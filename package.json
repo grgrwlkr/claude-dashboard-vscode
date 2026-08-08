@@ -1,0 +1,59 @@
+{
+  "name": "claude-statusline",
+  "displayName": "Claude Statusline",
+  "description": "Claude Code limits, session context and spend in the VS Code status bar",
+  "version": "0.5.0",
+  "publisher": "x",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "status bar",
+    "usage",
+    "tokens"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeStatusline.refresh",
+        "title": "Claude Statusline: Refresh now"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Statusline",
+      "properties": {
+        "claudeStatusline.refreshInterval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 15,
+          "description": "How often to refresh limits and session stats, in seconds."
+        },
+        "claudeStatusline.alignment": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "right",
+          "description": "Which side of the status bar to use. Requires a window reload."
+        },
+        "claudeStatusline.priority": {
+          "type": "number",
+          "default": 100,
+          "description": "Priority within the chosen side: higher means further left. Requires a window reload."
+        }
+      }
+    }
+  }
+}
