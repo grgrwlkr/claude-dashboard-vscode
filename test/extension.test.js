@@ -19,10 +19,13 @@ Module._resolveFilename = function patched(request, ...rest) {
 // tree. That collection is not gated on what the bar mentions, so without this
 // every activate() here walks the real ~/.claude — reading the transcripts of
 // whatever other sessions happen to be running on the machine.
-process.env.CLAUDE_STATUSLINE_PROJECTS = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-empty-'));
+const EMPTY_TREE = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-empty-'));
+process.env.CLAUDE_STATUSLINE_PROJECTS = EMPTY_TREE;
+test.after(() => fs.rmSync(EMPTY_TREE, { recursive: true, force: true }));
 
 const vscode = require('./vscode-stub.js');
 const ext = require('../extension');
+const ix = require('../indexer');
 const seg = require('../segments');
 
 function activate({ segments, workspace = '' } = {}) {
@@ -177,8 +180,13 @@ test('the fast tick re-reads a running workflow and keeps what its agents cost',
             runId: 'wf_live', name: 'live one', state: 'running', jsonPath: '',
             runDir: fakeRun(root, { runId: 'wf_live' }), startedAt: Date.now(), phases: [],
             // Priced by the slow tick: reading a whole transcript is its job, not
-            // this tick's, so these numbers have to survive the refresh.
-            agents: [{ agentId: 'a1', state: 'running', tokens: 5000, cost: 1.25 }],
+            // this tick's, so these numbers have to survive the refresh. The
+            // preview is carried for a different reason — it cannot change, and
+            // re-reading it costs the head of every transcript every ten seconds.
+            agents: [{
+                agentId: 'a1', state: 'running', tokens: 5000, cost: 1.25,
+                promptPreview: 'what it was told, read once',
+            }],
             totals: { agents: 1, done: 0, cost: 1.25 },
         };
         state.data.workflows = { runs: [going], active: [going] };
@@ -191,6 +199,8 @@ test('the fast tick re-reads a running workflow and keeps what its agents cost',
         assert.equal(after.agents[0].model, 'claude-opus-5', 'read from the transcript, not from the old record');
         assert.equal(after.agents[0].tokens, 5000, 'the price the slow tick found is carried across');
         assert.equal(after.agents[0].cost, 1.25);
+        assert.equal(after.agents[0].promptPreview, 'what it was told, read once',
+            'the preview is handed back, not read out of the transcript again');
         assert.equal(state.workflows.length, 1, 'the tree reads the same list');
     } finally {
         run.dispose();
@@ -222,14 +232,69 @@ test('the fast tick retires a run whose snapshot has landed', () => {
     }
 });
 
+// A run of two hundred agents is a wall, not a hint: the hover shows a dozen and
+// says how many it is not showing, while the tree and the dashboard have the room
+// for the full list. The ones still working come first — that is what a hover
+// over a live run is asked about.
+test('the tooltip shows a dozen agents and counts the rest', () => {
+    const run = activate({ segments: ['[$(gear) {wfName}]'] });
+    try {
+        const state = run.context.claudeState;
+        const agent = (i, agentState) => ({
+            agentId: `a${i}`, label: `agent-${i}`, phase: 'Scan', model: 'claude-opus-5',
+            state: agentState, promptPreview: '', tokens: 0, cost: 0,
+        });
+        // The working ones are written last, so taking the first twelve in order
+        // would hide every one of them.
+        const agents = [...Array(16)].map((_, i) => agent(i, 'done'))
+            .concat([...Array(4)].map((_, i) => agent(`live${i}`, 'progress')));
+        const going = {
+            runId: 'wf_many', name: 'many', state: 'running', startedAt: Date.now(),
+            phases: [], agents, totals: { agents: 20, done: 16, cost: 0 },
+        };
+        state.data.workflows = { runs: [going], active: [going] };
+        ext.__render(state);
+
+        const tip = String(vscode.__items[0].tooltip.value);
+        const rows = tip.split('\n').filter((line) => line.startsWith('| $('));
+        assert.equal(rows.length, 12, 'a dozen rows, whatever the run is doing');
+        assert.match(tip, /8 more/, 'and the rest are counted, not dropped silently');
+        for (let i = 0; i < 4; i++) {
+            assert.match(tip, new RegExp(`agent-live${i}`), 'the working agents are the ones shown');
+        }
+    } finally { run.dispose(); }
+});
+
+// Re-parsing the index is ~40 ms over 5.6 MB on this machine, and the file only
+// changes when the dashboard is opened — a repeating tick has no business paying
+// for it every minute.
+test('the index is read again only when it has changed', () => {
+    const run = activate({ segments: ['{weekly}'] });
+    try {
+        const state = run.context.claudeState;
+        assert.ok(state.index, 'the collector holds an index to price workflows with');
+        state.index.__mark = 'kept';
+
+        vscode.__changeConfiguration(); // runs a second slow tick
+        assert.equal(state.index.__mark, 'kept', 'nothing changed on disk, nothing re-read');
+
+        ix.saveIndex(run.storage, { version: ix.INDEX_VERSION, files: {} });
+        vscode.__changeConfiguration();
+        assert.equal(state.index.__mark, undefined, 'a rewritten index is picked up');
+    } finally { run.dispose(); }
+});
+
 // The landmine this task exists to defuse: both maps are keyed by topic, so a
 // topic a field can carry but neither map knows is not a missing tooltip — it
 // is a throw inside render() that hides every item in the bar, not just its own.
+// The list comes from the fields themselves, not from the hand-written constant:
+// a field given a topic nobody registered is exactly the way this breaks again.
 test('every topic a segment can carry has a tooltip and a colour source', () => {
     const run = activate({ segments: ['{weekly}'] });
     try {
         const state = run.context.claudeState;
-        for (const topic of seg.TOPICS) {
+        const declared = Object.values(seg.fields({})).map((f) => f.topic);
+        for (const topic of new Set([...seg.TOPICS, ...declared])) {
             // A field of that topic with something to say, so render() is forced
             // down the path that looks the topic up in both maps.
             state.registry = { probe: { topic, doc: '', get: () => 'x' } };

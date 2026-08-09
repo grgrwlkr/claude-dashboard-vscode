@@ -23,7 +23,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { projectName, indexFile } = require('./indexer');
+const { projectName, INTERESTING } = require('./indexer');
+const { costOf } = require('./pricing');
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -258,6 +259,23 @@ function readChunk(file, { fromEnd = false, length = fromEnd ? TAIL_BYTES : HEAD
     return buf.toString('utf8');
 }
 
+// A slice of a file between two byte offsets. The tail and head readers above
+// answer "what does this agent look like"; this one answers "what has it written
+// since I last looked", which is a different question and a different range.
+function readSlice(file, start, end) {
+    const size = end - start;
+    if (size <= 0) return '';
+    const buf = Buffer.alloc(size);
+    let fd;
+    try {
+        fd = fs.openSync(file, 'r');
+        fs.readSync(fd, buf, 0, size, start);
+    } catch { return ''; } finally {
+        if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already gone */ } }
+    }
+    return buf.toString('utf8');
+}
+
 function parsedLines(text) {
     const out = [];
     for (const line of text.split('\n')) {
@@ -307,8 +325,16 @@ function tailOf(file) {
  * every agent that started and every one that returned — and the transcripts
  * fill in what each of them is doing right now. Null when the directory holds
  * nothing at all, which is also what a path that does not exist looks like.
+ *
+ * `known` maps an agent id to what the caller was told about it last time, and
+ * is how a repeating reader stops paying for what has not changed. A prompt is
+ * the first thing the agent was told and never changes at all; the model and the
+ * tool change only when the agent writes, and an mtime equal to the one already
+ * recorded says it has not. Without it every look costs the head and the tail of
+ * every transcript — 64 KB plus up to half a megabyte each, 208 of them on the
+ * widest run here, on a tick that repeats every ten seconds.
  */
-function readLive(runDir) {
+function readLive(runDir, { known = null } = {}) {
     const entries = listDir(runDir);
     if (entries.length === 0) return null;
 
@@ -330,7 +356,15 @@ function readLive(runDir) {
         const file = path.join(runDir, `agent-${agentId}.jsonl`);
         const meta = readJson(path.join(runDir, `agent-${agentId}.meta.json`)) || {};
         const st = statOf(file);
-        const tail = st ? tailOf(file) : { model: '', lastToolName: '' };
+        const was = (known && known.get(agentId)) || null;
+        // The file has not been written to since it was last read, so what was
+        // read from it then is what is in it now.
+        const still = Boolean(was && st && was.lastActivity === st.mtimeMs);
+        const tail = still ? { model: was.model, lastToolName: was.lastToolName }
+            : (st ? tailOf(file) : { model: '', lastToolName: '' });
+        // An empty preview counts as none: the agent may simply not have written
+        // its first line yet, and next time it will have.
+        const told = (was && was.promptPreview) || '';
         return {
             agentId,
             // The runtime knows the label and the phase; the disk does not learn
@@ -341,7 +375,7 @@ function readLive(runDir) {
             model: tail.model,
             state: done.has(agentId) ? 'done' : 'running',
             lastToolName: tail.lastToolName,
-            promptPreview: st ? promptOf(file) : '',
+            promptPreview: told || (st ? promptOf(file) : ''),
             // The same keys a snapshot's agent has, so one renderer draws both.
             // The zeros are absences, not unread data: a result exists only once
             // the agent returns, and totalling a running transcript would mean
@@ -552,9 +586,11 @@ function mergeHalves(halves) {
 /**
  * Every workflow run on the machine with its state. `liveSessions` holds the ids
  * of sessions whose process is alive, and `now` is passed in rather than read so
- * the state machine is testable without touching the clock.
+ * the state machine is testable without touching the clock. `known` maps a run
+ * id to what a previous scan learned about its agents, and is handed to readLive
+ * for the runs that are still going — see there for what it saves.
  */
-function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() } = {}) {
+function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now(), known = null } = {}) {
     return mergeHalves(collect(root)).map((run) => {
         // A snapshot too broken to parse leaves `final` null while `jsonPath`
         // stays set, so such a run degrades into the freshness branch and reads
@@ -580,7 +616,9 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() 
         // its phases. Only a running run pays for the first — it opens a file per
         // agent, 208 of them on the biggest run here — while the second is one
         // bounded read, so an abandoned run still gets a name instead of a blank.
-        const live = state === 'running' && run.runDir ? readLive(run.runDir) : null;
+        const live = state === 'running' && run.runDir
+            ? readLive(run.runDir, { known: known ? known.get(run.runId) : null })
+            : null;
         const script = !final && run.scriptPath ? readChunk(run.scriptPath, { length: SCRIPT_BYTES }) : '';
 
         return {
@@ -653,13 +691,54 @@ function costIndex(index) {
     return byAgent;
 }
 
-// The index's own arithmetic, run early on a transcript that is still growing.
-// It reads the whole file — the one thing the fast tick must never do — so it
-// happens only when the caller asks for it, from the slow tick.
-function priceLive(runDir, agentId, root) {
-    const agg = indexFile(path.join(runDir, `agent-${agentId}.jsonl`), root);
-    const row = agg && agg.sessions[0];
-    return row ? { cost: row.cost || 0, tokens: row.tokens || 0 } : null;
+// What has been counted in one transcript so far: how far it was read, and the
+// money and tokens found up to there.
+const NOTHING_READ = { size: 0, cost: 0, tokens: 0 };
+
+/**
+ * Add up what a transcript has spent since it was last looked at. A transcript
+ * is append-only, so only the bytes that appeared since `prev.size` are read —
+ * which is what makes pricing a live agent affordable on a repeating tick, where
+ * reading the file whole would mean megabytes per agent per minute. The first
+ * look has nothing carried and reads all of it, once per agent.
+ *
+ * The records are picked the way indexer.js picks them, so the two sides of the
+ * join price the same transcript identically: same line filter, same `usage`
+ * block, same rate table.
+ */
+function accrue(file, prev = null) {
+    const st = statOf(file);
+    // Nothing to read from, and nothing to correct: what was counted stays.
+    if (!st) return prev || NOTHING_READ;
+    // A file smaller than what was already read is not the file that was read —
+    // a client that rewrote or replaced it starts the count over, because adding
+    // to a total whose records are gone is adding to nothing.
+    const carried = prev && prev.size <= st.size ? prev : NOTHING_READ;
+    if (carried.size === st.size) return carried;
+
+    const text = readSlice(file, carried.size, st.size);
+    // The read ends wherever the file happened to end, which is rarely a line
+    // boundary: the last record may be half written. Everything up to the final
+    // newline is whole, and the size is remembered up to exactly there — so the
+    // remainder is read again next time and counted once, never twice and never
+    // lost. The byte count comes from the text rather than the slice length,
+    // since a transcript is UTF-8 and its characters are not one byte each.
+    const cut = text.lastIndexOf('\n');
+    if (cut < 0) return carried;
+    const whole = text.slice(0, cut);
+
+    let { cost, tokens } = carried;
+    for (const line of whole.split('\n')) {
+        if (line.length < 50 || line[0] !== '{' || !INTERESTING.test(line)) continue;
+        let r;
+        try { r = JSON.parse(line); } catch { continue; }
+        const usage = r.message && r.message.usage;
+        if (!usage) continue;
+        cost += costOf(r.message.model || '', usage);
+        tokens += (usage.input_tokens || 0) + (usage.output_tokens || 0)
+            + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+    }
+    return { size: carried.size + Buffer.byteLength(whole, 'utf8') + 1, cost, tokens };
 }
 
 // Which record gets to claim a shared row first. Two records can carry one run
@@ -678,12 +757,17 @@ function claimOrder(runs) {
 // pays for that, and the index answers for everything that has stopped moving —
 // including an agent of a live run whose transcript is not in this directory,
 // which is what a run resumed into someone else's directory looks like.
-function freshOf(run, agentId, live, root) {
+function freshOf(run, agentId, live, carried) {
     if (!live || run.state !== 'running' || !run.runDir) return null;
-    return priceLive(run.runDir, agentId, root);
+    const key = `${run.runId}/${agentId}`;
+    const next = accrue(path.join(run.runDir, `agent-${agentId}.jsonl`), carried.get(key));
+    carried.set(key, next);
+    // Nothing read means no transcript here at all — an agent of a run resumed
+    // into someone else's directory — and the index answers for it instead.
+    return next.size > 0 ? { cost: next.cost, tokens: next.tokens } : null;
 }
 
-function pricedRun(run, known, claimed, live, root) {
+function pricedRun(run, known, claimed, live, carried) {
     let cost = 0;
     let tokens = 0;
 
@@ -693,7 +777,7 @@ function pricedRun(run, known, claimed, live, root) {
         // single transcript has already been paid for.
         const priced = claimed.has(key)
             ? null
-            : (freshOf(run, agent.agentId, live, root) || known.get(key) || null);
+            : (freshOf(run, agent.agentId, live, carried) || known.get(key) || null);
         if (!priced) return { ...agent, cost: 0, tokens: 0 };
 
         claimed.add(key);
@@ -728,15 +812,21 @@ function unlistedByRun(known, claimed) {
 /**
  * Attach money to every run. Agents that have stopped are looked up in the
  * index; the agents of a run that is still going are priced from their own
- * transcripts, but only when `live` is set — that is a full read per agent, and
- * only the slow tick can afford it. `root` is the tree the index was built over.
+ * transcripts, but only when `live` is set — the index is a photograph taken
+ * when the dashboard was last opened, and a run in flight has moved since.
+ *
+ * `carried` is the caller's accumulator, keyed `runId/agentId`: what each live
+ * transcript has cost and how far it has been read. It is updated in place and
+ * outlives the call, which is what turns every later look into a read of the
+ * few kilobytes that appeared since. Without one, every call reads every live
+ * transcript whole — correct, and affordable only once.
  */
-function withCost(runs, { index = null, live = false, root = PROJECTS } = {}) {
+function withCost(runs, { index = null, live = false, carried = new Map() } = {}) {
     const known = costIndex(index);
     const claimed = new Set();
     const order = claimOrder(runs);
     const out = new Array(runs.length);
-    for (const i of order) out[i] = pricedRun(runs[i], known, claimed, live, root);
+    for (const i of order) out[i] = pricedRun(runs[i], known, claimed, live, carried);
 
     // The leftovers can only be counted once every record has taken what it
     // lists, and they go to one record per run id — the same one that claimed
@@ -753,5 +843,5 @@ function withCost(runs, { index = null, live = false, root = PROJECTS } = {}) {
 
 module.exports = {
     readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived,
-    costIndex, withCost, PROJECTS, RUN_STALE_MS,
+    costIndex, withCost, accrue, PROJECTS, RUN_STALE_MS,
 };

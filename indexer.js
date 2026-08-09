@@ -584,7 +584,7 @@ function summarize(index) {
 
 module.exports = {
     PROJECTS, INDEX_VERSION, SUBAGENT_RE, INTERESTING,
-    describeFile, projectName, indexFile, walk, loadIndex, saveIndex, refreshIndex,
+    describeFile, projectName, indexFile, walk, indexPath, loadIndex, saveIndex, refreshIndex,
     summarize, dayKey, bucket, emptyAgg, emptyFriction, effortKey, splitEffort,
     promptText, tallyWords, trimWords, lenBucket, LEN_BUCKETS,
 };

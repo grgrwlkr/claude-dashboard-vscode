@@ -578,7 +578,7 @@ test('a live run is priced only when the caller asks for it', () => tree((t) => 
     assert.equal(cheap[0].agents[0].cost, 0, 'the fast path prices nothing');
     assert.equal(cheap[0].totals.cost, 0);
 
-    const full = wf.withCost(runs, { index: { files: {} }, live: true, root: t.root });
+    const full = wf.withCost(runs, { index: { files: {} }, live: true });
     assert.ok(full[0].agents[0].tokens > 0, 'the slow path reads the transcript');
     assert.ok(full[0].totals.cost > 0, 'and prices what it read');
 
@@ -587,7 +587,7 @@ test('a live run is priced only when the caller asks for it', () => tree((t) => 
     // result again must leave that zero alone rather than read our own count
     // into it — the one place where "already priced" cannot be told from
     // "priced at nothing" by truthiness.
-    const again = wf.withCost(full, { index: { files: {} }, live: true, root: t.root });
+    const again = wf.withCost(full, { index: { files: {} }, live: true });
     assert.equal(again[0].agents[0].reportedTokens, 0);
     assert.equal(again[0].totals.reportedTokens, 0);
     assert.deepEqual(again[0], full[0]);
@@ -615,7 +615,7 @@ test('a running run is priced from its transcript, not from a row written mid-ru
     };
     const [run] = wf.withCost(
         wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() }),
-        { index: stale, live: true, root: t.root },
+        { index: stale, live: true },
     );
 
     assert.ok(run.agents[0].tokens > 1, 'the growing transcript answers, not the stale row');
@@ -646,7 +646,7 @@ test('a live agent with no transcript here is still priced from the index', () =
 
     const [run] = wf.withCost(
         wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() }),
-        { index, live: true, root: t.root },
+        { index, live: true },
     );
     const a1 = run.agents.find((a) => a.agentId === 'a1');
     const a2 = run.agents.find((a) => a.agentId === 'a2');
@@ -801,3 +801,105 @@ test('costIndex keys workflow agents by run and agent, and adds up a repeated pa
     assert.equal(wf.costIndex(null).size, 0);
     assert.equal(wf.costIndex({}).size, 0);
 });
+
+// A transcript only ever grows, so what it cost can be added up the same way:
+// read what appeared since the last look and add it to what was already counted.
+// Reading each live agent's file whole, every minute, is what this replaces —
+// hundreds of megabytes a minute under a run with two hundred agents.
+test('accrue adds only what grew, and a line cut by the boundary is counted once', () => tree((t) => {
+    const [first, second] = AGENT_LINES('a1');
+    const file = path.join(t.root, 'agent-grow.jsonl');
+    // The file ends mid-record, the way one being written to does.
+    fs.writeFileSync(file, `${first}\n${second.slice(0, 40)}`);
+
+    const once = wf.accrue(file, null);
+    assert.equal(once.cost, 0, 'the record that is there carries no usage');
+    assert.equal(once.size, Buffer.byteLength(`${first}\n`), 'the half-written line is left for next time');
+
+    fs.appendFileSync(file, `${second.slice(40)}\n`);
+    const twice = wf.accrue(file, once);
+
+    assert.deepEqual(twice, wf.accrue(file, null), 'two looks add up to exactly what one look sees');
+    assert.equal(twice.tokens, 105);
+    assert.ok(twice.cost > 0);
+    assert.equal(twice.size, fs.statSync(file).size);
+}));
+
+test('accrue starts over when the file it was reading shrank', () => tree((t) => {
+    const file = path.join(t.root, 'agent-swap.jsonl');
+    fs.writeFileSync(file, `${AGENT_LINES('a1').join('\n')}\n`);
+    const full = wf.accrue(file, null);
+    assert.equal(full.tokens, 105);
+
+    // A shorter file under the same name is a different file: adding to what was
+    // counted before would be adding to something that is no longer there.
+    fs.writeFileSync(file, `${AGENT_LINES('a2')[1]}\n`);
+    const after = wf.accrue(file, full);
+    assert.equal(after.tokens, 105, 'counted from zero, not added to the old total');
+    assert.equal(after.size, fs.statSync(file).size);
+
+    // A file that is not there at all leaves what was counted alone.
+    assert.deepEqual(wf.accrue(path.join(t.root, 'nope.jsonl'), after), after);
+}));
+
+// The prompt never changes, and the model and the tool change only when the
+// agent writes. A reader looking at the same run every ten seconds hands back
+// what it already has, and pays for the head and the tail of a transcript only
+// where the file has actually moved.
+test('readLive re-reads only the transcripts that grew since it last looked', () => tree((t) => {
+    runFixture(t, 'wf_prev-1', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        agents: { a1: AGENT_LINES('a1') },
+    });
+    const dir = path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_prev-1');
+    const file = path.join(dir, 'agent-a1.jsonl');
+
+    const fresh = wf.readLive(dir);
+    assert.ok(fresh.agents[0].promptPreview.startsWith('Задача агента a1'));
+    assert.equal(fresh.agents[0].model, 'claude-opus-5');
+    assert.equal(fresh.agents[0].lastActivity, fs.statSync(file).mtimeMs);
+
+    // Values no read of this file could have produced: getting them back proves
+    // the file was not read, not merely that the answer happened to match.
+    const known = new Map([['a1', {
+        ...fresh.agents[0], promptPreview: 'already known', model: 'kept', lastToolName: 'Kept',
+    }]]);
+    const told = wf.readLive(dir, { known });
+    assert.equal(told.agents[0].promptPreview, 'already known');
+    assert.equal(told.agents[0].model, 'kept');
+    assert.equal(told.agents[0].lastToolName, 'Kept');
+
+    // Once the agent writes, the tail is read again — the prompt is not, since
+    // it is the one thing that cannot have changed.
+    fs.appendFileSync(file, `${AGENT_LINES('a1')[1]}\n`);
+    const moved = wf.readLive(dir, { known });
+    assert.equal(moved.agents[0].model, 'claude-opus-5', 'the transcript answers again');
+    assert.equal(moved.agents[0].promptPreview, 'already known');
+    assert.equal(wf.readLive(dir, { known: new Map() }).agents[0].model, 'claude-opus-5');
+}));
+
+test('withCost prices a live agent from what grew since it last looked', () => tree((t) => {
+    runFixture(t, 'wf_carry-1', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        agents: { a1: AGENT_LINES('a1') },
+    });
+    const transcript = path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_carry-1/agent-a1.jsonl');
+    const scan = () => wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    const carried = new Map();
+    const price = () => wf.withCost(scan(), { index: { files: {} }, live: true, carried })[0];
+
+    const first = price();
+    assert.ok(first.totals.cost > 0, 'the live agent is priced from its transcript');
+    assert.equal(carried.get('wf_carry-1/a1').size, fs.statSync(transcript).size,
+        'and the file is remembered up to where it was read');
+
+    // Nothing grew, so nothing is read and nothing is counted twice.
+    const same = price();
+    assert.equal(same.totals.cost, first.totals.cost);
+    assert.equal(same.agents[0].tokens, first.agents[0].tokens);
+
+    fs.appendFileSync(transcript, `${AGENT_LINES('a1')[1]}\n`);
+    const grown = price();
+    assert.equal(grown.agents[0].tokens, first.agents[0].tokens * 2, 'only the new reply is added');
+    assert.ok(grown.totals.cost > first.totals.cost);
+}));
