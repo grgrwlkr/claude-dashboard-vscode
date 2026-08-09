@@ -35,6 +35,37 @@ and the lines added and removed during the session.
 **Work.** `⧉` counts other live sessions in this repository (busy ones in
 parentheses), `▸` tracks the current session's task list.
 
+## Usage dashboard
+
+Click the spend item, or run **Claude: Open usage dashboard**. Seven tabs, drawn
+from an index of every transcript on the machine:
+
+| Tab | What it answers |
+| --- | --- |
+| Overview | spend all-time / 30d / 7d / today, daily stacked chart by model, a calendar heatmap, model breakdown, hour-of-day profile |
+| Sessions | every transcript as a row: project, kind, models, duration, requests, tokens, spend |
+| Projects | which repository the money went to |
+| Branches | spend per git branch, accumulated across sessions |
+| Agents & workflows | main vs subagent vs workflow spend, and each workflow run with its agent count |
+| Skills | which skill was driving when the tokens burned, from the transcript's own `attributionSkill` |
+| Content | prompt counts, length histogram, where prompts came from, and the words you use |
+
+The Agents tab is the reason this exists: subagents and workflow agents write
+their own transcripts, so on a machine that runs them their spend is the larger
+half — and it is invisible in the terminal statusline, which only ever sees one
+session.
+
+**Indexing.** The first run reads every transcript — about 1.1 GB and 4–5 s on
+the machine this was built on — behind a progress notification. After that a
+file whose size and mtime are unchanged is reused as-is, so a refresh costs tens
+of milliseconds. The index lives in the extension's global storage, holds only
+aggregates, and is rebuilt from scratch by **Claude: Rebuild the usage index**.
+
+**The Content tab never stores prompt text** — only counts, a length histogram
+and word tallies. Words shorter than five letters are ignored, and anything
+appearing in most sessions is dropped as filler, which works in any language
+without a stop-word list. Nothing leaves the machine.
+
 ## Where the data comes from
 
 Nothing is asked of the CLI — it has no channel to ask.
@@ -81,7 +112,8 @@ code in the extension host until you do.
 | `claudeStatusline.alignment` | `right` | Which side of the status bar (needs a reload) |
 | `claudeStatusline.priority` | `100` | Position within that side (needs a reload) |
 
-The command `Claude Statusline: Refresh now` forces a refresh outside the timer.
+Commands: **Claude: Open usage dashboard**, **Claude: Rebuild the usage index**,
+**Claude Statusline: Refresh now**.
 
 ## Tests
 

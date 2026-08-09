@@ -1,6 +1,8 @@
 const vscode = require('vscode');
 const u = require('./usage');
 const s = require('./session');
+const ix = require('./indexer');
+const dashboard = require('./dashboard');
 const { fmtCost, ratesFor } = require('./pricing');
 
 // Complaining about the cache is only meaningful once refreshes have failed for
@@ -244,16 +246,68 @@ async function openClaude() {
     }
 }
 
+// --- dashboard --------------------------------------------------------------
+
+// One panel, reused. A second invocation reveals the existing one rather than
+// stacking copies of a page that costs a full index read to build.
+let panel = null;
+
+// Indexing a gigabyte of transcripts takes seconds on the first run, so it
+// happens inside a progress notification the user can watch — and reuses the
+// stored fingerprints on every run after that.
+async function buildIndex(storageDir, { force = false } = {}) {
+    return vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Claude: indexing transcripts',
+        cancellable: false,
+    }, async (progress) => {
+        if (force) ix.saveIndex(storageDir, { version: ix.INDEX_VERSION, files: {} });
+        let lastPct = 0;
+        const result = await new Promise((resolve) => {
+            // setImmediate lets the notification paint before the synchronous
+            // read begins; without it the first run looks like a frozen window.
+            setImmediate(() => resolve(ix.refreshIndex(storageDir, {
+                onProgress: (done, total) => {
+                    const p = Math.floor((done / total) * 100);
+                    if (p > lastPct) { progress.report({ increment: p - lastPct, message: `${done}/${total}` }); lastPct = p; }
+                },
+            })));
+        });
+        return result;
+    });
+}
+
+async function showDashboard(context, { force = false } = {}) {
+    const storageDir = context.globalStorageUri.fsPath;
+    const { index, stats } = await buildIndex(storageDir, { force });
+    const total = ix.summarize(index);
+    const html = dashboard.render(index, total, { files: stats.total, lastRun: Date.now() });
+
+    if (!panel) {
+        panel = vscode.window.createWebviewPanel(
+            'claudeStatusline.dashboard', 'Claude usage', vscode.ViewColumn.Active,
+            { enableScripts: true, retainContextWhenHidden: true },
+        );
+        panel.onDidDispose(() => { panel = null; });
+        panel.webview.onDidReceiveMessage((msg) => {
+            if (msg && msg.type === 'refresh') showDashboard(context, { force: false });
+        });
+    } else {
+        panel.reveal(vscode.ViewColumn.Active);
+    }
+    panel.webview.html = html;
+}
+
 function activate(context) {
     const cfg = vscode.workspace.getConfiguration('claudeStatusline');
     const align = cfg.get('alignment') === 'left'
         ? vscode.StatusBarAlignment.Left
         : vscode.StatusBarAlignment.Right;
     const priority = cfg.get('priority');
-    const item = (id, name, offset) => {
+    const item = (id, name, offset, command = 'claudeStatusline.open') => {
         const bar = vscode.window.createStatusBarItem(id, align, priority - offset);
         bar.name = name;
-        bar.command = 'claudeStatusline.open';
+        bar.command = command;
         context.subscriptions.push(bar);
         return bar;
     };
@@ -269,7 +323,9 @@ function activate(context) {
         version: { current: '', latest: '' },
         limitsItem: item('claudeStatusline.limits', 'Claude limits', 0),
         contextItem: item('claudeStatusline.context', 'Claude context', 1),
-        moneyItem: item('claudeStatusline.money', 'Claude spend', 2),
+        // Clicking spend opens the dashboard: that is the question the number
+        // raises, so the click should answer it rather than open a chat panel.
+        moneyItem: item('claudeStatusline.money', 'Claude spend', 2, 'claudeStatusline.dashboard'),
         workItem: item('claudeStatusline.work', 'Claude work', 3),
     };
 
@@ -285,6 +341,8 @@ function activate(context) {
         // again" signal; there is no event channel from the CLI itself.
         vscode.window.onDidChangeWindowState((w) => { if (w.focused) slowTick(state); }),
         vscode.commands.registerCommand('claudeStatusline.open', openClaude),
+        vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
+        vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
         vscode.commands.registerCommand('claudeStatusline.refresh', async () => {
             u.touchStamp();
             await u.refreshUsage();

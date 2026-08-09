@@ -1,8 +1,8 @@
 {
   "name": "claude-statusline",
   "displayName": "Claude Statusline",
-  "description": "Claude Code limits, session context and spend in the VS Code status bar",
-  "version": "0.5.0",
+  "description": "Claude Code limits, session context, spend and a usage dashboard in VS Code",
+  "version": "0.6.0",
   "publisher": "x",
   "private": true,
   "license": "MIT",
@@ -25,6 +25,14 @@
   "main": "./extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "claudeStatusline.dashboard",
+        "title": "Claude: Open usage dashboard"
+      },
+      {
+        "command": "claudeStatusline.reindex",
+        "title": "Claude: Rebuild the usage index"
+      },
       {
         "command": "claudeStatusline.refresh",
         "title": "Claude Statusline: Refresh now"

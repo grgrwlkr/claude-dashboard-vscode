@@ -1,0 +1,140 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const ix = require('../indexer');
+
+const T0 = Date.parse('2026-08-08T10:00:00Z');
+
+function rec(over = {}, usage = {}) {
+    return JSON.stringify({
+        timestamp: new Date(T0).toISOString(),
+        gitBranch: 'main',
+        message: {
+            model: 'claude-opus-5',
+            usage: { input_tokens: 0, output_tokens: 1e6, ...usage },
+        },
+        ...over,
+    });
+}
+
+// A scratch tree shaped like ~/.claude/projects, including the subagent and
+// workflow layout, so path parsing is exercised the way it runs for real.
+function tree(fn) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-tree-'));
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-store-'));
+    const slug = '-Users-x-Develop-demo';
+    const write = (rel, lines) => {
+        const full = path.join(root, slug, rel);
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, lines.join('\n') + '\n');
+        return full;
+    };
+    try { return fn({ root, store, slug, write }); } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(store, { recursive: true, force: true });
+    }
+}
+
+test('describeFile reads the relationship encoded in the path', () => {
+    const base = path.join(ix.PROJECTS, '-Users-x-Develop-demo');
+    const main = ix.describeFile(path.join(base, 'sess-1.jsonl'));
+    assert.equal(main.kind, 'main');
+    assert.equal(main.sessionId, 'sess-1');
+
+    const agent = ix.describeFile(path.join(base, 'sess-1', 'subagents', 'agent-abc.jsonl'));
+    assert.equal(agent.kind, 'agent');
+    assert.equal(agent.sessionId, 'sess-1');
+    assert.equal(agent.agentId, 'abc');
+    assert.equal(agent.workflowId, '');
+
+    const wf = ix.describeFile(path.join(base, 'sess-1', 'subagents', 'workflows', 'wf_9', 'agent-xyz.jsonl'));
+    assert.equal(wf.kind, 'workflow');
+    assert.equal(wf.workflowId, 'wf_9');
+    assert.equal(wf.agentId, 'xyz');
+    assert.equal(wf.sessionId, 'sess-1');
+});
+
+test('projectName takes the readable tail of a slug', () => {
+    assert.equal(ix.projectName('-Users-x-Develop-rust-service'), 'service');
+    assert.equal(ix.projectName(''), '');
+});
+
+test('indexFile aggregates by day, model, branch and skill', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [
+        rec(),
+        rec({ attributionSkill: 'lint-vault' }),
+        'junk line the parser must survive',
+    ]);
+    const agg = ix.indexFile(file);
+    assert.equal(agg.sessions[0].msgs, 2);
+    assert.equal(agg.sessions[0].cost, 50); // two requests of 1M output on Opus 5
+    assert.equal(Object.keys(agg.days).length, 1);
+    assert.equal(agg.models['claude-opus-5'].msgs, 2);
+    assert.equal(agg.branches.main.msgs, 2);
+    assert.equal(agg.skills['lint-vault'].msgs, 1);
+    assert.equal(agg.sessions[0].models[0], 'claude-opus-5');
+}));
+
+test('indexFile ignores a transcript with no usage records', () => tree(({ write }) => {
+    const file = write('empty.jsonl', [JSON.stringify({ timestamp: new Date(T0).toISOString(), type: 'user' })]);
+    assert.equal(ix.indexFile(file), null);
+}));
+
+test('refreshIndex reuses unchanged files and re-reads only what grew', () => tree(({ root, store, write }) => {
+    write('sess-1.jsonl', [rec()]);
+    write(path.join('sess-1', 'subagents', 'agent-a.jsonl'), [rec()]);
+
+    const first = ix.refreshIndex(store, { root });
+    assert.equal(first.stats.total, 2);
+    assert.equal(first.stats.parsed, 2);
+    assert.equal(first.stats.reused, 0);
+
+    const second = ix.refreshIndex(store, { root });
+    assert.equal(second.stats.parsed, 0);
+    assert.equal(second.stats.reused, 2);
+
+    // Appending to one transcript must re-read that one and nothing else.
+    fs.appendFileSync(path.join(root, '-Users-x-Develop-demo', 'sess-1.jsonl'), rec() + '\n');
+    const third = ix.refreshIndex(store, { root });
+    assert.equal(third.stats.parsed, 1);
+    assert.equal(third.stats.reused, 1);
+    assert.equal(ix.summarize(third.index).sessions.find((s) => s.kind === 'main').msgs, 2);
+}));
+
+test('a deleted transcript leaves the index instead of haunting the totals', () => tree(({ root, store, write }) => {
+    const file = write('sess-1.jsonl', [rec()]);
+    write('sess-2.jsonl', [rec()]);
+    assert.equal(ix.summarize(ix.refreshIndex(store, { root }).index).sessions.length, 2);
+
+    fs.rmSync(file);
+    const after = ix.refreshIndex(store, { root });
+    assert.equal(after.stats.removed, 1);
+    assert.equal(ix.summarize(after.index).sessions.length, 1);
+}));
+
+test('summarize folds per-file aggregates and sorts sessions newest first', () => tree(({ root, store, write }) => {
+    write('old.jsonl', [rec({ timestamp: new Date(T0 - 86400000).toISOString() })]);
+    write('new.jsonl', [rec()]);
+    const total = ix.summarize(ix.refreshIndex(store, { root }).index);
+    assert.equal(total.sessions[0].id, 'new');
+    assert.equal(total.models['claude-opus-5'].msgs, 2);
+    assert.equal(Object.keys(total.days).length, 2);
+    assert.equal(total.projects.demo.msgs, 2);
+}));
+
+test('an index written by an older version is discarded, not misread', () => tree(({ store }) => {
+    fs.mkdirSync(store, { recursive: true });
+    fs.writeFileSync(path.join(store, 'index.json'), JSON.stringify({ version: 0, files: { x: {} } }));
+    const loaded = ix.loadIndex(store);
+    assert.equal(loaded.version, ix.INDEX_VERSION);
+    assert.deepEqual(loaded.files, {});
+}));
+
+test('dayKey uses local dates, so a day boundary is the user\'s midnight', () => {
+    const noon = new Date(2026, 7, 8, 12, 0, 0).getTime();
+    assert.equal(ix.dayKey(noon), '2026-08-08');
+    const almostMidnight = new Date(2026, 7, 8, 23, 59, 0).getTime();
+    assert.equal(ix.dayKey(almostMidnight), '2026-08-08');
+});
