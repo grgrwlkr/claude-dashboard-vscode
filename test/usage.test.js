@@ -131,3 +131,26 @@ test('parseToken extracts the token and survives junk', () => {
     assert.equal(u.parseToken('{}'), null);
     assert.equal(u.parseToken('not json'), null);
 });
+
+test('pace reports the forecast even when it lands after the reset', () => {
+    // Half the window gone, 30% spent: 100% is further away than the reset.
+    const weekly = { pct: 30, reset: NOW + WEEK / 2 };
+    const pc = u.pace(weekly, NOW);
+    assert.equal(pc.dry, null, 'the bar must stay quiet');
+    assert.ok(pc.dryAt > weekly.reset, 'but the tooltip still gets a date');
+    assert.equal(pc.beforeReset, false);
+});
+
+test('pace marks a forecast that lands before the reset', () => {
+    const elapsed = Math.round(0.19 * WEEK);
+    const pc = u.pace({ pct: 23, reset: NOW + WEEK - elapsed }, NOW);
+    assert.equal(pc.beforeReset, true);
+    assert.equal(pc.dry, pc.dryAt, 'the bar shows the same moment as the tooltip');
+});
+
+test('fmtWhen names the weekday, so a date days out needs no arithmetic', () => {
+    // 2026-08-15 is a Saturday.
+    const ts = Math.floor(new Date(2026, 7, 15, 6, 40).getTime() / 1000);
+    assert.equal(u.fmtWhen(ts), 'Sat 15.08, ~06h');
+    assert.equal(u.fmtWhen(0), '—');
+});

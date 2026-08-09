@@ -114,16 +114,22 @@ function limitsOf(payload) {
 
 // Window start = resets_at - 7d. The API does not report started_at, but the
 // reset time is stable between refreshes, so the window is fixed, not rolling.
+//
+// `dryAt` is the forecast whenever one can be computed at all; `dry` is that
+// same moment only when it falls before the reset. The bar uses `dry`, because
+// a date past the reset is not a warning about anything. The tooltip uses
+// `dryAt`, because "you will not run out" is far more convincing when it says
+// when you would have.
 function pace(weekly, now) {
     if (!weekly || weekly.reset <= 0) return null;
     const elapsed = Math.min(WEEK, Math.max(0, WEEK - (weekly.reset - now)));
     const plan = Math.floor((elapsed * 100) / WEEK);
-    let dry = null;
+    let dryAt = null;
     if (elapsed >= DRY_MIN_ELAPSED && weekly.pct >= DRY_MIN_PCT) {
-        const ts = now + Math.floor((elapsed * (100 - weekly.pct)) / weekly.pct);
-        if (ts < weekly.reset) dry = ts;
+        dryAt = now + Math.floor((elapsed * (100 - weekly.pct)) / weekly.pct);
     }
-    return { elapsed, plan, dry };
+    const beforeReset = dryAt !== null && dryAt < weekly.reset;
+    return { elapsed, plan, dryAt, beforeReset, dry: beforeReset ? dryAt : null };
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -159,6 +165,15 @@ function fmtAbs(ts, nowMs = Date.now()) {
     return sameDay(d, new Date(nowMs)) ? hm : `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${hm}`;
 }
 
+// Weekday plus date and hour. A forecast four days out is unreadable as a bare
+// number — "Sat 15.08" answers "when is that" without arithmetic.
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function fmtWhen(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts * 1000);
+    return `${WEEKDAYS[d.getDay()]} ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}, ~${pad2(d.getHours())}h`;
+}
+
 // Fact and plan in one bar: cells beyond the plan are spend ahead of schedule.
 function bar(fact, plan) {
     const f = Math.min(BAR_WIDTH, Math.max(0, Math.ceil((fact * BAR_WIDTH) / 100)));
@@ -183,5 +198,5 @@ function barText(weekly, pc, nowMs = Date.now()) {
 module.exports = {
     CACHE, STAMP, WEEK, STAMP_TTL, CACHE_TTL, BAR_WIDTH,
     mtime, parseToken, readToken, refreshUsage, touchStamp, stampExpired, readCache,
-    isoToTs, limitsOf, pace, fmtDry, fmtLeft, fmtAbs, bar, barText,
+    isoToTs, limitsOf, pace, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText,
 };

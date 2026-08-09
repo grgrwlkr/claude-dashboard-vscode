@@ -22,31 +22,47 @@ function background(pct) {
     return undefined;
 }
 
+// A tooltip has room a status bar does not, so it gets sections and full rows
+// instead of the terminal's single dense line. Each fact lives on its own row
+// with a label, and nothing is packed into a heading to save space.
+function table(rows, head) {
+    const header = head ? `| ${head.join(' | ')} |\n|${head.map(() => '---').join('|')}|\n` : '| | |\n|---|---|\n';
+    return header + rows.map((cells) => `| ${cells.join(' | ')} |`).join('\n') + '\n';
+}
+
 function limitsTooltip(lim, pc, now, stale) {
     const md = new vscode.MarkdownString('', true);
     const rows = [];
     const row = (label, pct, reset) =>
-        `| ${label} | **${pct}%** | ${reset ? `${u.fmtLeft(reset, now)} → ${u.fmtAbs(reset)}` : ''} |`;
+        [label, `**${pct}%**`, reset ? `${u.fmtLeft(reset, now)} → ${u.fmtAbs(reset)}` : ''];
 
     if (lim.session) rows.push(row('5h', lim.session.pct, lim.session.reset));
-    if (lim.weekly) {
-        rows.push(row(pc ? `7d · plan ${pc.plan}%` : '7d', lim.weekly.pct, lim.weekly.reset));
-    }
+    if (lim.weekly) rows.push(row('7d', lim.weekly.pct, lim.weekly.reset));
     // Per-model windows almost always reset together with the overall weekly one;
     // repeating that date on every row would turn the table into noise.
     for (const scoped of lim.scoped) {
         const own = Math.abs(scoped.reset - (lim.weekly?.reset ?? 0)) > 60 ? scoped.reset : 0;
         rows.push(row(scoped.scope.toLowerCase(), scoped.pct, own));
     }
+    md.appendMarkdown(table(rows, ['limit', 'used', 'resets']));
 
-    md.appendMarkdown(`| limit | used | resets |\n|---|---|---|\n${rows.join('\n')}\n`);
-    // Silence where a forecast used to be reads as breakage, though it means the
-    // opposite: at this pace the limit will not run out. Say so in words.
-    if (pc?.dry) {
-        md.appendMarkdown(`\n$(flame) at this pace you hit 100% around **${u.fmtDry(pc.dry)}**\n`);
-    } else if (pc && lim.weekly.pct >= 2 && pc.elapsed >= 1800) {
-        md.appendMarkdown('\n$(check) at this pace you will not hit the limit before it resets\n');
+    if (pc && lim.weekly) {
+        // Pace as its own section: spend against plan is a comparison, and a
+        // comparison squeezed into a row label is the thing that was hard to read.
+        const diff = lim.weekly.pct - pc.plan;
+        const verdict = diff > 0 ? `${diff} pp ahead of plan` : diff < 0 ? `${-diff} pp under plan` : 'exactly on plan';
+        md.appendMarkdown(`\n**Pace** — ${lim.weekly.pct}% spent, ${pc.plan}% of the window elapsed: ${verdict}\n`);
+
+        // The forecast is stated even when it lands past the reset. "You will not
+        // run out" is worth far more with the date that would have been.
+        if (pc.dryAt && pc.elapsed >= 1800 && lim.weekly.pct >= 2) {
+            const when = `**${u.fmtWhen(pc.dryAt)}**, in ${u.fmtLeft(pc.dryAt, now)}`;
+            md.appendMarkdown(pc.beforeReset
+                ? `\n$(flame) **Forecast** — 100% around ${when}, before the window resets\n`
+                : `\n$(check) **Forecast** — 100% would be ${when}, which is after the reset: you do not get there\n`);
+        }
     }
+
     if (stale) md.appendMarkdown('\n$(warning) showing cached data — refresh failed\n');
     md.appendMarkdown(`\n_updated ${u.fmtAbs(u.mtime(u.CACHE))}_`);
     return md;
@@ -63,28 +79,37 @@ const tok = (n) => {
 function contextTooltip(state) {
     const { context: ctx, settings, version } = state;
     const md = new vscode.MarkdownString('', true);
+    md.appendMarkdown(`### ${short(ctx.model)}\n\n`);
 
-    // Header mirrors L2 of the terminal statusline: model, effort, thinking,
-    // advisor.
+    // The terminal packs model, effort, thinking and advisor into one line
+    // because it has one line. Here each is a labelled row: the values are
+    // unrelated to each other and reading them as a run of dot-separated words
+    // means parsing the separator rather than the fact.
     const advisor = ctx.advisor || settings.advisor;
-    const traits = [ctx.effort, ctx.thinking ? 'think' : '', advisor ? `adv ${short(advisor)}` : '']
-        .filter(Boolean).join(' · ');
-    md.appendMarkdown(`**${short(ctx.model)}**${traits ? ` · ${traits}` : ''}\n\n`);
+    const model = [];
+    if (ctx.effort) model.push(['effort', ctx.effort]);
+    model.push(['thinking', ctx.thinking ? 'on' : 'off']);
+    if (advisor) model.push(['advisor', short(advisor)]);
+    if (settings.outputStyle) model.push(['output style', settings.outputStyle]);
+    md.appendMarkdown(table(model));
 
-    const rows = [
-        `| context | ${tok(ctx.tokens)} / ${tok(ctx.window)}${ctx.estimated ? ' (window unknown)' : ''} |`,
-    ];
-    if (ctx.cachePct >= 0) rows.push(`| from cache | ${ctx.cachePct}% |`);
-    if (state.compactPct > 0) rows.push(`| auto-compact | at ${state.compactPct}% |`);
-    if (settings.outputStyle) rows.push(`| output style | ${settings.outputStyle} |`);
-    if (ctx.branch) rows.push(`| branch | ${ctx.branch} |`);
-    if (version.current) {
-        rows.push(`| client | v${version.current}${version.latest ? ` → ${version.latest} available` : ''} |`);
+    const win = `${tok(ctx.tokens)} / ${tok(ctx.window)}`;
+    const fill = [['window', `**${ctx.estimated ? '~' : ''}${ctx.pct}%** — ${win}`]];
+    if (ctx.estimated) fill.push(['note', 'window size unknown for this model']);
+    if (ctx.cachePct >= 0) fill.push(['from cache', `${ctx.cachePct}%`]);
+    if (state.compactPct > 0) {
+        const left = state.compactPct - ctx.pct;
+        fill.push(['auto-compact', left > 0 ? `at ${state.compactPct}% — ${left} pp away` : `at ${state.compactPct}% — due`]);
     }
-    md.appendMarkdown(`| | |\n|---|---|\n${rows.join('\n')}\n`);
+    md.appendMarkdown(`\n**Context**\n\n${table(fill)}`);
+
+    const env = [];
+    if (ctx.branch) env.push(['branch', ctx.branch]);
+    if (version.current) env.push(['client', `v${version.current}`]);
+    if (env.length) md.appendMarkdown(`\n**Environment**\n\n${table(env)}`);
 
     if (version.latest) {
-        md.appendMarkdown(`\n$(arrow-up) version **${version.latest}** is unpacked — it takes effect on the next launch\n`);
+        md.appendMarkdown(`\n$(arrow-up) **${version.latest}** is unpacked and starts with the next launch\n`);
     }
     return md;
 }
@@ -92,21 +117,23 @@ function contextTooltip(state) {
 function moneyTooltip(state) {
     const { stats, todayUsd, context: ctx } = state;
     const md = new vscode.MarkdownString('', true);
-    const rows = [
-        `| session | ~${fmtCost(stats.cost)} |`,
-        `| today | ~${fmtCost(todayUsd)} |`,
-    ];
-    if (stats.burn > 0) rows.push(`| burn rate | ~${fmtCost(stats.burn)}/h |`);
-    if (stats.durationMs > 0) rows.push(`| duration | ${s.fmtDuration(stats.durationMs)} |`);
-    if (stats.apiPct >= 0) rows.push(`| waiting on model | ~${stats.apiPct}% of the time |`);
-    rows.push(`| requests | ${stats.messages} |`);
-    if (stats.added || stats.removed) rows.push(`| edits | +${stats.added} / −${stats.removed} lines |`);
-    md.appendMarkdown(`| | |\n|---|---|\n${rows.join('\n')}\n`);
+    md.appendMarkdown(`### ~${fmtCost(stats.cost)} this session\n\n`);
+
+    const spend = [['today', `~${fmtCost(todayUsd)}`]];
+    if (stats.burn > 0) spend.push(['burn rate', `~${fmtCost(stats.burn)}/h`]);
+    md.appendMarkdown(table(spend));
+
+    const work = [];
+    if (stats.durationMs > 0) work.push(['duration', s.fmtDuration(stats.durationMs)]);
+    work.push(['requests', String(stats.messages)]);
+    if (stats.apiPct >= 0) work.push(['waiting on model', `~${stats.apiPct}% of that time`]);
+    if (stats.added || stats.removed) work.push(['edits', `+${stats.added} / −${stats.removed} lines`]);
+    md.appendMarkdown(`\n**This session**\n\n${table(work)}`);
 
     const known = ctx ? ratesFor(ctx.model).known : true;
     md.appendMarkdown(known
-        ? '\n_estimated from public rates — not a bill_'
-        : '\n_estimated at Opus rates: this model has no published rate here_');
+        ? '\n_estimated from public rates — not a bill. Click for the full dashboard._'
+        : '\n_estimated at Opus rates: this model has no published rate. Click for the full dashboard._');
     return md;
 }
 
@@ -198,12 +225,14 @@ function renderWork(state) {
 
     workItem.text = parts.join(' ');
     const md = new vscode.MarkdownString('', true);
-    if (peers.total > 0) {
-        md.appendMarkdown(`${peers.total} other session${peers.total === 1 ? '' : 's'} in this repository`
-            + `${peers.busy > 0 ? `, ${peers.busy} busy` : ''}\n\n`);
-    }
     if (todo) {
-        md.appendMarkdown(`**${todo.done}/${todo.total}** tasks${todo.active ? `\n\nnow: ${todo.active}` : ''}`);
+        md.appendMarkdown(`### Tasks ${todo.done}/${todo.total}\n\n`);
+        if (todo.active) md.appendMarkdown(`$(play) ${todo.active}\n\n`);
+    }
+    if (peers.total > 0) {
+        const rows = [['sessions', String(peers.total)]];
+        if (peers.busy > 0) rows.push(['busy right now', String(peers.busy)]);
+        md.appendMarkdown(`${todo ? '**Other sessions here**' : '### Other sessions here'}\n\n${table(rows)}`);
     }
     workItem.tooltip = md;
     workItem.show();
