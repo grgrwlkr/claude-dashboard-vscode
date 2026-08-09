@@ -96,4 +96,37 @@ function readFinal(jsonPath) {
     };
 }
 
-module.exports = { readFinal };
+// The `meta` block of a workflow script is a pure literal by contract — no
+// variables, no calls, no interpolation — which is what makes reading it with a
+// regular expression sound. It is still someone else's file, so nothing is
+// evaluated: a script is code, and code from disk does not get run to draw a
+// tree label.
+//
+// The key quotes are optional because both spellings ship: a hand-written script
+// writes `title:`, while the workflows Claude Code itself ships (/code-review,
+// /deep-research) serialize their meta as JSON and write `"title":`. Six of the
+// 64 scripts on this machine are the latter — the six every user has.
+const META_RE = /export\s+const\s+meta\s*=\s*\{/;
+const PHASES_RE = /phases\s*:\s*\[([\s\S]*?)\]/;
+const ENTRY_RE = /\{[^{}]*\}/g;
+const TITLE_RE = /['"`]?title['"`]?\s*:\s*(['"`])(.*?)\1/;
+const DETAIL_RE = /['"`]?detail['"`]?\s*:\s*(['"`])(.*?)\1/;
+
+/** Phase titles of a run whose snapshot does not exist yet. */
+function phasesFromScript(text) {
+    const body = String(text || '');
+    const meta = META_RE.exec(body);
+    if (!meta) return [];
+    const block = PHASES_RE.exec(body.slice(meta.index));
+    if (!block) return [];
+    const out = [];
+    for (const entry of block[1].match(ENTRY_RE) || []) {
+        const title = TITLE_RE.exec(entry);
+        if (!title) continue;
+        const detail = DETAIL_RE.exec(entry);
+        out.push({ title: title[2], detail: detail ? detail[2] : '' });
+    }
+    return out;
+}
+
+module.exports = { readFinal, phasesFromScript };

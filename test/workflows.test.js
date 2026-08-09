@@ -117,3 +117,46 @@ test('readFinal ignores an agent entry with no id', () => tree(({ write }) => {
     }));
     assert.deepEqual(final.agents, []);
 }));
+
+test('phasesFromScript pulls the phase titles out of the meta literal', () => {
+    const script = `export const meta = {
+    name: 'review-changes',
+    description: 'Review changed files across dimensions, verify each finding',
+    phases: [
+        { title: 'Review', detail: 'one agent per dimension' },
+        { title: 'Verify' },
+    ],
+}
+phase('Review')
+const results = await pipeline(DIMENSIONS, d => agent(d.prompt))`;
+
+    assert.deepEqual(wf.phasesFromScript(script), [
+        { title: 'Review', detail: 'one agent per dimension' },
+        { title: 'Verify', detail: '' },
+    ]);
+});
+
+// The workflows Claude Code ships — /code-review and /deep-research — write the
+// meta literal as JSON, keys quoted and all on one line. Six of the 64 scripts on
+// this machine are theirs, and they are the ones every user has, so a reader that
+// only knows bare keys is blank exactly where it matters most.
+test('phasesFromScript reads a meta literal whose keys are quoted', () => {
+    const script = `export const meta = {
+  name: "code-review",
+  phases: [{"title":"Scope","detail":"Pin the diff command and the changed files"},{"title":"Find","detail":"One finder per correctness angle"},{"title":"Synthesize"}],
+}`;
+
+    assert.deepEqual(wf.phasesFromScript(script), [
+        { title: 'Scope', detail: 'Pin the diff command and the changed files' },
+        { title: 'Find', detail: 'One finder per correctness angle' },
+        { title: 'Synthesize', detail: '' },
+    ]);
+});
+
+test('phasesFromScript returns nothing rather than guessing', () => {
+    assert.deepEqual(wf.phasesFromScript('export const meta = { name: "x" }'), []);
+    assert.deepEqual(wf.phasesFromScript(''), []);
+    assert.deepEqual(wf.phasesFromScript('phases: [ {title: '), []);
+    // A `phases` word outside the meta block must not be mistaken for the real one.
+    assert.deepEqual(wf.phasesFromScript('log("phases: [{title: 1}]")'), []);
+});
