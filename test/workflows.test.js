@@ -94,6 +94,22 @@ test('readFinal counts the agents it listed, and keeps the client count apart', 
     assert.equal(final.totals.reported, 74);
 }));
 
+// The client's own capped preview is 400 characters plus an ellipsis, so cutting
+// at 400 and adding one back leaves it byte for byte as it was; anything longer
+// is ours to cut, and it says so.
+test('readFinal marks a preview it cut itself and leaves a short one alone', () => tree(({ write }) => {
+    const final = wf.readFinal(write('workflows/wf_long-1.json', {
+        runId: 'wf_long-1',
+        workflowProgress: [
+            { type: 'workflow_agent', agentId: 'c1', promptPreview: 'x'.repeat(500), resultPreview: 'y'.repeat(400) },
+        ],
+    }));
+
+    assert.equal(final.agents[0].promptPreview.length, 401);
+    assert.ok(final.agents[0].promptPreview.endsWith('…'));
+    assert.equal(final.agents[0].resultPreview, 'y'.repeat(400));
+}));
+
 test('readFinal ignores an agent entry with no id', () => tree(({ write }) => {
     const final = wf.readFinal(write('workflows/wf_x-1.json', {
         runId: 'wf_x-1',

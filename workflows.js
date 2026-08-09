@@ -16,11 +16,17 @@ const path = require('path');
 
 // The client writes a capped preview as 400 characters plus an ellipsis — 2590 of
 // them are exactly that on this machine — but that is its habit, not a promise,
-// and a run with dozens of agents would carry all of it into a panel. Cutting at
-// the same 400 keeps every preview whole up to the client's own limit; the one
-// character it drops is that trailing ellipsis, so whatever renders these marks
-// truncation itself rather than relying on the client having marked it.
+// and a run with dozens of agents would carry all of it into a panel.
 const PREVIEW_CHARS = 400;
+
+// Cut at the same 400 and put the ellipsis back, which leaves the client's own
+// 401-character preview exactly as it was and marks anything we cut ourselves.
+// The marker is the point: a preview is read as prose, and prose broken off
+// mid-word without one reads as something the agent actually wrote.
+function clip(text) {
+    const s = text || '';
+    return s.length > PREVIEW_CHARS ? `${s.slice(0, PREVIEW_CHARS)}…` : s;
+}
 
 function readJson(file) {
     try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
@@ -45,8 +51,8 @@ function agentOf(entry) {
         lastToolName: entry.lastToolName || '',
         // Bounded here, the way system.js bounds a hook command and a job detail:
         // the size of a row is ours to decide, not the client's to hand us.
-        promptPreview: (entry.promptPreview || '').slice(0, PREVIEW_CHARS),
-        resultPreview: (entry.resultPreview || '').slice(0, PREVIEW_CHARS),
+        promptPreview: clip(entry.promptPreview),
+        resultPreview: clip(entry.resultPreview),
     };
 }
 
