@@ -109,22 +109,56 @@ function readFinal(jsonPath) {
 const META_RE = /export\s+const\s+meta\s*=\s*\{/;
 const PHASES_RE = /phases\s*:\s*\[([\s\S]*?)\]/;
 const ENTRY_RE = /\{[^{}]*\}/g;
-const TITLE_RE = /['"`]?title['"`]?\s*:\s*(['"`])(.*?)\1/;
-const DETAIL_RE = /['"`]?detail['"`]?\s*:\s*(['"`])(.*?)\1/;
+// Group 1 is the quote around the key, present only to force it to be symmetric;
+// the value is group 3. A key must start at `{`, `,` or whitespace, or `subtitle:`
+// would answer to `title:` — and reading the wrong value is worse than reading
+// none.
+const TITLE_RE = /(?:^|[{,\s])(?:title|(['"`])title\1)\s*:\s*(['"`])(.*?)\2/;
+const DETAIL_RE = /(?:^|[{,\s])(?:detail|(['"`])detail\1)\s*:\s*(['"`])(.*?)\2/;
 
-/** Phase titles of a run whose snapshot does not exist yet. */
+// The text of the `meta` literal, from the brace META_RE stopped on to the one
+// that closes it. Everything below reads this and not the file, because a script
+// that declares no phases has none: without the bound, the first `phases:` its
+// own code happens to log becomes the answer, and an invented phase is the one
+// failure this module must never produce.
+//
+// Counting depth means walking the text, and walking it means honouring string
+// literals — a brace written in prose is a character, not a level — and honouring
+// an escape inside one, or a quote the script escaped would end the string early.
+// Comments are not skipped: an apostrophe in one would swallow the rest of the
+// literal, which costs the phases and never fabricates any.
+function metaBody(text, open) {
+    let depth = 0;
+    let quote = '';
+    for (let i = open; i < text.length; i++) {
+        const c = text[i];
+        if (quote) {
+            if (c === '\\') i++;
+            else if (c === quote) quote = '';
+        } else if (c === "'" || c === '"' || c === '`') quote = c;
+        else if (c === '{') depth++;
+        else if (c === '}' && --depth === 0) return text.slice(open, i + 1);
+    }
+    // Truncated file, or a literal that never closes: there is nothing to read.
+    return '';
+}
+
+/**
+ * The phases of a run whose snapshot does not exist yet — title and detail, in
+ * the order the literal lists them. Live runs have nowhere else to get them.
+ */
 function phasesFromScript(text) {
     const body = String(text || '');
     const meta = META_RE.exec(body);
     if (!meta) return [];
-    const block = PHASES_RE.exec(body.slice(meta.index));
+    const block = PHASES_RE.exec(metaBody(body, meta.index + meta[0].length - 1));
     if (!block) return [];
     const out = [];
     for (const entry of block[1].match(ENTRY_RE) || []) {
         const title = TITLE_RE.exec(entry);
         if (!title) continue;
         const detail = DETAIL_RE.exec(entry);
-        out.push({ title: title[2], detail: detail ? detail[2] : '' });
+        out.push({ title: title[3], detail: detail ? detail[3] : '' });
     }
     return out;
 }

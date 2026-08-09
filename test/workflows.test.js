@@ -160,3 +160,59 @@ test('phasesFromScript returns nothing rather than guessing', () => {
     // A `phases` word outside the meta block must not be mistaken for the real one.
     assert.deepEqual(wf.phasesFromScript('log("phases: [{title: 1}]")'), []);
 });
+
+// The whole point of reading `meta` and not the file: a script that declares no
+// phases has none, and the first `phases:` its own code happens to log is not a
+// substitute. This is the only place the function could have invented a value
+// instead of returning nothing.
+test('phasesFromScript ignores a phases: line that lives outside the meta literal', () => {
+    const script = `export const meta = { name: 'x', description: 'y' }
+log("phases: [{title: 'FAKE'}]")`;
+
+    assert.deepEqual(wf.phasesFromScript(script), []);
+});
+
+// Counting braces means honouring string literals: a `}` written in prose is a
+// character, not the end of the block, and a quote escaped inside a string does
+// not end the string.
+test('phasesFromScript is not fooled by a brace inside a string in the meta literal', () => {
+    const script = `export const meta = {
+    name: 'x',
+    description: 'it\\'s got a } brace in the prose',
+    phases: [{ title: 'Review', detail: 'one agent per dimension' }],
+}`;
+
+    assert.deepEqual(wf.phasesFromScript(script), [
+        { title: 'Review', detail: 'one agent per dimension' },
+    ]);
+});
+
+test('phasesFromScript gives up on a meta literal that is never closed', () => {
+    assert.deepEqual(wf.phasesFromScript('export const meta = {\n  phases: [{ title: "Review" }],'), []);
+});
+
+// `subtitle` ends in `title`, so a key match with no left-hand boundary reads the
+// wrong value — and reading the wrong one is worse than reading none.
+test('phasesFromScript does not mistake subtitle: for title:', () => {
+    const script = "export const meta = { phases: [{ subtitle: 'sub', title: 'real' }] }";
+
+    assert.deepEqual(wf.phasesFromScript(script), [{ title: 'real', detail: '' }]);
+});
+
+test('phasesFromScript reads values written in backticks', () => {
+    const script = 'export const meta = { phases: [{ title: `Review`, detail: `one agent per dimension` }] }';
+
+    assert.deepEqual(wf.phasesFromScript(script), [
+        { title: 'Review', detail: 'one agent per dimension' },
+    ]);
+});
+
+// Locked in as behaviour, not left as a surprise: a `]` inside a value ends the
+// phases array early, and what is left holds no complete entry, so the whole list
+// goes rather than half of it. Nothing on this machine writes one — the point is
+// that the failure stays empty instead of turning into a guess.
+test('phasesFromScript drops the whole list when a value contains a bracket', () => {
+    const script = "export const meta = { phases: [{ title: 'A', detail: 'a ] b' }, { title: 'B' }] }";
+
+    assert.deepEqual(wf.phasesFromScript(script), []);
+});
