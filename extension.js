@@ -411,6 +411,73 @@ function systemSnapshot(state, index, { force = false } = {}) {
     return systemCache;
 }
 
+/**
+ * What the settings tab needs: the values in force, and every placeholder with
+ * what it says right now. The palette is only useful with live values next to
+ * it — a name means little until you see that `{drift}` currently reads "-7pp".
+ */
+function configView(state) {
+    const cfg = vscode.workspace.getConfiguration('claudeStatusline');
+    const registry = (state && state.registry) || seg.fields({});
+    const data = (state && state.data) || {};
+    const palette = Object.entries(registry).map(([name, field]) => {
+        let value = '';
+        try { value = String(field.get(data, '') ?? ''); } catch { value = ''; }
+        return { name, topic: field.topic, doc: field.doc, value };
+    });
+    return {
+        segments: (state && state.segments) || cfg.get('segments') || seg.DEFAULT_SEGMENTS,
+        defaults: seg.DEFAULT_SEGMENTS,
+        alignment: cfg.get('alignment'),
+        priority: cfg.get('priority'),
+        refreshInterval: cfg.get('refreshInterval'),
+        palette,
+    };
+}
+
+// The webview edits settings; writing them is the extension's job. Only these
+// four keys are ever written, and only into the scope the form asked for.
+const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval'];
+
+async function handleMessage(context, msg) {
+    const state = context.claudeState;
+    if (!msg || !panel) return;
+
+    if (msg.type === 'refresh') { showDashboard(context, { force: false }); return; }
+
+    if (msg.type === 'preview') {
+        // Rendered by the same code that draws the bar, against the data the
+        // bar is holding at this moment — so the preview cannot disagree with
+        // what appears after saving.
+        const previews = (msg.segments || []).map((template) => {
+            const out = seg.renderSegment(String(template), state ? state.data : {}, state ? state.registry : seg.fields({}));
+            return { text: out.visible ? out.text : '' };
+        });
+        panel.webview.postMessage({ type: 'preview', previews });
+        return;
+    }
+
+    if (msg.type === 'defaults') {
+        panel.webview.postMessage({ type: 'defaults', segments: seg.DEFAULT_SEGMENTS });
+        return;
+    }
+
+    if (msg.type === 'save') {
+        const target = msg.scope === 'workspace'
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+        const cfg = vscode.workspace.getConfiguration('claudeStatusline');
+        try {
+            for (const key of WRITABLE) {
+                if (msg.settings && msg.settings[key] !== undefined) await cfg.update(key, msg.settings[key], target);
+            }
+            panel.webview.postMessage({ type: 'saved' });
+        } catch (err) {
+            vscode.window.showErrorMessage(`Claude statusline: could not save settings — ${err.message}`);
+        }
+    }
+}
+
 async function showDashboard(context, { force = false } = {}) {
     const storageDir = context.globalStorageUri.fsPath;
     const { index, stats } = await buildIndex(storageDir, { force });
@@ -420,6 +487,7 @@ async function showDashboard(context, { force = false } = {}) {
         lastRun: Date.now(),
         history: hist.readHistory(storageDir),
         system: systemSnapshot(context.claudeState, index, { force }),
+        config: configView(context.claudeState),
     });
 
     if (!panel) {
@@ -428,9 +496,7 @@ async function showDashboard(context, { force = false } = {}) {
             { enableScripts: true, retainContextWhenHidden: true },
         );
         panel.onDidDispose(() => { panel = null; });
-        panel.webview.onDidReceiveMessage((msg) => {
-            if (msg && msg.type === 'refresh') showDashboard(context, { force: false });
-        });
+        panel.webview.onDidReceiveMessage((msg) => handleMessage(context, msg));
     } else {
         panel.reveal(vscode.ViewColumn.Active);
     }

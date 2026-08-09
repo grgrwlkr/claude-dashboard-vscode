@@ -206,6 +206,43 @@ test('lineChart draws one path per window and marks the plan', () => {
     assert.match(db.lineChart([]), /Nothing recorded/);
 });
 
+// A window is named by how long ago it ran, not by where it sits in the list:
+// the log only grows while the editor runs, so a fortnight away leaves a hole
+// and index arithmetic would call a month-old window "last week".
+test('weekLabel counts back from now and survives a gap in the log', () => {
+    const now = Date.parse('2026-08-09T20:00:00Z');
+    const reset = (days) => Math.floor((now + days * 86400000) / 1000);
+    assert.equal(db.weekLabel(reset(4), now), 'this week');
+    assert.equal(db.weekLabel(reset(-3), now), 'last week');
+    assert.equal(db.weekLabel(reset(-24), now), '4 weeks ago');
+});
+
+test('the limits legend names each window and says when it resets', () => {
+    const now = Date.parse('2026-08-09T20:00:00Z');
+    const week = 604800 * 1000;
+    const rows = [
+        // Last week, already reset, plus this one still running — and the live
+        // one answered twice with a reset a second apart, as the endpoint does.
+        { at: now - week - 86400000, weekly: 60, reset: Math.floor((now - week + 3 * 86400000) / 1000) },
+        { at: now - 86400000, weekly: 30, reset: Math.floor((now + 3 * 86400000) / 1000) - 1 },
+        { at: now - 3600000, weekly: 41, reset: Math.floor((now + 3 * 86400000) / 1000) },
+    ];
+    const html = db.limitsTab(rows, now);
+    assert.equal((html.match(/class="chip"/g) || []).length, 2, 'the drifting reset is one window, not two');
+    assert.match(html, /this week<span class="dim">· resets /);
+    assert.match(html, /last week<span class="dim">· ended /);
+    assert.doesNotMatch(html, /week to /);
+    assert.doesNotMatch(html, /nothing to compare/);
+});
+
+test('the limits tab says so when a single window has nothing to compare against', () => {
+    const now = Date.parse('2026-08-09T20:00:00Z');
+    const rows = [{ at: now - 3600000, weekly: 41, reset: Math.floor((now + 3 * 86400000) / 1000) }];
+    assert.match(db.limitsTab(rows, now), /nothing to compare/);
+    // An empty log has no window at all, so it has nothing to say about one.
+    assert.doesNotMatch(db.limitsTab([], now), /nothing to compare/);
+});
+
 test('stackedTokens stacks the parts it is given and labels the busiest day', () => {
     const days = {
         '2026-08-07': bucket(0, 1, { cacheRead: 1000, cw1h: 500 }),

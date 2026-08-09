@@ -113,6 +113,12 @@ function trim(dir, rows) {
     }
 }
 
+// The endpoint answers the same window with a reset that wanders by a second or
+// two between calls, so the raw value cannot key a window: one week arrives as
+// three. Readings this close together are the same window — real ones are a
+// week apart, some two thousand times further out than this slack.
+const RESET_SLACK_S = 300;
+
 /**
  * Split the readings into weekly windows, keyed by the reset they belong to.
  * Each point carries how far into its own window it sits, which is what makes
@@ -120,19 +126,32 @@ function trim(dir, rows) {
  * not a date.
  */
 function weeklyWindows(rows, limit = 6) {
-    const byReset = new Map();
+    const windows = [];
     for (const r of rows) {
         if (!r.reset) continue;
-        const start = r.reset * 1000 - WEEK_MS;
-        const elapsed = r.at - start;
+        // Membership is judged against the reading's own reset, before any
+        // canonicalisation, so a point is never dropped for a discrepancy the
+        // grouping introduced.
+        const elapsed = r.at - (r.reset * 1000 - WEEK_MS);
         // A reading whose timestamp falls outside its own window means the
         // clock or the reset moved under us; there is nothing sensible to plot.
         if (elapsed < 0 || elapsed > WEEK_MS) continue;
-        const w = byReset.get(r.reset) || { reset: r.reset, start, points: [] };
-        w.points.push({ at: r.at, day: elapsed / WEEK_MS * 7, pct: r.weekly });
-        byReset.set(r.reset, w);
+
+        let w = windows.find((x) => Math.abs(x.reset - r.reset) <= RESET_SLACK_S);
+        if (!w) windows.push(w = { reset: r.reset, points: [] });
+        // The latest reset in the group names the window: the drift is noise,
+        // but the label still has to match what the account page says.
+        else if (r.reset > w.reset) w.reset = r.reset;
+        w.points.push({ at: r.at, pct: r.weekly });
     }
-    return [...byReset.values()].sort((a, b) => a.reset - b.reset).slice(-limit);
+
+    // `day` is derived last, from the window's settled start, so every point in
+    // one window is measured from the same origin.
+    for (const w of windows) {
+        w.start = w.reset * 1000 - WEEK_MS;
+        w.points = w.points.map((p) => ({ ...p, day: (p.at - w.start) / WEEK_MS * 7 }));
+    }
+    return windows.sort((a, b) => a.reset - b.reset).slice(-limit);
 }
 
 /** The 5-hour session limit over time — a sawtooth, one tooth per session. */

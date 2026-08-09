@@ -711,14 +711,28 @@ function frictionTab(total) {
     </section>`;
 }
 
-function limitsTab(history) {
+// Which week a window was, counted from now rather than from its position in
+// the list: the log only grows while the editor runs, so a fortnight with the
+// laptop shut leaves a gap, and "the one before the last one" would then label a
+// month-old window "last week".
+function weekLabel(reset, nowMs) {
+    const ms = reset * 1000;
+    if (ms > nowMs) return 'this week';
+    const back = Math.floor((nowMs - ms) / hist.WEEK_MS) + 1;
+    return back === 1 ? 'last week' : `${back} weeks ago`;
+}
+
+function limitsTab(history, nowMs = Date.now()) {
     // Sorted here rather than trusted: the caller reads a file that several
     // windows append to, and "the last row" has to mean the latest reading.
     const rows = (history || []).slice().sort((a, b) => a.at - b.at);
     const windows = hist.weeklyWindows(rows);
-    const series = windows.map((w, i) => ({
-        label: `week to ${fmtDateTime(w.reset * 1000)}`,
-        current: i === windows.length - 1,
+    const series = windows.map((w) => ({
+        label: weekLabel(w.reset, nowMs),
+        // Still running, rather than last in the list: after a week away the
+        // newest window on file is history too, and nothing is "now".
+        current: w.reset * 1000 > nowMs,
+        reset: w.reset,
         points: w.points.map((p) => ({ x: p.day, y: p.pct })),
     }));
     const last = rows[rows.length - 1];
@@ -735,10 +749,11 @@ function limitsTab(history) {
         <p class="note">The usage endpoint answers only for right now, so this is a local log: one row whenever a percentage moves, kept in the extension's own storage. It starts empty and fills in as the extension runs.</p>
         ${cards}
         <h2>Weekly windows, overlaid</h2>
+        <p class="note">One line per weekly window, each drawn from its own beginning: across is days since that window opened, up is how much of the weekly limit was gone by then. Stacking the weeks on one pair of axes compares the pace rather than the dates — the same day of two different weeks sits at the same place. The dashed diagonal is a window spent evenly; a line above it runs out before the reset, a line below leaves quota unused.</p>
         ${lineChart(series)}
         <div class="legend">${series.map((s, i) =>
-        `<span class="chip"><i style="background:${modelColor(s.label, i)}"></i>${esc(s.label)}${s.current ? ' · now' : ''}</span>`).join('')}</div>
-        <p class="note">Each line starts at the beginning of its own window, so this week can be read against the ones before it. The dashed diagonal is spending the window evenly.</p>
+        `<span class="chip"><i style="background:${modelColor(s.label, i)}"></i>${esc(s.label)}<span class="dim">· ${s.current ? 'resets' : 'ended'} ${esc(fmtDateTime(s.reset * 1000))}</span></span>`).join('')}</div>
+        ${series.length === 1 ? '<p class="note">Only one window has been recorded so far, so there is nothing to compare it against yet — the older lines appear as resets go by.</p>' : ''}
         ${models.length ? `<h2>Per-model windows, latest reading</h2>${barList(
         models.map(([name, p]) => [name, { cost: p, msgs: p }]),
         { limit: 8, label: (v) => `${v}%` })}` : ''}
@@ -1069,6 +1084,84 @@ function filesTab(total, sys) {
     </section>`;
 }
 
+/**
+ * The extension's own settings, edited here rather than in settings.json. The
+ * bar is a template, and a template is written by trying it — so each segment
+ * carries a live preview rendered by the extension itself, from the same code
+ * that draws the real thing.
+ */
+function settingsTab(config) {
+    const cfg = config || {};
+    const segments = (cfg.segments || []).length ? cfg.segments : (cfg.defaults || []);
+    const palette = cfg.palette || [];
+    const byTopic = {};
+    for (const field of palette) (byTopic[field.topic] || (byTopic[field.topic] = [])).push(field);
+
+    const row = (template, i) => `<li class="seg" data-index="${i}">
+        <div class="seg-head">
+          <span class="seg-num">${i + 1}</span>
+          <input class="seg-input" type="text" value="${esc(template)}" spellcheck="false"
+                 aria-label="Segment ${i + 1}">
+          <button class="icon" data-act="up" title="Move left">↑</button>
+          <button class="icon" data-act="down" title="Move right">↓</button>
+          <button class="icon" data-act="drop" title="Remove">✕</button>
+        </div>
+        <div class="seg-preview" data-preview="${i}">…</div>
+      </li>`;
+
+    return `<section class="tab" data-tab="settings" hidden>
+        <p class="note">These are the extension's own settings — the same keys as in <code>settings.json</code>, written straight from here. The status bar updates as soon as you save; nothing needs a reload.</p>
+
+        <h2>Status bar</h2>
+        <p class="note">One line per status-bar item, left to right. Text outside <code>{…}</code> is yours; <code>[square brackets]</code> mark a group that disappears whole when a placeholder inside it has nothing to say. A segment with nothing to show hides itself.</p>
+        <ol class="segs" id="segs">${segments.map(row).join('')}</ol>
+        <div class="btns">
+          <button class="btn" id="add">Add segment</button>
+          <button class="btn" id="restore">Restore defaults</button>
+        </div>
+
+        <h2>Placeholders</h2>
+        <p class="note">Click one to insert it into the segment you last edited. The value beside each name is what it says on this machine right now.</p>
+        <div class="palette">
+          ${Object.entries(byTopic).map(([topic, list]) => `<div class="pal-group">
+            <h3>${esc(topic)}</h3>
+            ${list.map((f) => `<button class="chip-btn" data-insert="{${esc(f.name)}}" title="${esc(f.doc)}">
+              <code>{${esc(f.name)}}</code><span class="pal-val">${f.value ? esc(f.value) : '—'}</span>
+            </button>`).join('')}
+          </div>`).join('')}
+        </div>
+
+        <h2>Behaviour</h2>
+        <table class="kv form">
+          <tbody>
+            <tr><th scope="row"><label for="alignment">Side of the bar</label></th>
+              <td><select id="alignment">
+                <option value="right"${cfg.alignment === 'right' ? ' selected' : ''}>right</option>
+                <option value="left"${cfg.alignment === 'left' ? ' selected' : ''}>left</option>
+              </select></td>
+              <td class="dim">where the items sit</td></tr>
+            <tr><th scope="row"><label for="priority">Priority</label></th>
+              <td><input id="priority" type="number" value="${Number(cfg.priority) || 100}"></td>
+              <td class="dim">higher means further left</td></tr>
+            <tr><th scope="row"><label for="refreshInterval">Refresh interval</label></th>
+              <td><input id="refreshInterval" type="number" min="15" value="${Number(cfg.refreshInterval) || 60}"></td>
+              <td class="dim">seconds between the expensive reads</td></tr>
+            <tr><th scope="row"><label for="scope">Save to</label></th>
+              <td><select id="scope">
+                <option value="global">my settings</option>
+                <option value="workspace">this workspace</option>
+              </select></td>
+              <td class="dim">workspace settings live in the repository's <code>.vscode/settings.json</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="btns">
+          <button class="btn primary" id="save">Save</button>
+          <span class="saved" id="saved" hidden>Saved</span>
+        </div>
+    </section>`;
+}
+
 // --- page -------------------------------------------------------------------
 
 const STYLE = `
@@ -1111,6 +1204,9 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .legend { display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 14px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; opacity: .75; font-size: 11px; }
 .chip i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+/* .dim inside an already-faded chip would multiply down to a third of the text
+   colour, which is past legible for something that carries a date. */
+.chip .dim { opacity: .7; }
 /* min-width: 0 is the whole trick: a grid child defaults to min-content, so one
    wide table inside a column pushes the other column off the page instead of
    letting its own content wrap. */
@@ -1195,6 +1291,45 @@ tr.off { opacity: .45; }
 .j-stopped { color: hsl(35 72% 58%); }
 ul.log { margin: 4px 0 14px; padding-left: 20px; line-height: 1.6; max-width: 90ch; }
 ul.log li { margin: 2px 0; opacity: .85; }
+.segs { list-style: none; margin: 0 0 10px; padding: 0; max-width: 110ch; }
+.seg { margin-bottom: 8px; }
+.seg-head { display: flex; align-items: center; gap: 6px; }
+.seg-num { opacity: .45; font-size: 11px; width: 14px; text-align: right; }
+.seg-input { flex: 1; min-width: 0; font-family: var(--vscode-editor-font-family); font-size: 12px;
+  padding: 5px 8px; border-radius: 4px; color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+.seg-input:focus { outline: 1px solid var(--vscode-focusBorder); }
+.seg-preview { margin: 3px 0 0 20px; padding: 3px 8px; border-radius: 4px; font-size: 12px;
+  background: var(--vscode-editorWidget-background); display: inline-block; min-height: 20px; }
+.empty-preview { opacity: .45; font-style: italic; }
+.icon { background: none; border: none; color: inherit; opacity: .5; cursor: pointer;
+  font: inherit; padding: 2px 6px; border-radius: 3px; }
+.icon:hover { opacity: 1; background: var(--vscode-list-hoverBackground); }
+.btns { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.btn { font: inherit; padding: 5px 12px; border-radius: 4px; cursor: pointer;
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-panel-border); }
+.btn:hover { background: var(--vscode-list-hoverBackground); }
+.btn.primary { color: var(--vscode-button-foreground, #fff);
+  background: var(--vscode-button-background, hsl(210 80% 45%)); border-color: transparent; }
+.saved { color: hsl(145 45% 55%); font-size: 12px; }
+.palette { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 20px; margin-bottom: 8px; }
+.pal-group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  opacity: .55; margin: 8px 0 4px; font-weight: 600; }
+.chip-btn { display: flex; width: 100%; align-items: baseline; gap: 8px; background: none;
+  border: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  padding: 2px 6px; border-radius: 3px; }
+.chip-btn:hover { background: var(--vscode-list-hoverBackground); }
+.pal-val { margin-left: auto; opacity: .5; font-size: 11px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 14ch; }
+.form select, .form input { font: inherit; padding: 3px 6px; border-radius: 4px;
+  color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+.form input[type="number"] { width: 8ch; }
+.form td:first-of-type { width: 1%; }
 footer { margin-top: 28px; opacity: .5; font-size: 11px; }
 `;
 
@@ -1223,6 +1358,132 @@ function openSection(id) {
 
 sections.forEach((btn) => btn.addEventListener('click', () => openSection(btn.dataset.section)));
 tabs.forEach((btn) => btn.addEventListener('click', () => openTab(btn)));
+
+// --- the settings editor ----------------------------------------------------
+const api = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
+const list = document.getElementById('segs');
+
+if (list && api) {
+  // The preview is rendered by the extension, not here: the template grammar
+  // lives in one module and a second implementation in the webview would drift
+  // from it the first time either changed.
+  let timer = null;
+  const templates = () => [...list.querySelectorAll('.seg-input')].map((i) => i.value);
+  const askPreview = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => api.postMessage({ type: 'preview', segments: templates() }), 120);
+  };
+
+  const renumber = () => {
+    [...list.children].forEach((li, i) => {
+      li.dataset.index = i;
+      li.querySelector('.seg-num').textContent = i + 1;
+      li.querySelector('.seg-preview').dataset.preview = i;
+    });
+    askPreview();
+  };
+
+  let lastFocused = list.querySelector('.seg-input');
+  list.addEventListener('focusin', (e) => {
+    if (e.target.classList.contains('seg-input')) lastFocused = e.target;
+  });
+  list.addEventListener('input', (e) => {
+    if (e.target.classList.contains('seg-input')) askPreview();
+  });
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const li = btn.closest('.seg');
+    if (btn.dataset.act === 'drop') li.remove();
+    if (btn.dataset.act === 'up' && li.previousElementSibling) li.parentNode.insertBefore(li, li.previousElementSibling);
+    if (btn.dataset.act === 'down' && li.nextElementSibling) li.parentNode.insertBefore(li.nextElementSibling, li);
+    renumber();
+  });
+
+  // Built node by node rather than from a string of HTML: nothing here is
+  // interpolated today, and assembling it this way keeps it that way.
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  };
+
+  const addSegment = (value) => {
+    const li = el('li', 'seg');
+    const head = el('div', 'seg-head');
+    head.appendChild(el('span', 'seg-num'));
+    const input = el('input', 'seg-input');
+    input.type = 'text';
+    input.spellcheck = false;
+    input.value = value || '';
+    head.appendChild(input);
+    for (const [act, label, title] of [['up', '↑', 'Move left'], ['down', '↓', 'Move right'], ['drop', '✕', 'Remove']]) {
+      const btn = el('button', 'icon', label);
+      btn.dataset.act = act;
+      btn.title = title;
+      head.appendChild(btn);
+    }
+    li.appendChild(head);
+    li.appendChild(el('div', 'seg-preview', '…'));
+    list.appendChild(li);
+    renumber();
+    input.focus();
+  };
+
+  document.getElementById('add').addEventListener('click', () => addSegment(''));
+  document.getElementById('restore').addEventListener('click', () => api.postMessage({ type: 'defaults' }));
+
+  // Inserting at the caret rather than appending: a placeholder usually belongs
+  // between two pieces of text that are already written.
+  document.querySelectorAll('[data-insert]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = lastFocused || list.querySelector('.seg-input');
+      if (!input) { addSegment(btn.dataset.insert); return; }
+      const at = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? at;
+      input.value = input.value.slice(0, at) + btn.dataset.insert + input.value.slice(end);
+      input.focus();
+      input.selectionStart = input.selectionEnd = at + btn.dataset.insert.length;
+      askPreview();
+    });
+  });
+
+  document.getElementById('save').addEventListener('click', () => {
+    api.postMessage({
+      type: 'save',
+      scope: document.getElementById('scope').value,
+      settings: {
+        segments: templates().filter((t) => t.trim().length > 0),
+        alignment: document.getElementById('alignment').value,
+        priority: Number(document.getElementById('priority').value) || 100,
+        refreshInterval: Number(document.getElementById('refreshInterval').value) || 60,
+      },
+    });
+  });
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data || {};
+    if (msg.type === 'preview') {
+      [...list.querySelectorAll('.seg-preview')].forEach((el, i) => {
+        const out = msg.previews[i];
+        el.textContent = out && out.text ? out.text : '(hidden — nothing to show)';
+        el.classList.toggle('empty-preview', !(out && out.text));
+      });
+    }
+    if (msg.type === 'defaults') {
+      while (list.firstChild) list.removeChild(list.firstChild);
+      for (const t of msg.segments) addSegment(t);
+    }
+    if (msg.type === 'saved') {
+      const badge = document.getElementById('saved');
+      badge.hidden = false;
+      setTimeout(() => { badge.hidden = true; }, 2000);
+    }
+  });
+
+  askPreview();
+}
 const refresh = document.getElementById('refresh');
 if (refresh) {
   const vscode = acquireVsCodeApi();
@@ -1284,6 +1545,7 @@ const SECTIONS = [
         ['limits', 'Limits'],
     ]],
     ['setup', 'Setup', [
+        ['settings', 'Settings'],
         ['health', 'Health'],
         ['jobs', 'Background jobs'],
         ['live', 'Live now'],
@@ -1332,6 +1594,7 @@ ${modelsTab(total)}
 ${cacheTab(total)}
 ${frictionTab(total)}
 ${limitsTab(meta.history)}
+${settingsTab(meta.config)}
 ${healthTab(total, meta.system)}
 ${jobsTab(meta.system)}
 ${liveTab(meta.system)}
@@ -1347,6 +1610,7 @@ module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, SECTIONS, CACHE_PARTS,
-    healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab,
+    healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
+    limitsTab, weekLabel,
     shortModel, tok, bytes, fmtDur, esc,
 };

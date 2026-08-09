@@ -77,6 +77,25 @@ test('weeklyWindows places each reading by how far into its own window it sits',
     assert.ok(Math.abs(first.points[1].day - 3.5) < 1e-9);
 });
 
+// The endpoint answered one live window with three resets a second apart, and
+// keying on the raw value drew it as three separate weeks in three colours.
+test('weeklyWindows treats a reset that drifts by seconds as one window', () => {
+    const start = RESET * 1000 - h.WEEK_MS;
+    const rows = [
+        { at: start + h.WEEK_MS / 7, weekly: 12, reset: RESET - 1 },
+        { at: start + h.WEEK_MS / 4, weekly: 20, reset: RESET },
+        { at: start + h.WEEK_MS / 2, weekly: 47, reset: RESET + 1 },
+    ];
+    const windows = h.weeklyWindows(rows);
+    assert.equal(windows.length, 1);
+    assert.equal(windows[0].points.length, 3);
+    // The freshest reset wins, so the label matches the account page rather
+    // than whichever answer happened to arrive first.
+    assert.equal(windows[0].reset, RESET + 1);
+    // One origin for every point: days are measured from the settled start.
+    assert.ok(windows[0].points.every((p, i, a) => i === 0 || p.day > a[i - 1].day));
+});
+
 test('weeklyWindows keeps only the most recent windows', () => {
     const rows = [];
     for (let i = 0; i < 10; i++) {
