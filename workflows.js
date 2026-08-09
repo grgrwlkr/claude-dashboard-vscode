@@ -67,7 +67,13 @@ function agentOf(entry) {
         phase: entry.phaseTitle || '',
         model: entry.model || '',
         state: entry.state || '',
-        tokens: entry.tokens || 0,
+        // `tokens` means what the agent spent, at every stage of the pipeline,
+        // and nothing here can know that — only the priced `usage` records can,
+        // and they are read later. The client's own number goes to the name that
+        // says whose it is: it measures the agent's context at its last reply,
+        // not its spend, and the two differ by a factor of 29 on this machine.
+        tokens: 0,
+        reportedTokens: entry.tokens || 0,
         toolCalls: entry.toolCalls || 0,
         durationMs: entry.durationMs || 0,
         lastToolName: entry.lastToolName || '',
@@ -119,7 +125,12 @@ function readFinal(jsonPath) {
             // them is a fact about the run, not an error to paper over.
             agents: agents.length,
             reported: raw.agentCount || 0,
-            tokens: raw.totalTokens || 0,
+            // Zero until something prices this run, for the same reason an
+            // agent's is: the snapshot's own total is a sum of the contexts it
+            // lists — verified equal to it on all 74 snapshots here — and that
+            // is not a quantity a price can come out of.
+            tokens: 0,
+            reportedTokens: raw.totalTokens || 0,
             toolCalls: raw.totalToolCalls || 0,
         },
     };
@@ -338,6 +349,10 @@ function readLive(runDir) {
             resultPreview: '',
             agentType: meta.agentType || '',
             tokens: 0,
+            // The client writes no figure for an agent until the run ends, so
+            // there is nothing to report yet — the key exists so both kinds of
+            // agent carry the same fields.
+            reportedTokens: 0,
             toolCalls: 0,
             durationMs: st ? Math.max(0, st.mtimeMs - (st.birthtimeMs || st.mtimeMs)) : 0,
             lastActivity: st ? st.mtimeMs : 0,
@@ -592,7 +607,11 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() 
             // call while the run is going, each agent's own last state after.
             totals: final
                 ? { ...final.totals, done: settledCount(final.agents, state) }
-                : { agents: live ? live.total : 0, reported: 0, tokens: 0, toolCalls: 0, done: live ? live.done : 0 },
+                : {
+                    agents: live ? live.total : 0, reported: 0,
+                    tokens: 0, reportedTokens: 0, toolCalls: 0,
+                    done: live ? live.done : 0,
+                },
         };
     });
 }
@@ -656,27 +675,13 @@ function claimOrder(runs) {
 // The index refreshes when the dashboard is opened, which can land in the middle
 // of a run: the row it wrote then is a photograph of a file that is still
 // growing. So a run that is going is read from its transcripts when the caller
-// pays for that, and the index answers for everything that has stopped moving.
-function priceOf(run, agent, known, key, live, root) {
-    if (live && run.state === 'running' && run.runDir) {
-        const fresh = priceLive(run.runDir, agent.agentId, root);
-        if (fresh) return fresh;
-    }
-    return known.get(key) || null;
+// pays for that, and the index answers for everything that has stopped moving —
+// including an agent of a live run whose transcript is not in this directory,
+// which is what a run resumed into someone else's directory looks like.
+function freshOf(run, agentId, live, root) {
+    if (!live || run.state !== 'running' || !run.runDir) return null;
+    return priceLive(run.runDir, agentId, root);
 }
-
-// The client's `tokens` is not a smaller version of ours, it is a different
-// quantity: on this machine it equals the agent's context at its last recorded
-// reply — input plus cache plus that one output — while ours is everything the
-// agent ever spent. Hence 86.1M against 2476.1M over the same 1235 agents, a
-// factor of 29 that is almost entirely cache reads. Putting one in the other's
-// place would understate a run by that factor, so ours goes in `tokens`, theirs
-// is kept beside it under its own name, and neither is ever mixed into the
-// other. `reported` is read first so pricing the same runs twice cannot
-// overwrite the client's number with our own — by presence and not by truth,
-// because a live agent starts at zero on both sides and `||` cannot tell the
-// client's own zero from a field that was never filled in.
-const reportedOf = (x) => (x.reportedTokens === undefined ? (x.tokens || 0) : x.reportedTokens);
 
 function pricedRun(run, known, claimed, live, root) {
     let cost = 0;
@@ -686,25 +691,38 @@ function pricedRun(run, known, claimed, live, root) {
         const key = `${run.runId}/${agent.agentId}`;
         // Claimed by an earlier record, so this one is looking at an agent whose
         // single transcript has already been paid for.
-        const priced = claimed.has(key) ? null : priceOf(run, agent, known, key, live, root);
-        const reportedTokens = reportedOf(agent);
-        if (!priced) return { ...agent, cost: 0, tokens: 0, reportedTokens };
+        const priced = claimed.has(key)
+            ? null
+            : (freshOf(run, agent.agentId, live, root) || known.get(key) || null);
+        if (!priced) return { ...agent, cost: 0, tokens: 0 };
 
         claimed.add(key);
         cost += priced.cost;
         tokens += priced.tokens;
-        return { ...agent, cost: priced.cost, tokens: priced.tokens, reportedTokens };
+        return { ...agent, cost: priced.cost, tokens: priced.tokens };
     });
 
-    return {
-        ...run,
-        agents,
-        // Every snapshot here has totalTokens exactly equal to the sum of the
-        // agents it lists, so the run's reported figure is a sum of context
-        // sizes — kept whole rather than re-summed from the agents, since a
-        // client that stops agreeing with itself is telling us something.
-        totals: { ...run.totals, cost, tokens, reportedTokens: reportedOf(run.totals) },
-    };
+    // `reportedTokens` rides through untouched on both levels: the client's
+    // figure is put there when the run is read, so nothing here has to guess
+    // whether it is looking at a fresh record or one it already priced.
+    return { ...run, agents, totals: { ...run.totals, cost, tokens } };
+}
+
+// What the index attributes to a run id that no agent of it accounted for,
+// summed per run. A run's price is the sum over the agents it lists, and a run
+// directory can hold transcripts no snapshot names — 175 of them here, $120.00,
+// and on wf_19cbc05e-1c7 that is $88.45 beside the $107.65 the run itself shows.
+// Reporting only the second number would present a run at 55 % of what its
+// directory spent, so the remainder is carried in the open rather than folded
+// into a total whose meaning is "the agents you can see".
+function unlistedByRun(known, claimed) {
+    const left = new Map();
+    for (const [key, row] of known) {
+        if (claimed.has(key)) continue;
+        const runId = key.slice(0, key.lastIndexOf('/'));
+        left.set(runId, (left.get(runId) || 0) + row.cost);
+    }
+    return left;
 }
 
 /**
@@ -716,8 +734,20 @@ function pricedRun(run, known, claimed, live, root) {
 function withCost(runs, { index = null, live = false, root = PROJECTS } = {}) {
     const known = costIndex(index);
     const claimed = new Set();
+    const order = claimOrder(runs);
     const out = new Array(runs.length);
-    for (const i of claimOrder(runs)) out[i] = pricedRun(runs[i], known, claimed, live, root);
+    for (const i of order) out[i] = pricedRun(runs[i], known, claimed, live, root);
+
+    // The leftovers can only be counted once every record has taken what it
+    // lists, and they go to one record per run id — the same one that claimed
+    // first — so that summing the runs still adds up to what the index holds.
+    const left = unlistedByRun(known, claimed);
+    const taken = new Set();
+    for (const i of order) {
+        const { runId } = runs[i];
+        out[i].totals.unlisted = taken.has(runId) ? 0 : (left.get(runId) || 0);
+        taken.add(runId);
+    }
     return out;
 }
 
