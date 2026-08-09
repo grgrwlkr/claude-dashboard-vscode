@@ -12,10 +12,18 @@
 // Which tooltip a segment gets, and which threshold colours it. A segment that
 // mentions fields from two topics gets both tooltips, in the order the fields
 // appear.
-const TOPICS = ['limits', 'context', 'money', 'work'];
+const TOPICS = ['limits', 'context', 'money', 'work', 'workflow'];
 
 const pct = (n) => (Number.isFinite(n) && n >= 0 ? `${n}%` : '');
 const usd = (n, fmt) => (Number.isFinite(n) && n > 0 ? fmt(n) : '');
+
+// The run to talk about when several are going: the one that started last, which
+// is the one the user just launched and is waiting on.
+const newestRun = (d) => {
+    const active = (d.workflows && d.workflows.active) || [];
+    if (active.length === 0) return null;
+    return active.reduce((a, b) => (b.startedAt > a.startedAt ? b : a));
+};
 
 /**
  * Every field a template may use. `topic` picks the tooltip and the colour
@@ -92,6 +100,50 @@ function fields(helpers = {}) {
         jobs: { topic: 'work', doc: 'background jobs still working, machine-wide', get: (d) => (d.machine?.jobs > 0 ? String(d.machine.jobs) : '') },
         sessions: { topic: 'work', doc: 'live Claude sessions on the whole machine', get: (d) => (d.machine?.sessions > 0 ? String(d.machine.sessions) : '') },
         openTasks: { topic: 'work', doc: 'unfinished task-list items across every session', get: (d) => (d.machine?.openTasks > 0 ? String(d.machine.openTasks) : '') },
+
+        // --- workflow -------------------------------------------------------
+        wfName: {
+            topic: 'workflow',
+            doc: 'name of the workflow running right now',
+            get: (d) => newestRun(d)?.name || '',
+        },
+        wfAgents: {
+            topic: 'workflow',
+            doc: 'agents of that run as done/total, e.g. 5/14',
+            get: (d) => {
+                const run = newestRun(d);
+                if (!run) return '';
+                // Whether an agent counts as finished — it returned, it crashed,
+                // or the run was cut from under it — is settled where the run is
+                // read, and `totals.done` is that answer for both a live run and
+                // a finished one. Counting the state words again here is how the
+                // bar and the panel end up disagreeing about the same run.
+                const done = run.totals?.done;
+                const total = run.totals?.agents || (run.agents || []).length;
+                return total > 0 && Number.isFinite(done) ? `${done}/${total}` : '';
+            },
+        },
+        wfElapsed: {
+            topic: 'workflow',
+            doc: 'how long that run has been going',
+            get: (d) => {
+                const run = newestRun(d);
+                return run && run.startedAt ? fmtDuration(Date.now() - run.startedAt) : '';
+            },
+        },
+        wfCost: {
+            topic: 'workflow',
+            doc: 'estimated spend of that run so far',
+            get: (d) => usd(newestRun(d)?.totals?.cost, fmtCost),
+        },
+        wfRuns: {
+            topic: 'workflow',
+            doc: 'how many workflows are running at once, when it is more than one',
+            get: (d) => {
+                const n = ((d.workflows && d.workflows.active) || []).length;
+                return n > 1 ? String(n) : '';
+            },
+        },
     };
 }
 
@@ -141,6 +193,8 @@ const DEFAULT_SEGMENTS = [
     '▤ {ctx} {ctxTokens}/{ctxWindow}',
     '[~{cost}][ {burn}/h]',
     '[⧉ {peers}][ ▸ {todo}]',
+    // Every part optional, so the whole item disappears while no workflow runs.
+    '[$(gear) {wfName}][ {wfAgents}][ {wfElapsed}][ ×{wfRuns}]',
 ];
 
 // Placeholders alone, groups ignored: this scans for names wherever they sit,

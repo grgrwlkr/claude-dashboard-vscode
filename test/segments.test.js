@@ -115,6 +115,58 @@ test('usedFields reports only what the templates actually ask for', () => {
     assert.deepEqual([...used].sort(), ['jobs', 'weekly']);
 });
 
+test('workflow fields describe the run that is going right now', () => {
+    // The done count is read off `totals.done` rather than counted here: what
+    // makes an agent settled — finished, crashed, or cut off with the run — is
+    // decided in workflows.js and tested there, and a second reading of the
+    // state words in the string builder is how the two drift apart.
+    const wfData = {
+        ...data,
+        workflows: {
+            active: [{
+                runId: 'wf_1', name: 'review-changes', state: 'running',
+                startedAt: Date.now() - 720000,
+                agents: [{ state: 'done' }, { state: 'progress' }, { state: 'progress' }],
+                totals: { agents: 3, done: 1, cost: 1.5 },
+            }],
+        },
+    };
+
+    assert.equal(registry.wfName.get(wfData), 'review-changes');
+    assert.equal(registry.wfAgents.get(wfData), '1/3');
+    assert.equal(registry.wfElapsed.get(wfData), '12m');
+    assert.equal(registry.wfCost.get(wfData), '$1.50');
+    assert.equal(registry.wfRuns.get(wfData), '');
+    assert.equal(registry.wfName.topic, 'workflow');
+});
+
+test('workflow fields say nothing when no run is going', () => {
+    for (const name of ['wfName', 'wfAgents', 'wfElapsed', 'wfCost', 'wfRuns']) {
+        assert.equal(registry[name].get({ workflows: { active: [] } }), '');
+        assert.equal(registry[name].get({}), '');
+    }
+});
+
+test('a run with no done count of its own says nothing rather than "undefined/3"', () => {
+    const run = { name: 'x', agents: [{}, {}], totals: { agents: 2 }, startedAt: Date.now() };
+    assert.equal(registry.wfAgents.get({ workflows: { active: [run] } }), '');
+});
+
+test('the workflow segment hides itself with nothing to report', () => {
+    const template = seg.DEFAULT_SEGMENTS[4];
+    assert.equal(seg.renderSegment(template, { workflows: { active: [] } }, registry).visible, false);
+});
+
+test('the run to talk about is the one that started last', () => {
+    const run = (name, ago) => ({
+        name, state: 'running', agents: [], totals: { agents: 0, done: 0 },
+        startedAt: Date.now() - ago,
+    });
+    const active = [run('older', 600000), run('newest', 5000), run('old', 60000)];
+    assert.equal(registry.wfName.get({ workflows: { active } }), 'newest');
+    assert.equal(registry.wfRuns.get({ workflows: { active } }), '3');
+});
+
 test('zero and negative readings count as nothing to say', () => {
     const quiet = { ...data, stats: { cost: 0, burn: -1, apiPct: -1, added: 0, removed: 0, messages: 0, durationMs: 0 } };
     assert.equal(registry.cost.get(quiet), '');
