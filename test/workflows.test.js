@@ -903,3 +903,39 @@ test('withCost prices a live agent from what grew since it last looked', () => t
     assert.equal(grown.agents[0].tokens, first.agents[0].tokens * 2, 'only the new reply is added');
     assert.ok(grown.totals.cost > first.totals.cost);
 }));
+
+// Size answers how much has been appended; it cannot answer whether this is the
+// same file. A transcript replaced by another one at least as long would be read
+// from the middle of a text whose beginning nobody counted — measured at
+// $0.02565 against the $0.03765 the file actually holds.
+test('accrue starts over when the path stopped pointing at the file it read', () => tree((t) => {
+    const file = path.join(t.root, 'agent-swap.jsonl');
+    const reply = (out) => JSON.stringify({
+        type: 'assistant', timestamp: '2026-08-09T10:00:00Z',
+        message: { model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: out }, content: [] },
+    });
+
+    // Replaced in place by a longer file: the inode does not change and neither
+    // does the direction of the size, so only the text itself gives it away.
+    fs.writeFileSync(file, `${reply(1000)}\n`);
+    const half = wf.accrue(file, null);
+    fs.writeFileSync(file, `${reply(2000)}\n${reply(3000)}\n`);
+    assert.deepEqual(wf.accrue(file, half), wf.accrue(file, null), 'counted whole, not from the middle');
+
+    // Replaced by a file of exactly the same length: nothing grew, so without a
+    // second signal nothing would be read at all.
+    const now = wf.accrue(file, null);
+    fs.writeFileSync(file, `${reply(2000)}\n${reply(9000)}\n`);
+    const after = wf.accrue(file, now);
+    assert.equal(after.size, fs.statSync(file).size);
+    assert.deepEqual(after, wf.accrue(file, null));
+    assert.notEqual(after.tokens, now.tokens, 'the swap is noticed at all');
+
+    // Replaced by a shorter one, and by a different inode: both still restart.
+    fs.writeFileSync(file, `${reply(10)}\n`);
+    assert.deepEqual(wf.accrue(file, after), wf.accrue(file, null));
+    const swap = path.join(t.root, 'agent-other.jsonl');
+    fs.writeFileSync(swap, `${reply(4000)}\n${reply(4000)}\n`);
+    fs.renameSync(swap, file);
+    assert.deepEqual(wf.accrue(file, wf.accrue(file, null)), wf.accrue(file, null));
+}));

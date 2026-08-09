@@ -268,3 +268,20 @@ test('dayKey uses local dates, so a day boundary is the user\'s midnight', () =>
     const almostMidnight = new Date(2026, 7, 8, 23, 59, 0).getTime();
     assert.equal(ix.dayKey(almostMidnight), '2026-08-08');
 });
+
+// The index is 5.6 MB on this machine and parsing it is ~40 ms, while the file
+// changes only when the dashboard rebuilds it. A caller on a repeating tick asks
+// for it by name and gets the previous parse back until the file itself moves —
+// deciding that here rather than in extension.js, which touches no disk.
+test('freshIndex parses index.json again only when the file has moved', () => tree(({ store }) => {
+    const first = ix.freshIndex(store);
+    assert.deepEqual(first.files, {}, 'nothing built yet reads as an empty index');
+    first.__mark = 'kept';
+    assert.equal(ix.freshIndex(store).__mark, 'kept', 'the same parse comes back');
+
+    ix.saveIndex(store, { version: ix.INDEX_VERSION, files: {} });
+    const second = ix.freshIndex(store);
+    assert.equal(second.__mark, undefined, 'a file that moved is parsed again');
+    second.__mark = 'again';
+    assert.equal(ix.freshIndex(store).__mark, 'again');
+}));

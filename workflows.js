@@ -691,9 +691,35 @@ function costIndex(index) {
     return byAgent;
 }
 
-// What has been counted in one transcript so far: how far it was read, and the
-// money and tokens found up to there.
-const NOTHING_READ = { size: 0, cost: 0, tokens: 0 };
+// What has been counted in one transcript so far: how far it was read, which
+// file that was, the last stretch of what was counted, and the money and tokens
+// found up to there.
+const NOTHING_READ = { size: 0, mtime: 0, ino: 0, edge: '', cost: 0, tokens: 0 };
+
+// How much of the counted region is re-read to prove it is still the same text.
+// A file rewritten in place and left longer passes every test `stat` can make —
+// same inode, same direction of growth — and its bytes are the only witness
+// left. Sixty-four of them are one read of nothing, and two transcripts that
+// agree over the last sixty-four bytes before an identical offset are not
+// something this format produces.
+const EDGE_BYTES = 64;
+
+function edgeOf(file, size) {
+    const back = Math.min(EDGE_BYTES, size);
+    return back > 0 ? readSlice(file, size - back, size) : '';
+}
+
+// Is what was counted still describing the file at this path? Size answers how
+// much has been appended and nothing else: a transcript replaced by another one
+// at least as long would be read from the middle of a text whose beginning
+// nobody counted. The inode catches a file swapped in under the name, and the
+// mtime catches the case both of those miss — a rewrite in place that lands at
+// exactly the same length, where nothing grew and so nothing would be read.
+function sameFile(prev, st) {
+    if (!prev || prev.size > st.size) return false;
+    if (prev.ino !== st.ino) return false;
+    return prev.size < st.size || prev.mtime === st.mtimeMs;
+}
 
 /**
  * Add up what a transcript has spent since it was last looked at. A transcript
@@ -710,13 +736,25 @@ function accrue(file, prev = null) {
     const st = statOf(file);
     // Nothing to read from, and nothing to correct: what was counted stays.
     if (!st) return prev || NOTHING_READ;
-    // A file smaller than what was already read is not the file that was read —
-    // a client that rewrote or replaced it starts the count over, because adding
+    // Anything that is not the same file starts the count over, because adding
     // to a total whose records are gone is adding to nothing.
-    const carried = prev && prev.size <= st.size ? prev : NOTHING_READ;
+    let carried = sameFile(prev, st) ? prev : NOTHING_READ;
     if (carried.size === st.size) return carried;
 
-    const text = readSlice(file, carried.size, st.size);
+    // The read starts a little before the boundary, on the stretch that was
+    // counted last time: if it does not come back word for word, this is not the
+    // text that was counted, whatever its size and its inode say, and the whole
+    // file is counted afresh.
+    const back = Math.min(EDGE_BYTES, carried.size);
+    let text = readSlice(file, carried.size - back, st.size);
+    if (back > 0) {
+        if (text.startsWith(carried.edge)) text = text.slice(carried.edge.length);
+        else {
+            carried = NOTHING_READ;
+            text = readSlice(file, 0, st.size);
+        }
+    }
+
     // The read ends wherever the file happened to end, which is rarely a line
     // boundary: the last record may be half written. Everything up to the final
     // newline is whole, and the size is remembered up to exactly there — so the
@@ -738,7 +776,18 @@ function accrue(file, prev = null) {
         tokens += (usage.input_tokens || 0) + (usage.output_tokens || 0)
             + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
     }
-    return { size: carried.size + Buffer.byteLength(whole, 'utf8') + 1, cost, tokens };
+    const size = carried.size + Buffer.byteLength(whole, 'utf8') + 1;
+    return {
+        size,
+        // Recorded from the stat this read was planned against, not from a
+        // second one: the file may have grown again while it was being read,
+        // and claiming that mtime would skip whatever arrived in between.
+        mtime: st.mtimeMs,
+        ino: st.ino,
+        edge: edgeOf(file, size),
+        cost,
+        tokens,
+    };
 }
 
 // Which record gets to claim a shared row first. Two records can carry one run

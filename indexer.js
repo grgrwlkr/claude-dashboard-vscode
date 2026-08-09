@@ -462,6 +462,26 @@ function loadIndex(storageDir) {
     return { version: INDEX_VERSION, files: {} };
 }
 
+// The last parse of each storage directory, and the mtime it came from.
+const lastParse = new Map();
+
+/**
+ * The index on disk, parsed again only when the file behind it has moved. The
+ * same object comes back until it does, so a caller on a repeating tick can ask
+ * every time: it is 5.6 MB on this machine and ~40 ms to parse, while the file
+ * itself changes only when the dashboard rebuilds it. Deciding that here is what
+ * keeps the reading of it — and the path it lives at — inside this module.
+ */
+function freshIndex(storageDir) {
+    let at = 0;
+    try { at = fs.statSync(indexPath(storageDir)).mtimeMs; } catch { /* not built yet */ }
+    const seen = lastParse.get(storageDir);
+    if (seen && seen.at === at) return seen.index;
+    const index = loadIndex(storageDir);
+    lastParse.set(storageDir, { at, index });
+    return index;
+}
+
 function saveIndex(storageDir, index) {
     try {
         fs.mkdirSync(storageDir, { recursive: true });
@@ -584,7 +604,7 @@ function summarize(index) {
 
 module.exports = {
     PROJECTS, INDEX_VERSION, SUBAGENT_RE, INTERESTING,
-    describeFile, projectName, indexFile, walk, indexPath, loadIndex, saveIndex, refreshIndex,
+    describeFile, projectName, indexFile, walk, loadIndex, freshIndex, saveIndex, refreshIndex,
     summarize, dayKey, bucket, emptyAgg, emptyFriction, effortKey, splitEffort,
     promptText, tallyWords, trimWords, lenBucket, LEN_BUCKETS,
 };

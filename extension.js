@@ -1,5 +1,4 @@
 const vscode = require('vscode');
-const fs = require('fs');
 const u = require('./usage');
 const s = require('./session');
 const ix = require('./indexer');
@@ -418,17 +417,10 @@ function knownAgents(state) {
 
 // The index prices workflow agents that have stopped. It is read here and never
 // built — building it is a seconds-long walk that belongs to the dashboard's
-// progress notification — and it is re-read only when it has actually changed:
-// parsing it is ~40 ms over 5.6 MB on this machine, and the file is rewritten
-// only when the dashboard is opened, not once a minute.
+// progress notification. Whether the file behind it has changed since the last
+// tick is indexer.js's question, not this file's: nothing here touches a disk.
 function indexNow(state) {
-    if (!state.storageDir) return state.index;
-    let mtime = 0;
-    try { mtime = fs.statSync(ix.indexPath(state.storageDir)).mtimeMs; } catch { /* not built yet */ }
-    if (!state.index || mtime !== state.indexAt) {
-        state.index = ix.loadIndex(state.storageDir);
-        state.indexAt = mtime;
-    }
+    if (state.storageDir) state.index = ix.freshIndex(state.storageDir);
     return state.index;
 }
 
@@ -765,10 +757,8 @@ function activate(context) {
         session: null,
         context: null,
         stats: null,
-        // Read from storage on the slow tick, never built here, and re-read only
-        // when the file behind it has changed.
+        // Read from storage on the slow tick, never built here.
         index: null,
-        indexAt: 0,
         workflows: [],
         // Per live agent: what its transcript has cost and how far it was read,
         // so a tick adds up what appeared since instead of reading it all again.
