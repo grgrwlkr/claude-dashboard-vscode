@@ -23,7 +23,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { projectName } = require('./indexer');
+const { projectName, indexFile } = require('./indexer');
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -597,6 +597,129 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() 
     });
 }
 
+// A run's own numbers cannot be priced. `totalTokens` and the `tokens` of a
+// snapshot's agent are lump sums with no input/output/cache-read/cache-write
+// split, and those four are billed at four different rates — any price derived
+// from them would be a guess wearing a dollar sign. The priced records are the
+// `usage` blocks in the transcripts, and the index has already walked every one
+// of them, so a price is looked up there rather than recomputed.
+
+/**
+ * Every workflow agent the index knows, keyed `runId/agentId` — the pair a run
+ * record joins on. The index takes `workflowId` from the run directory's own
+ * name, which is the run id, so the two sides meet without either having to
+ * guess the other's path.
+ *
+ * Two rows can land on one key: one run id can own a directory under two
+ * sessions, and the same agent id could appear beneath both. They are added
+ * rather than overwritten, because the key stands for everything the index
+ * attributes to that agent of that run, and dropping one of them would lose
+ * money that was spent. No pair on this machine does this today.
+ */
+function costIndex(index) {
+    const byAgent = new Map();
+    for (const entry of Object.values((index && index.files) || {})) {
+        // A transcript with nothing in it is stored with no aggregate at all.
+        for (const row of ((entry && entry.agg && entry.agg.sessions) || [])) {
+            if (row.kind !== 'workflow' || !row.workflowId || !row.agentId) continue;
+            const key = `${row.workflowId}/${row.agentId}`;
+            const at = byAgent.get(key) || { cost: 0, tokens: 0, out: 0, msgs: 0 };
+            at.cost += row.cost || 0;
+            at.tokens += row.tokens || 0;
+            at.out += row.out || 0;
+            at.msgs += row.msgs || 0;
+            byAgent.set(key, at);
+        }
+    }
+    return byAgent;
+}
+
+// The index's own arithmetic, run early on a transcript that is still growing.
+// It reads the whole file — the one thing the fast tick must never do — so it
+// happens only when the caller asks for it, from the slow tick.
+function priceLive(runDir, agentId, root) {
+    const agg = indexFile(path.join(runDir, `agent-${agentId}.jsonl`), root);
+    const row = agg && agg.sessions[0];
+    return row ? { cost: row.cost || 0, tokens: row.tokens || 0 } : null;
+}
+
+// Which record gets to claim a shared row first. Two records can carry one run
+// id — two attempts of the same workflow, kept apart on purpose — and the second
+// attempt writes into the first one's directory, so the index files both under
+// one workflow id. One transcript is one payment, so the record holding the
+// directory is asked first: that is where the transcripts physically are.
+// Sorting is stable, so records that are equal here stay in the order they came.
+function claimOrder(runs) {
+    return runs.map((_, i) => i).sort((a, b) => (runs[a].runDir ? 0 : 1) - (runs[b].runDir ? 0 : 1));
+}
+
+// The index refreshes when the dashboard is opened, which can land in the middle
+// of a run: the row it wrote then is a photograph of a file that is still
+// growing. So a run that is going is read from its transcripts when the caller
+// pays for that, and the index answers for everything that has stopped moving.
+function priceOf(run, agent, known, key, live, root) {
+    if (live && run.state === 'running' && run.runDir) {
+        const fresh = priceLive(run.runDir, agent.agentId, root);
+        if (fresh) return fresh;
+    }
+    return known.get(key) || null;
+}
+
+// The client's `tokens` is not a smaller version of ours, it is a different
+// quantity: on this machine it equals the agent's context at its last recorded
+// reply — input plus cache plus that one output — while ours is everything the
+// agent ever spent. Hence 86.1M against 2476.1M over the same 1235 agents, a
+// factor of 29 that is almost entirely cache reads. Putting one in the other's
+// place would understate a run by that factor, so ours goes in `tokens`, theirs
+// is kept beside it under its own name, and neither is ever mixed into the
+// other. `reported` is read first so pricing the same runs twice cannot
+// overwrite the client's number with our own.
+const reportedOf = (x) => x.reportedTokens || x.tokens || 0;
+
+function pricedRun(run, known, claimed, live, root) {
+    let cost = 0;
+    let tokens = 0;
+
+    const agents = run.agents.map((agent) => {
+        const key = `${run.runId}/${agent.agentId}`;
+        // Claimed by an earlier record, so this one is looking at an agent whose
+        // single transcript has already been paid for.
+        const priced = claimed.has(key) ? null : priceOf(run, agent, known, key, live, root);
+        const reportedTokens = reportedOf(agent);
+        if (!priced) return { ...agent, cost: 0, tokens: 0, reportedTokens };
+
+        claimed.add(key);
+        cost += priced.cost;
+        tokens += priced.tokens;
+        return { ...agent, cost: priced.cost, tokens: priced.tokens, reportedTokens };
+    });
+
+    return {
+        ...run,
+        agents,
+        // Every snapshot here has totalTokens exactly equal to the sum of the
+        // agents it lists, so the run's reported figure is a sum of context
+        // sizes — kept whole rather than re-summed from the agents, since a
+        // client that stops agreeing with itself is telling us something.
+        totals: { ...run.totals, cost, tokens, reportedTokens: reportedOf(run.totals) },
+    };
+}
+
+/**
+ * Attach money to every run. Agents that have stopped are looked up in the
+ * index; the agents of a run that is still going are priced from their own
+ * transcripts, but only when `live` is set — that is a full read per agent, and
+ * only the slow tick can afford it. `root` is the tree the index was built over.
+ */
+function withCost(runs, { index = null, live = false, root = PROJECTS } = {}) {
+    const known = costIndex(index);
+    const claimed = new Set();
+    const out = new Array(runs.length);
+    for (const i of claimOrder(runs)) out[i] = pricedRun(runs[i], known, claimed, live, root);
+    return out;
+}
+
 module.exports = {
-    readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived, PROJECTS, RUN_STALE_MS,
+    readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived,
+    costIndex, withCost, PROJECTS, RUN_STALE_MS,
 };

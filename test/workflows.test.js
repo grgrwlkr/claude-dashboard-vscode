@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const wf = require('../workflows');
+const ix = require('../indexer');
 
 // A scratch tree shaped like ~/.claude/projects. Every test that touches disk
 // builds one: the layout is the contract, so a fixture that fakes it flatter
@@ -525,3 +526,177 @@ test('snapshotArrived finds a snapshot that landed in a sibling session', () => 
     writeAt(t, SECOND, 'workflows/wf_sib-1.json', { ...FINAL, runId: 'wf_sib-1' });
     assert.equal(wf.snapshotArrived(run), true);
 }));
+
+// The index the join reads, built over the fixture tree. Its storage goes in a
+// scratch directory of its own: refreshIndex writes index.json, and the tree
+// under test has to stay exactly what the fixture put in it.
+function indexOf(root) {
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-idx-'));
+    try { return ix.refreshIndex(store, { root }).index; } finally {
+        fs.rmSync(store, { recursive: true, force: true });
+    }
+}
+
+test('withCost prices finished agents from the index', () => tree((t) => {
+    runFixture(t, 'wf_paid-1', {
+        final: { ...FINAL, runId: 'wf_paid-1' },
+        agents: { a11111111111111: AGENT_LINES('a1'), a22222222222222: AGENT_LINES('a2') },
+    });
+    const index = indexOf(t.root);
+    const runs = wf.withCost(
+        wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() }),
+        { index },
+    );
+
+    const [run] = runs;
+    assert.ok(run.totals.cost > 0, 'a finished run is priced');
+    assert.ok(run.agents.every((a) => a.cost > 0), 'every agent carries its own price');
+    // The lump totalTokens of the snapshot must never become the token figure:
+    // it has no split, so it cannot be priced, and it counts a different thing
+    // besides. It is not thrown away either — it moves next to ours.
+    assert.notEqual(run.totals.tokens, FINAL.totalTokens);
+    assert.equal(run.totals.reportedTokens, FINAL.totalTokens);
+    assert.equal(run.agents[0].reportedTokens, FINAL.workflowProgress[1].tokens);
+    // Ours and only ours in `tokens`, so the run total is the sum of its agents.
+    assert.equal(run.totals.tokens, run.agents.reduce((a, x) => a + x.tokens, 0));
+    // The counts the scan put there survive the join.
+    assert.equal(run.totals.agents, 2);
+    assert.equal(run.totals.done, 2);
+    // Pricing runs that have already been priced changes nothing — a second
+    // pass must not swallow the client's figure into ours or double the money.
+    assert.deepEqual(wf.withCost(runs, { index })[0], run);
+}));
+
+test('a live run is priced only when the caller asks for it', () => tree((t) => {
+    runFixture(t, 'wf_live-6', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        agents: { a1: AGENT_LINES('a1') },
+    });
+    const runs = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+
+    const cheap = wf.withCost(runs, { index: { files: {} } });
+    assert.equal(cheap[0].agents[0].cost, 0, 'the fast path prices nothing');
+    assert.equal(cheap[0].totals.cost, 0);
+
+    const full = wf.withCost(runs, { index: { files: {} }, live: true, root: t.root });
+    assert.ok(full[0].agents[0].tokens > 0, 'the slow path reads the transcript');
+    assert.ok(full[0].totals.cost > 0, 'and prices what it read');
+}));
+
+// The index is rebuilt when the dashboard is opened, which can happen in the
+// middle of a run: the row it wrote then is a photograph of a file that is still
+// growing. Asked for the live price, the transcript answers — otherwise a
+// running run's cost freezes at whatever it was when the panel was opened.
+test('a running run is priced from its transcript, not from a row written mid-run', () => tree((t) => {
+    runFixture(t, 'wf_stale-1', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        agents: { a1: AGENT_LINES('a1') },
+    });
+    const stale = {
+        files: {
+            '/x.jsonl': {
+                agg: {
+                    sessions: [{
+                        kind: 'workflow', workflowId: 'wf_stale-1', agentId: 'a1', cost: 1e-9, tokens: 1,
+                    }],
+                },
+            },
+        },
+    };
+    const [run] = wf.withCost(
+        wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() }),
+        { index: stale, live: true, root: t.root },
+    );
+
+    assert.ok(run.agents[0].tokens > 1, 'the growing transcript answers, not the stale row');
+    assert.ok(run.totals.cost > 1e-9);
+}));
+
+test('withCost survives an index with no workflow rows', () => tree((t) => {
+    runFixture(t, 'wf_nocost-1', { final: { ...FINAL, runId: 'wf_nocost-1' } });
+    const runs = wf.withCost(wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() }), {});
+
+    assert.equal(runs[0].totals.cost, 0);
+    assert.equal(runs[0].agents[0].cost, 0);
+    // Nothing to price leaves a zero rather than the client's own figure, which
+    // measures the agent's context and not what it spent. The figure itself is
+    // not lost — it moves to the name that says whose it is.
+    assert.equal(runs[0].totals.tokens, 0);
+    assert.equal(runs[0].agents[0].tokens, 0);
+    assert.equal(runs[0].totals.reportedTokens, FINAL.totalTokens);
+    assert.equal(runs[0].agents[0].reportedTokens, FINAL.workflowProgress[1].tokens);
+}));
+
+// wf_00e91f74-a5b on this machine: two snapshots under one run id — killed with
+// 7 agents, completed with 65 — and one run directory between them, because the
+// second attempt wrote into the first one's. The index keys an agent by that
+// directory's name, so an agent listed by both attempts answers to both records;
+// charging it twice would invent money nobody spent. One agent id really is
+// shared there, so this is a live case, not a hypothetical.
+test('an agent listed by two attempts of one run is charged once', () => tree((t) => {
+    const shared = 'a11111111111111';
+    runFixture(t, 'wf_twice-2', {
+        final: { ...FINAL, runId: 'wf_twice-2', status: 'killed' },
+        agents: {
+            [shared]: AGENT_LINES('a1'),
+            a22222222222222: AGENT_LINES('a2'),
+            a33333333333333: AGENT_LINES('a3'),
+        },
+    });
+    // The second attempt lists the shared agent again plus one of its own, and
+    // has no directory: its agents' transcripts are in the first attempt's.
+    writeAt(t, SECOND, 'workflows/wf_twice-2.json', {
+        ...FINAL,
+        runId: 'wf_twice-2',
+        status: 'completed',
+        workflowProgress: [
+            { type: 'workflow_agent', agentId: shared, state: 'done', tokens: 1 },
+            { type: 'workflow_agent', agentId: 'a33333333333333', state: 'done', tokens: 1 },
+        ],
+    });
+
+    const index = indexOf(t.root);
+    const runs = wf.withCost(
+        wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() }),
+        { index },
+    );
+    assert.equal(runs.length, 2);
+
+    // Every transcript paid for once, and only once: equality catches a join
+    // that drops money just as surely as one that counts it twice.
+    const indexed = [...wf.costIndex(index).values()].reduce((a, r) => a + r.cost, 0);
+    assert.ok(indexed > 0);
+    assert.equal(runs.reduce((a, r) => a + r.totals.cost, 0), indexed);
+
+    // The record holding the directory prices what is in it; the other attempt
+    // keeps its own agent and is not charged again for the shared one.
+    const owner = runs.find((r) => r.runDir);
+    const other = runs.find((r) => !r.runDir);
+    assert.ok(owner.agents.every((a) => a.cost > 0));
+    assert.equal(other.agents.find((a) => a.agentId === shared).cost, 0);
+    assert.ok(other.agents.find((a) => a.agentId === 'a33333333333333').cost > 0);
+}));
+
+test('costIndex keys workflow agents by run and agent, and adds up a repeated pair', () => {
+    const row = (over) => ({
+        kind: 'workflow', workflowId: 'wf_1', agentId: 'a1',
+        cost: 1, tokens: 10, out: 2, msgs: 3, ...over,
+    });
+    const index = {
+        files: {
+            '/a.jsonl': { agg: { sessions: [row()] } },
+            '/b.jsonl': { agg: { sessions: [row({ cost: 0.5, tokens: 5, out: 1, msgs: 2 })] } },
+            // A main session and a plain subagent are not workflow agents, and a
+            // transcript with nothing in it is stored with no aggregate at all.
+            '/c.jsonl': { agg: { sessions: [row({ kind: 'main', workflowId: '', agentId: '' })] } },
+            '/d.jsonl': { agg: { sessions: [row({ kind: 'agent', workflowId: '' })] } },
+            '/e.jsonl': { agg: null },
+        },
+    };
+
+    const map = wf.costIndex(index);
+    assert.equal(map.size, 1);
+    assert.deepEqual(map.get('wf_1/a1'), { cost: 1.5, tokens: 15, out: 3, msgs: 5 });
+    assert.equal(wf.costIndex(null).size, 0);
+    assert.equal(wf.costIndex({}).size, 0);
+});
