@@ -233,6 +233,16 @@ function runFixture({ write }, id, { final = null, journal = [], agents = {}, sc
     if (final) write(`workflows/${id}.json`, final);
 }
 
+// The two lines a live agent transcript is read for: the first user record
+// carries the prompt, the newest assistant record the model and the tool.
+const AGENT_LINES = (id) => [
+    JSON.stringify({ type: 'user', promptSource: 'workflow', message: { role: 'user', content: `Задача агента ${id}: проверить фикстуры и вернуть список находок` } }),
+    JSON.stringify({
+        type: 'assistant', timestamp: '2026-08-09T10:00:00Z',
+        message: { model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 100 }, content: [{ type: 'tool_use', id: 't1', name: 'Grep' }] },
+    }),
+];
+
 // The same write, aimed at a second session of the same project: one run leaves
 // its directory under one session id and its snapshot under another, and a
 // fixture that cannot express that cannot test the merge.
@@ -391,3 +401,58 @@ test('outcomeOf calls a working agent inside a run that ended stopped', () => {
     assert.equal(wf.outcomeOf('progress'), 'running');
     assert.equal(wf.outcomeOf('done'), 'done');
 });
+
+test('readLive names the agents a running workflow has on disk', () => tree((t) => {
+    runFixture(t, 'wf_live-2', {
+        journal: [
+            { type: 'started', agentId: 'a1' },
+            { type: 'started', agentId: 'a2' },
+            { type: 'result', agentId: 'a1', result: { ok: true } },
+        ],
+        agents: { a1: AGENT_LINES('a1'), a2: AGENT_LINES('a2') },
+    });
+    const dir = path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_live-2');
+    const live = wf.readLive(dir);
+
+    assert.equal(live.total, 2);
+    assert.equal(live.done, 1);
+    const a2 = live.agents.find((a) => a.agentId === 'a2');
+    assert.equal(a2.state, 'running');
+    assert.equal(a2.model, 'claude-opus-5');
+    assert.equal(a2.lastToolName, 'Grep');
+    assert.equal(a2.agentType, 'workflow-subagent');
+    assert.ok(a2.promptPreview.startsWith('Задача агента a2'));
+    assert.equal(a2.label, '');
+    assert.equal(live.agents.find((a) => a.agentId === 'a1').state, 'done');
+}));
+
+test('readLive degrades on a half-written run directory', () => tree((t) => {
+    runFixture(t, 'wf_live-3', { journal: [{ type: 'started', agentId: 'a1' }] });
+    const dir = path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_live-3');
+    // Journal knows an agent whose transcript has not appeared yet.
+    const live = wf.readLive(dir);
+    assert.equal(live.total, 1);
+    assert.equal(live.agents[0].model, '');
+    assert.equal(wf.readLive(path.join(t.root, 'nope')), null);
+}));
+
+test('scanRuns fills a running workflow with its live agents', () => tree((t) => {
+    runFixture(t, 'wf_live-4', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        agents: { a1: AGENT_LINES('a1') },
+        script: `export const meta = { name: 'demo', phases: [{ title: 'Scan' }] }`,
+    });
+    const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    assert.equal(run.state, 'running');
+    assert.equal(run.agents.length, 1);
+    assert.equal(run.name, 'demo');
+    assert.deepEqual(run.phases, [{ title: 'Scan', detail: '' }]);
+}));
+
+test('snapshotArrived notices a run that just finished', () => tree((t) => {
+    runFixture(t, 'wf_fin-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    assert.equal(wf.snapshotArrived(run), false);
+    t.write('workflows/wf_fin-1.json', { ...FINAL, runId: 'wf_fin-1' });
+    assert.equal(wf.snapshotArrived(run), true);
+}));

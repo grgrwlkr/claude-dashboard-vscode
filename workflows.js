@@ -37,9 +37,9 @@ const PREVIEW_CHARS = 400;
 // 401-character preview exactly as it was and marks anything we cut ourselves.
 // The marker is the point: a preview is read as prose, and prose broken off
 // mid-word without one reads as something the agent actually wrote.
-function clip(text) {
+function clip(text, max = PREVIEW_CHARS) {
     const s = text || '';
-    return s.length > PREVIEW_CHARS ? `${s.slice(0, PREVIEW_CHARS)}…` : s;
+    return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
 function readJson(file) {
@@ -183,6 +183,161 @@ function phasesFromScript(text) {
         out.push({ title: title[3], detail: detail ? detail[3] : '' });
     }
     return out;
+}
+
+// How much of an agent transcript is read to describe what it is doing. The last
+// record carries the model and the tool; the first carries the prompt. Reading
+// whole transcripts here would mean megabytes on every tick — the largest one on
+// this machine is 8.4 MB, and a single run holds 208 of them — while the tick
+// that draws the tree runs every ten seconds.
+const TAIL_BYTES = 64 * 1024;
+const HEAD_BYTES = 8 * 1024;
+
+// A live agent's prompt is the whole brief it was dispatched with, not the
+// client's own capped preview, so it is cut far shorter than a snapshot's: it
+// stands in for a label in one row, it is not text anyone reads here.
+const LIVE_PREVIEW_CHARS = 160;
+
+// The journal is a roll call, but every `result` entry carries the agent's whole
+// return value, so it grows with the work: 557 KB is the largest here. A run that
+// outgrows this cap loses the tail of the roll call, which leaves agents reading
+// as still working — the roster itself survives, since a transcript on disk
+// counts as an agent whether or not the journal got that far.
+const JOURNAL_BYTES = 1024 * 1024;
+
+// One end of a file, without reading the rest of it. A cut lands mid-record at
+// both ends, and that record is dropped rather than repaired: half a line of JSON
+// is not evidence of anything.
+function readChunk(file, { fromEnd = false, length = TAIL_BYTES } = {}) {
+    const st = statOf(file);
+    if (!st || st.size === 0) return '';
+    const size = Math.min(length, st.size);
+    const start = fromEnd ? st.size - size : 0;
+    const buf = Buffer.alloc(size);
+    let fd;
+    try {
+        fd = fs.openSync(file, 'r');
+        fs.readSync(fd, buf, 0, size, start);
+    } catch { return ''; } finally {
+        if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already gone */ } }
+    }
+    return buf.toString('utf8');
+}
+
+function parsedLines(text) {
+    const out = [];
+    for (const line of text.split('\n')) {
+        if (line.length < 2 || line[0] !== '{') continue;
+        try { out.push(JSON.parse(line)); } catch { /* a chunk boundary cut this one */ }
+    }
+    return out;
+}
+
+// The first thing said to an agent, which is the only description a live agent
+// has: its label exists solely in the runtime and reaches disk with the final
+// snapshot, long after anyone wanted to know what this agent is for.
+function promptOf(file) {
+    for (const r of parsedLines(readChunk(file, { length: HEAD_BYTES }))) {
+        if (r.type !== 'user' || !r.message) continue;
+        const c = r.message.content;
+        const text = typeof c === 'string' ? c
+            : (Array.isArray(c) ? c.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ') : '');
+        if (text) return clip(text, LIVE_PREVIEW_CHARS);
+    }
+    return '';
+}
+
+// Model and current tool, from the newest complete record in the tail.
+function tailOf(file) {
+    const records = parsedLines(readChunk(file, { fromEnd: true }));
+    const out = { model: '', lastToolName: '' };
+    for (const r of records) {
+        if (r.type !== 'assistant' || !r.message) continue;
+        if (r.message.model) out.model = r.message.model;
+        for (const block of (Array.isArray(r.message.content) ? r.message.content : [])) {
+            if (block && (block.type === 'tool_use' || block.type === 'server_tool_use')) {
+                out.lastToolName = block.name || out.lastToolName;
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * What a run looks like while it is still going. The journal is the roster —
+ * every agent that started and every one that returned — and the transcripts
+ * fill in what each of them is doing right now. Null when the directory holds
+ * nothing at all, which is also what a path that does not exist looks like.
+ */
+function readLive(runDir) {
+    const entries = listDir(runDir);
+    if (entries.length === 0) return null;
+
+    const started = [];
+    const done = new Set();
+    for (const r of parsedLines(readChunk(path.join(runDir, 'journal.jsonl'), { length: JOURNAL_BYTES }))) {
+        if (!r.agentId) continue;
+        if (r.type === 'started' && !started.includes(r.agentId)) started.push(r.agentId);
+        if (r.type === 'result') done.add(r.agentId);
+    }
+    // A transcript can exist for an agent the journal has not recorded yet.
+    for (const entry of entries) {
+        const id = (/^agent-(.+)\.jsonl$/.exec(entry.name) || [])[1];
+        if (id && !started.includes(id)) started.push(id);
+    }
+
+    const agents = started.map((agentId) => {
+        const file = path.join(runDir, `agent-${agentId}.jsonl`);
+        const meta = readJson(path.join(runDir, `agent-${agentId}.meta.json`)) || {};
+        const st = statOf(file);
+        const tail = st ? tailOf(file) : { model: '', lastToolName: '' };
+        return {
+            agentId,
+            // The runtime knows the label and the phase; the disk does not learn
+            // either until the snapshot is written, so both stay empty rather
+            // than being guessed from the prompt.
+            label: '',
+            phase: '',
+            model: tail.model,
+            state: done.has(agentId) ? 'done' : 'running',
+            lastToolName: tail.lastToolName,
+            promptPreview: st ? promptOf(file) : '',
+            // The same keys a snapshot's agent has, so one renderer draws both.
+            // The counts are not among them: totalling a running transcript means
+            // reading all of it, which is the one thing this must not do.
+            resultPreview: '',
+            agentType: meta.agentType || '',
+            tokens: 0,
+            toolCalls: 0,
+            durationMs: st ? Math.max(0, st.mtimeMs - (st.birthtimeMs || st.mtimeMs)) : 0,
+            lastActivity: st ? st.mtimeMs : 0,
+        };
+    });
+
+    return { agents, done: done.size, total: started.length };
+}
+
+// "review-changes-wf_a01fe790-8b6.js" → "review-changes".
+function nameFromScriptPath(scriptPath) {
+    if (!scriptPath) return '';
+    return path.basename(scriptPath, '.js').replace(/-wf_[A-Za-z0-9-]+$/, '');
+}
+
+// Where a run's snapshot will appear: two levels up from the run directory, in
+// the session's own workflows folder. A running run has no jsonPath yet — that
+// field is filled by the scan, and the scan is exactly what the fast tick must
+// not do — so the path is derived instead of looked up.
+function snapshotPath(run) {
+    if (run.jsonPath) return run.jsonPath;
+    if (!run.runDir) return '';
+    const session = path.dirname(path.dirname(path.dirname(run.runDir)));
+    return path.join(session, 'workflows', `${run.runId}.json`);
+}
+
+/** Has the run that was going written its snapshot yet? */
+function snapshotArrived(run) {
+    const file = snapshotPath(run);
+    return Boolean(file && statOf(file));
 }
 
 // How long a run directory may sit untouched before it stops counting as live.
@@ -353,6 +508,14 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() 
         const state = final ? 'finished'
             : (fresh && run.sessions.some((s) => liveSessions.has(s)) ? 'running' : 'abandoned');
 
+        // The two places a run without a snapshot describes itself: the roster
+        // and the transcripts for its agents, the saved script for its name and
+        // its phases. Only a running run pays for the first — it opens a file per
+        // agent, 208 of them on the biggest run here — while the second is one
+        // bounded read, so an abandoned run still gets a name instead of a blank.
+        const live = state === 'running' && run.runDir ? readLive(run.runDir) : null;
+        const script = !final && run.scriptPath ? readChunk(run.scriptPath, { length: HEAD_BYTES }) : '';
+
         return {
             ...run,
             state,
@@ -362,16 +525,25 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() 
             startedAt: run.runDir ? birthOf(run.runDir) : 0,
             endedAt: written,
             lastActivity: Math.max(touched, written),
-            name: final ? final.name : '',
+            // A live run has no name of its own on disk; the script file carries
+            // it in front of the run id, which is the only place it exists before
+            // the snapshot is written.
+            name: final ? final.name : nameFromScriptPath(run.scriptPath),
             status: final ? final.status : '',
             durationMs: final ? final.durationMs : 0,
-            phases: final ? final.phases : [],
-            agents: final ? final.agents : [],
-            // Same shape whether or not a snapshot exists, so a caller reading a
-            // total off a running run gets a zero rather than undefined.
-            totals: final ? final.totals : { agents: 0, reported: 0, tokens: 0, toolCalls: 0 },
+            phases: final ? final.phases : phasesFromScript(script),
+            agents: final ? final.agents : (live ? live.agents : []),
+            // The four counts keep their shape whether or not a snapshot exists,
+            // so a caller reading a total off a running run gets a zero rather
+            // than undefined. `done` is the exception and only a running run has
+            // it: a finished one carries each agent's own state instead, and
+            // counting that here would be a second answer to the same question.
+            totals: final ? final.totals
+                : { agents: live ? live.total : 0, reported: 0, tokens: 0, toolCalls: 0, done: live ? live.done : 0 },
         };
     });
 }
 
-module.exports = { readFinal, phasesFromScript, scanRuns, outcomeOf, PROJECTS, RUN_STALE_MS };
+module.exports = {
+    readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived, PROJECTS, RUN_STALE_MS,
+};
