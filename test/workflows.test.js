@@ -43,7 +43,7 @@ const FINAL = {
         },
         {
             type: 'workflow_agent', index: 2, label: 'review:perf', phaseIndex: 1, phaseTitle: 'Review',
-            agentId: 'a22222222222222', model: 'claude-opus-5', state: 'failed',
+            agentId: 'a22222222222222', model: 'claude-opus-5', state: 'error',
             tokens: 123331, toolCalls: 50, durationMs: 44000,
         },
     ],
@@ -61,7 +61,7 @@ test('readFinal reads the run, its phases and its agents', () => tree(({ write }
     assert.equal(final.agents[0].label, 'review:bugs');
     assert.equal(final.agents[0].phase, 'Review');
     assert.equal(final.agents[0].state, 'done');
-    assert.equal(final.agents[1].state, 'failed');
+    assert.equal(final.agents[1].state, 'error');
     assert.equal(final.totals.agents, 2);
     assert.equal(final.totals.toolCalls, 309);
 }));
@@ -74,6 +74,24 @@ test('readFinal survives a truncated or foreign json', () => tree(({ write }) =>
     assert.equal(thin.status, 'killed');
     assert.deepEqual(thin.agents, []);
     assert.equal(thin.name, '');
+}));
+
+// A killed run counts agents it queued but never named: on live data one snapshot
+// claims 74 against 13 listed entries. The list is what a panel can show, so the
+// client's own count is kept beside it rather than on top of it.
+test('readFinal counts the agents it listed, and keeps the client count apart', () => tree(({ write }) => {
+    const final = wf.readFinal(write('workflows/wf_killed-1.json', {
+        runId: 'wf_killed-1',
+        status: 'killed',
+        agentCount: 74,
+        workflowProgress: [
+            { type: 'workflow_agent', agentId: 'b1', label: 'scan:1', state: 'done' },
+            { type: 'workflow_agent', label: 'queued, never started', state: 'start' },
+        ],
+    }));
+
+    assert.equal(final.totals.agents, 1);
+    assert.equal(final.totals.reported, 74);
 }));
 
 test('readFinal ignores an agent entry with no id', () => tree(({ write }) => {
