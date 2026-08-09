@@ -6,6 +6,7 @@ const hist = require('./history');
 const sys = require('./system');
 const seg = require('./segments');
 const dashboard = require('./dashboard');
+const wfm = require('./workflows');
 const { fmtCost, ratesFor } = require('./pricing');
 
 // Complaining about the cache is only meaningful once refreshes have failed for
@@ -179,6 +180,57 @@ function workTooltip(state) {
     return md.value;
 }
 
+// What an agent is doing, as one icon. Every word outcomeOf can answer with is
+// here, including the two a live run cannot produce today: an unmapped one would
+// print "undefined" in the cell, and a cell is read as a fact about the agent.
+const AGENT_ICON = {
+    running: '$(sync)',
+    done: '$(check)',
+    failed: '$(error)',
+    stopped: '$(circle-slash)',
+    unknown: '$(question)',
+};
+
+// A table cell holds one line and no pipes, and an agent's prompt is whatever
+// someone typed — a newline in it would end the row and a pipe would split it.
+function cell(text) {
+    return String(text || '').replace(/\s+/g, ' ').replace(/\|/g, '\\|');
+}
+
+function workflowTooltip(state) {
+    const active = (state.data.workflows && state.data.workflows.active) || [];
+    if (active.length === 0) return '';
+    const md = new Markdown();
+    for (const run of active) {
+        md.appendMarkdown(`### ${run.name || run.runId}\n\n`);
+        // Grouped by phase, because a phase is what the run's author wrote it in
+        // terms of: a flat list of fourteen agents does not say which stage the
+        // run is sitting in. A live run knows no phases yet — the client only
+        // writes them with the final snapshot — so they all fall in one group.
+        const byPhase = new Map();
+        for (const agent of run.agents) {
+            const key = agent.phase || '';
+            if (!byPhase.has(key)) byPhase.set(key, []);
+            byPhase.get(key).push(agent);
+        }
+        for (const [phase, agents] of byPhase) {
+            // The blank line is what ends the table above: a heading written
+            // straight after the last row is read as part of it.
+            if (phase) md.appendMarkdown(`\n**${phase}**\n\n`);
+            md.appendMarkdown(table(agents.map((a) => [
+                AGENT_ICON[wfm.outcomeOf(a.state, run.state)] || AGENT_ICON.unknown,
+                // A live agent has no label — it exists only in the runtime — so
+                // the first thing it was told stands in for one.
+                cell(a.label || (a.promptPreview || '').slice(0, 40) || a.agentId.slice(0, 8)),
+                short(a.model),
+                a.tokens ? tok(a.tokens) : '',
+            ]), ['', 'agent', 'model', 'tokens']));
+        }
+        if (run.totals.cost > 0) md.appendMarkdown(`\n_~${fmtCost(run.totals.cost)} so far_\n`);
+    }
+    return md.value;
+}
+
 // One builder per topic, so a segment that mixes topics gets both sections
 // joined rather than a tooltip about half of what it shows.
 const TOOLTIPS = {
@@ -190,6 +242,10 @@ const TOOLTIPS = {
     context: contextTooltip,
     money: moneyTooltip,
     work: workTooltip,
+    // Both maps are looked up by topic on every draw, so an entry missing here
+    // is not a segment without a tooltip — it is a throw inside render() that
+    // hides the whole bar, the moment the first workflow starts.
+    workflow: workflowTooltip,
 };
 
 // The percentage a topic colours by. A segment showing both a limit and a
@@ -200,6 +256,9 @@ const COLOUR_BY = {
     context: (d) => (d.ctx ? d.ctx.pct : -1),
     money: () => -1,
     work: () => -1,
+    // A run in flight is not a threshold: there is nothing here to be warned
+    // about, and painting the bar red for one would spend the alarm on news.
+    workflow: () => -1,
 };
 
 function render(state) {
@@ -233,6 +292,10 @@ const CONTEXT_FIELDS = ['ctx', 'ctxTokens', 'ctxWindow', 'ctxCache', 'model', 'e
 function collectFast(state) {
     const d = state.data;
     d.now = Math.floor(Date.now() / 1000);
+    // Ahead of the session guard below, and outside state.needs: a workflow is a
+    // fact about the machine, not about this window's session — a window with no
+    // Claude session in it still has a tree and a dashboard tab to fill.
+    collectWorkflowsFast(state);
     const own = state.session;
     if (!own || !state.workspace) {
         d.ctx = null; d.peers = null; d.todo = null;
@@ -295,6 +358,73 @@ function collectSlow(state) {
     if (state.needs.has('jobs') || state.needs.has('sessions') || state.needs.has('openTasks')) {
         d.machine = machineCounters(state.needs);
     }
+
+    collectWorkflowsSlow(state);
+}
+
+// Which runs exist at all, and what they cost. This walks every project
+// directory, so it belongs on the slow tick beside the other expensive reads —
+// and it prices the agents of a live run from their transcripts, which is a full
+// read of each. Unlike everything above it, it does not consult state.needs: the
+// tree and the dashboard want these runs whatever the bar happens to mention.
+function collectWorkflowsSlow(state) {
+    try {
+        const liveSessions = new Set(sys.live().sessions.filter((x) => x.alive).map((x) => x.id));
+        // The index is what prices a workflow's agents. It is read here and
+        // never built: building it is a seconds-long walk that belongs to the
+        // dashboard's progress notification, not to a status-bar tick.
+        if (state.storageDir) state.index = ix.loadIndex(state.storageDir);
+        const root = state.projectsRoot;
+        const runs = wfm.withCost(wfm.scanRuns({ root, liveSessions }), { index: state.index, live: true, root });
+        state.workflows = runs;
+        state.data.workflows = { runs, active: runs.filter((r) => r.state === 'running') };
+    } catch {
+        // A half-readable tree must not take the bar down with it: the previous
+        // reading stays until a tick manages to replace it.
+        state.data.workflows = state.data.workflows || { runs: [], active: [] };
+    }
+}
+
+// Only the runs already known to be going: their journal and the tails of their
+// agents' transcripts, nothing else. This must never call scanRuns — that walks
+// every project directory and parses every snapshot on the machine, which is the
+// sweep the slow tick owns. What is left is bounded by the number of live agents
+// rather than by the history of the machine, which is what makes it affordable
+// every ten seconds — and a panel refreshed once a minute is not a live panel.
+//
+// The price is that a workflow launched a moment ago reaches the bar only on the
+// next slow tick, up to a minute later. Discovery is rare; watching a run that
+// is already going is the part that has to feel immediate.
+function collectWorkflowsFast(state) {
+    const runs = (state.data.workflows && state.data.workflows.runs) || [];
+    if (!runs.some((r) => r.state === 'running')) return;
+    try {
+        const next = runs.map((run) => {
+            if (run.state !== 'running' || !run.runDir) return run;
+            // A snapshot appearing is how a run announces it is over. Looking for
+            // it lives in workflows.js, so this file keeps its hands off the disk.
+            if (wfm.snapshotArrived(run)) return { ...run, state: 'finished' };
+            const live = wfm.readLive(run.runDir);
+            if (!live) return run;
+            // What an agent has cost is settled by the slow tick, which reads its
+            // whole transcript; this one only re-reads what it is doing. The
+            // figures are carried across rather than dropped, or the money
+            // columns empty out for the fifty seconds between slow ticks. An
+            // agent that appeared since then has none yet, which is the truth.
+            const priced = new Map(run.agents.map((a) => [a.agentId, a]));
+            const agents = live.agents.map((a) => {
+                const was = priced.get(a.agentId);
+                return was ? { ...a, cost: was.cost || 0, tokens: was.tokens || 0 } : a;
+            });
+            return {
+                ...run,
+                agents,
+                totals: { ...run.totals, agents: live.total, done: live.done },
+            };
+        });
+        state.workflows = next;
+        state.data.workflows = { runs: next, active: next.filter((r) => r.state === 'running') };
+    } catch { /* keep the previous reading */ }
 }
 
 // Machine-wide counters, read straight from ~/.claude. Sizes are skipped — a
@@ -559,9 +689,17 @@ function activate(context) {
         // owns. ~/.claude belongs to Claude Code; reading it is one thing,
         // leaving files of ours in it is another.
         storageDir: context.globalStorageUri.fsPath,
+        // The tree of runs is read from a field rather than from the constant in
+        // workflows.js so a test can point the whole collector at a scratch
+        // directory — without it every test that calls activate() walks the real
+        // ~/.claude and reads whatever is running on the machine at the time.
+        projectsRoot: process.env.CLAUDE_STATUSLINE_PROJECTS || wfm.PROJECTS,
         session: null,
         context: null,
         stats: null,
+        // Read from storage on the slow tick, never built here.
+        index: null,
+        workflows: [],
         todayUsd: 0,
         compactPct: -1,
         settings: { outputStyle: '', advisor: '', model: '' },
@@ -636,4 +774,7 @@ async function showPlaceholders(state) {
 
 function deactivate() {}
 
-module.exports = { activate, deactivate };
+// The draw step and the fast collector on their own: a test can fill the state
+// by hand and check what reaches the bar, or drive one refresh of a running
+// workflow, without waiting out a ten-second interval.
+module.exports = { activate, deactivate, __render: render, __collectWorkflowsFast: collectWorkflowsFast };
