@@ -216,3 +216,87 @@ test('phasesFromScript drops the whole list when a value contains a bracket', ()
 
     assert.deepEqual(wf.phasesFromScript(script), []);
 });
+
+// Run directories and snapshots in one call, so a fixture reads like the tree
+// it imitates: a finished run has both, a live one has only the directory.
+function runFixture({ write }, id, { final = null, journal = [], agents = {}, script = '' } = {}) {
+    for (const [agentId, lines] of Object.entries(agents)) {
+        write(`subagents/workflows/${id}/agent-${agentId}.jsonl`, lines.join('\n') + '\n');
+        write(`subagents/workflows/${id}/agent-${agentId}.meta.json`,
+            { agentType: 'workflow-subagent', spawnDepth: 1 });
+    }
+    if (journal.length) {
+        write(`subagents/workflows/${id}/journal.jsonl`,
+            journal.map((j) => JSON.stringify(j)).join('\n') + '\n');
+    }
+    if (script) write(`workflows/scripts/demo-${id}.js`, script);
+    if (final) write(`workflows/${id}.json`, final);
+}
+
+test('scanRuns separates a finished run from a live one and a dead one', () => tree((t) => {
+    runFixture(t, 'wf_done-1', { final: { ...FINAL, runId: 'wf_done-1' }, journal: [{ type: 'started', agentId: 'a1' }] });
+    runFixture(t, 'wf_live-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    runFixture(t, 'wf_dead-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+
+    // The abandoned one has not been touched in an hour; the live one just was.
+    const old = new Date(Date.now() - 3600 * 1000);
+    const dead = path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_dead-1');
+    for (const f of fs.readdirSync(dead)) fs.utimesSync(path.join(dead, f), old, old);
+    fs.utimesSync(dead, old, old);
+
+    const runs = wf.scanRuns({
+        root: t.root,
+        liveSessions: new Set([t.session]),
+        now: Date.now(),
+    });
+    const by = Object.fromEntries(runs.map((r) => [r.runId, r]));
+
+    assert.equal(by['wf_done-1'].state, 'finished');
+    assert.equal(by['wf_done-1'].name, 'review-changes');
+    assert.equal(by['wf_done-1'].agents.length, 2);
+    assert.equal(by['wf_live-1'].state, 'running');
+    assert.equal(by['wf_dead-1'].state, 'abandoned');
+    assert.equal(by['wf_live-1'].project, 'demo');
+    assert.equal(by['wf_live-1'].sessionId, t.session);
+}));
+
+test('outcomeOf reads the states the client actually writes', () => {
+    // Observed across 1356 live agent records: done, start, progress, error.
+    // "failed" never appears — an icon table keyed on it would paint a crashed
+    // agent as a success, which is the one mistake this function exists to stop.
+    assert.equal(wf.outcomeOf('done'), 'done');
+    assert.equal(wf.outcomeOf('error'), 'failed');
+    assert.equal(wf.outcomeOf('failed'), 'failed');
+    assert.equal(wf.outcomeOf('start'), 'running');
+    assert.equal(wf.outcomeOf('progress'), 'running');
+    assert.equal(wf.outcomeOf('running'), 'running');
+    assert.equal(wf.outcomeOf(''), 'unknown');
+    assert.equal(wf.outcomeOf('some-future-word'), 'unknown');
+});
+
+test('a fresh run whose session is gone is abandoned, not running', () => tree((t) => {
+    runFixture(t, 'wf_orphan-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    const runs = wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() });
+    assert.equal(runs[0].state, 'abandoned');
+}));
+
+test('a snapshot with no run directory is still listed', () => tree((t) => {
+    // Seen on the real machine: 73 snapshots against 69 run directories.
+    t.write('workflows/wf_lonely-1.json', { ...FINAL, runId: 'wf_lonely-1' });
+    const runs = wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() });
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].state, 'finished');
+    assert.equal(runs[0].runDir, '');
+}));
+
+test('scanRuns takes the run start from the directory, never from startTime', () => tree((t) => {
+    // startTime here is four hours off, the way it is on a third of the real
+    // snapshots. The directory is the only honest clock.
+    runFixture(t, 'wf_clock-1', {
+        final: { ...FINAL, runId: 'wf_clock-1', startTime: Date.now() - 4 * 3600 * 1000 },
+        journal: [{ type: 'started', agentId: 'a1' }],
+    });
+    const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() });
+    const dirBirth = fs.statSync(run.runDir).birthtimeMs || fs.statSync(run.runDir).mtimeMs;
+    assert.ok(Math.abs(run.startedAt - dirBirth) < 2000);
+}));

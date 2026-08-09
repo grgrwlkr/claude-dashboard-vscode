@@ -12,7 +12,11 @@
 // No dependency on vscode: the roots are parameters, so this runs under plain node.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+const HOME = os.homedir();
+const PROJECTS = path.join(HOME, '.claude', 'projects');
 
 // The client writes a capped preview as 400 characters plus an ellipsis — 2590 of
 // them are exactly that on this machine — but that is its habit, not a promise,
@@ -30,6 +34,14 @@ function clip(text) {
 
 function readJson(file) {
     try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+function listDir(dir) {
+    try { return fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+}
+
+function statOf(file) {
+    try { return fs.statSync(file); } catch { return null; }
 }
 
 // One entry of workflowProgress, in the shape the rest of the extension uses.
@@ -163,4 +175,137 @@ function phasesFromScript(text) {
     return out;
 }
 
-module.exports = { readFinal, phasesFromScript };
+// How long a run directory may sit untouched before it stops counting as live.
+// An agent on a high effort tier can think for minutes between writes, so a
+// tighter window would flicker; a live parent session is the second, independent
+// witness that keeps this from marking a slow run dead.
+const RUN_STALE_MS = 10 * 60 * 1000;
+
+// Creation time, falling back to mtime on filesystems that do not keep one.
+// The run directory is created when the run starts and never rewritten, so its
+// birth is the only trustworthy start time — the snapshot's own startTime is off
+// by up to hours on a third of the runs on this machine.
+function birthOf(file) {
+    const st = statOf(file);
+    if (!st) return 0;
+    return st.birthtimeMs || st.mtimeMs || 0;
+}
+
+// The newest mtime anywhere in the run directory: the journal grows on every
+// agent boundary, the transcripts on every reply, so the maximum of the two is
+// "when this run last did anything".
+function lastTouch(dir) {
+    let newest = birthOf(dir);
+    for (const entry of listDir(dir)) {
+        const st = statOf(path.join(dir, entry.name));
+        if (st && st.mtimeMs > newest) newest = st.mtimeMs;
+    }
+    return newest;
+}
+
+// The client's own word for what an agent is doing, mapped to the three things
+// a panel can draw. The vocabulary was read off 1356 live records — done, start,
+// progress, error — and it is not documented anywhere, so a word we have never
+// seen becomes "unknown" rather than being guessed into success: painting a
+// crashed agent with a checkmark is the failure this function exists to prevent.
+const RUNNING_STATES = new Set(['start', 'progress', 'running', 'queued']);
+const DONE_STATES = new Set(['done', 'complete', 'completed']);
+const FAILED_STATES = new Set(['error', 'failed', 'killed']);
+
+function outcomeOf(state) {
+    const word = String(state || '').toLowerCase();
+    if (DONE_STATES.has(word)) return 'done';
+    if (FAILED_STATES.has(word)) return 'failed';
+    if (RUNNING_STATES.has(word)) return 'running';
+    return 'unknown';
+}
+
+// A project slug is the absolute path with separators replaced; the last
+// meaningful segment is close enough to a readable name.
+const projectName = (slug) => {
+    const parts = String(slug).split('-').filter(Boolean);
+    return parts[parts.length - 1] || slug;
+};
+
+// Every run on the machine, keyed by runId, assembled from whichever of the two
+// trees holds it. A run can appear in one and not the other: a snapshot outlives
+// its directory, and a directory without a snapshot is a run that never finished.
+function collect(root) {
+    const runs = new Map();
+    const at = (slug, session, runId) => {
+        const key = `${slug}/${session}/${runId}`;
+        if (!runs.has(key)) {
+            runs.set(key, {
+                runId, sessionId: session, slug, project: projectName(slug),
+                runDir: '', jsonPath: '', scriptPath: '',
+            });
+        }
+        return runs.get(key);
+    };
+
+    for (const slugDir of listDir(root)) {
+        if (!slugDir.isDirectory()) continue;
+        const slug = slugDir.name;
+        for (const sessionDir of listDir(path.join(root, slug))) {
+            if (!sessionDir.isDirectory()) continue;
+            const session = sessionDir.name;
+            const base = path.join(root, slug, session);
+
+            for (const entry of listDir(path.join(base, 'workflows'))) {
+                if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+                const runId = path.basename(entry.name, '.json');
+                at(slug, session, runId).jsonPath = path.join(base, 'workflows', entry.name);
+            }
+            for (const entry of listDir(path.join(base, 'workflows', 'scripts'))) {
+                if (!entry.isFile()) continue;
+                // Scripts are named <workflow-name>-<runId>.js — the id is the tail.
+                const runId = (/(wf_[A-Za-z0-9-]+)\.js$/.exec(entry.name) || [])[1];
+                if (runId) at(slug, session, runId).scriptPath = path.join(base, 'workflows', 'scripts', entry.name);
+            }
+            for (const entry of listDir(path.join(base, 'subagents', 'workflows'))) {
+                if (!entry.isDirectory() || !entry.name.startsWith('wf_')) continue;
+                at(slug, session, entry.name).runDir = path.join(base, 'subagents', 'workflows', entry.name);
+            }
+        }
+    }
+    return [...runs.values()];
+}
+
+/**
+ * Every workflow run on the machine with its state. `liveSessions` holds the ids
+ * of sessions whose process is alive, and `now` is passed in rather than read so
+ * the state machine is testable without touching the clock.
+ */
+function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() } = {}) {
+    return collect(root).map((run) => {
+        const final = run.jsonPath ? readFinal(run.jsonPath) : null;
+        const touched = run.runDir ? lastTouch(run.runDir) : 0;
+        const fresh = touched > 0 && now - touched < RUN_STALE_MS;
+        const written = final && run.jsonPath ? (statOf(run.jsonPath)?.mtimeMs || 0) : 0;
+
+        // A snapshot is proof the run ended — it is written once, at the end.
+        // Without one, a run counts as live only while its parent session is
+        // alive and its files are still moving; anything else is a run whose
+        // client died and will never write a snapshot.
+        const state = final ? 'finished'
+            : (fresh && liveSessions.has(run.sessionId) ? 'running' : 'abandoned');
+
+        return {
+            ...run,
+            state,
+            startedAt: run.runDir ? birthOf(run.runDir) : birthOf(run.jsonPath),
+            endedAt: written,
+            lastActivity: Math.max(touched, written),
+            name: final ? final.name : '',
+            status: final ? final.status : '',
+            durationMs: final ? final.durationMs : 0,
+            phases: final ? final.phases : [],
+            agents: final ? final.agents : [],
+            // Same shape whether or not a snapshot exists, so a caller reading a
+            // total off a running run gets a zero rather than undefined.
+            totals: final ? final.totals : { agents: 0, reported: 0, tokens: 0, toolCalls: 0 },
+        };
+    });
+}
+
+module.exports = { readFinal, phasesFromScript, scanRuns, outcomeOf, PROJECTS, RUN_STALE_MS };
