@@ -50,11 +50,26 @@ function shortModel(model) {
         .replace(/-(\d)$/, ' $1');
 }
 
-// A stable colour per model, so the same model keeps its colour across charts.
-const MODEL_HUES = [265, 200, 145, 35, 0, 310, 175];
+// A stable colour per position, so a model keeps its colour across every chart
+// and the legend. Hue alone runs out at about six entries — anything further
+// apart on the wheel starts closing the circle — so later slots also move in
+// saturation and lightness, which keeps them apart even where the hues are
+// neighbours. Slot 7 is deliberately dark lime rather than cyan: cyan next to
+// the blue of slot 2 was indistinguishable at chip size.
+const MODEL_COLORS = [
+    [265, 60, 58], // violet
+    [200, 62, 55], // blue
+    [145, 52, 48], // green
+    [35, 72, 55],  // orange
+    [0, 60, 57],   // red
+    [310, 52, 62], // pink
+    [75, 55, 42],  // dark lime
+    [190, 22, 68], // muted steel
+    [20, 40, 38],  // brown
+];
 function modelColor(model, i) {
-    const hue = MODEL_HUES[i % MODEL_HUES.length];
-    return `hsl(${hue} 60% 55%)`;
+    const [h, s, l] = MODEL_COLORS[i % MODEL_COLORS.length];
+    return `hsl(${h} ${s}% ${l}%)`;
 }
 
 // --- charts -----------------------------------------------------------------

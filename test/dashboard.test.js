@@ -119,3 +119,39 @@ test('render produces one pane per tab and escapes hostile project names', () =>
     assert.match(html, /Content-Security-Policy/);
     assert.ok(!/undefined|NaN/.test(html), 'no placeholder leaked into the page');
 });
+
+// Colour is load-bearing here: the legend is the only key to a stacked chart,
+// so two models that look alike make the chart unreadable. Distance is measured
+// in CIELAB rather than eyeballed, because hue numbers being far apart does not
+// mean the colours look far apart.
+function labOf(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const ch = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    const lin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    const [r, g, b] = [lin(ch(0)), lin(ch(8)), lin(ch(4))];
+    const X = r * 0.4124 + g * 0.3576 + b * 0.1805;
+    const Y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+    const Z = r * 0.0193 + g * 0.1192 + b * 0.9505;
+    const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+    return [116 * f(Y) - 16, 500 * (f(X / 0.95047) - f(Y)), 200 * (f(Y) - f(Z / 1.08883))];
+}
+
+test('every pair of model colours stays perceptually distinct', () => {
+    const rows = Array.from({ length: 9 }, (_, i) => [`m${i}`, bucket(9 - i)]);
+    const html = db.barList(rows, { limit: 9 });
+    const colors = [...html.matchAll(/hsl\((\d+) (\d+)% (\d+)%\)/g)]
+        .map((m) => labOf(Number(m[1]), Number(m[2]), Number(m[3])));
+    assert.equal(colors.length, 9);
+
+    let worst = Infinity;
+    let pair = '';
+    for (let i = 0; i < colors.length; i++) {
+        for (let j = i + 1; j < colors.length; j++) {
+            const d = Math.hypot(...colors[i].map((v, k) => v - colors[j][k]));
+            if (d < worst) { worst = d; pair = `${i} vs ${j}`; }
+        }
+    }
+    assert.ok(worst >= 25, `colours ${pair} are too close: deltaE ${worst.toFixed(1)}`);
+});
