@@ -9,11 +9,21 @@
 // client that ships almost daily, so every field here is optional and a parse
 // failure yields nothing rather than a wrong number.
 //
+// Walking the tree is this module's job too, and one run is not always in one
+// place: five runs on this machine keep their directory under one session id and
+// their snapshot under another, matching to about 20 ms at both ends. So a run is
+// identified by `slug/runId` rather than by the session that happens to hold a
+// half of it — but only complementary halves are folded together, at most one
+// snapshot and one directory each. Two snapshots under one run id are two
+// attempts, not two halves: one such pair here reads killed with 7 agents against
+// completed with 65, and merging them would hand a run the other's numbers.
+//
 // No dependency on vscode: the roots are parameters, so this runs under plain node.
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { projectName } = require('./indexer');
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -212,24 +222,26 @@ const RUNNING_STATES = new Set(['start', 'progress', 'running', 'queued']);
 const DONE_STATES = new Set(['done', 'complete', 'completed']);
 const FAILED_STATES = new Set(['error', 'failed', 'killed']);
 
-function outcomeOf(state) {
+function outcomeOf(state, runState) {
     const word = String(state || '').toLowerCase();
     if (DONE_STATES.has(word)) return 'done';
     if (FAILED_STATES.has(word)) return 'failed';
-    if (RUNNING_STATES.has(word)) return 'running';
+    if (RUNNING_STATES.has(word)) {
+        // A run that is over has no agent still working in it, whatever its last
+        // record says: 28 agents on this machine sit at `progress` or `start`
+        // inside runs killed weeks ago. That is not `failed` — nothing crashed,
+        // the run was cut from outside and this agent never got to finish — and
+        // it is not `running` either, so it gets its own word. The run's state is
+        // optional, and without it the answer is what it always was.
+        return runState && runState !== 'running' ? 'stopped' : 'running';
+    }
     return 'unknown';
 }
 
-// A project slug is the absolute path with separators replaced; the last
-// meaningful segment is close enough to a readable name.
-const projectName = (slug) => {
-    const parts = String(slug).split('-').filter(Boolean);
-    return parts[parts.length - 1] || slug;
-};
-
-// Every run on the machine, keyed by runId, assembled from whichever of the two
-// trees holds it. A run can appear in one and not the other: a snapshot outlives
-// its directory, and a directory without a snapshot is a run that never finished.
+// Everything one session knows about one run. A run can appear in one tree and
+// not the other: a snapshot outlives its directory, and a directory without a
+// snapshot is a run that never finished — or a run whose snapshot landed in a
+// sibling session, which is what `mergeHalves` sorts out afterwards.
 function collect(root) {
     const runs = new Map();
     const at = (slug, session, runId) => {
@@ -271,29 +283,83 @@ function collect(root) {
     return [...runs.values()];
 }
 
+// One run out of the halves the sessions hold, but only where the halves
+// genuinely complement each other: at most one snapshot and at most one
+// directory. Anything else is two attempts that share a run id — `resumeFromRunId`
+// keeps it — and they stay two rows, because their numbers are not each other's.
+// The record is named after the session that wrote the snapshot, since that is
+// the session a reader will recognise, while `sessions` keeps every session the
+// run touched: liveness has to ask all of them, as the directory and the snapshot
+// belong to different ones and either may still be alive.
+function mergeHalves(halves) {
+    const groups = new Map();
+    for (const half of halves) {
+        const key = `${half.slug}/${half.runId}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(half);
+    }
+
+    const out = [];
+    for (const group of groups.values()) {
+        const withJson = group.filter((h) => h.jsonPath);
+        const withDir = group.filter((h) => h.runDir);
+        if (withJson.length > 1 || withDir.length > 1) {
+            for (const half of group) out.push({ ...half, sessions: [half.sessionId] });
+            continue;
+        }
+        const dir = withDir[0] || null;
+        const json = withJson[0] || null;
+        const named = json || dir || group[0];
+        out.push({
+            runId: named.runId,
+            sessionId: named.sessionId,
+            sessions: group.map((h) => h.sessionId),
+            slug: named.slug,
+            project: named.project,
+            runDir: dir ? dir.runDir : '',
+            jsonPath: json ? json.jsonPath : '',
+            // The script is written beside the directory, not beside the
+            // snapshot, on all five pairs here — so the directory's half is asked
+            // first and the rest is a fallback, not a coin toss.
+            scriptPath: (dir && dir.scriptPath) || (group.find((h) => h.scriptPath) || {}).scriptPath || '',
+        });
+    }
+    return out;
+}
+
 /**
  * Every workflow run on the machine with its state. `liveSessions` holds the ids
  * of sessions whose process is alive, and `now` is passed in rather than read so
  * the state machine is testable without touching the clock.
  */
 function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() } = {}) {
-    return collect(root).map((run) => {
+    return mergeHalves(collect(root)).map((run) => {
+        // A snapshot too broken to parse leaves `final` null while `jsonPath`
+        // stays set, so such a run degrades into the freshness branch and reads
+        // as abandoned. That is the contract — a dash beats a wrong number — and
+        // the non-empty `jsonPath` is the only sign of what happened.
         const final = run.jsonPath ? readFinal(run.jsonPath) : null;
-        const touched = run.runDir ? lastTouch(run.runDir) : 0;
+        // Only the freshness test needs this, and it walks every file in the run
+        // directory — up to 417 of them here. A finished run already has its
+        // answer, so it does not pay for one.
+        const touched = !final && run.runDir ? lastTouch(run.runDir) : 0;
         const fresh = touched > 0 && now - touched < RUN_STALE_MS;
         const written = final && run.jsonPath ? (statOf(run.jsonPath)?.mtimeMs || 0) : 0;
 
         // A snapshot is proof the run ended — it is written once, at the end.
-        // Without one, a run counts as live only while its parent session is
+        // Without one, a run counts as live only while one of its sessions is
         // alive and its files are still moving; anything else is a run whose
         // client died and will never write a snapshot.
         const state = final ? 'finished'
-            : (fresh && liveSessions.has(run.sessionId) ? 'running' : 'abandoned');
+            : (fresh && run.sessions.some((s) => liveSessions.has(s)) ? 'running' : 'abandoned');
 
         return {
             ...run,
             state,
-            startedAt: run.runDir ? birthOf(run.runDir) : birthOf(run.jsonPath),
+            // Without a directory there is no honest start: the snapshot is
+            // written at the end, so its own timestamps would put a 53-minute run
+            // at a single point in time. Zero, and the display draws a dash.
+            startedAt: run.runDir ? birthOf(run.runDir) : 0,
             endedAt: written,
             lastActivity: Math.max(touched, written),
             name: final ? final.name : '',

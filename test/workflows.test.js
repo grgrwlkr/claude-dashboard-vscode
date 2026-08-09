@@ -233,6 +233,18 @@ function runFixture({ write }, id, { final = null, journal = [], agents = {}, sc
     if (final) write(`workflows/${id}.json`, final);
 }
 
+// The same write, aimed at a second session of the same project: one run leaves
+// its directory under one session id and its snapshot under another, and a
+// fixture that cannot express that cannot test the merge.
+function writeAt({ root, slug }, session, rel, body) {
+    const full = path.join(root, slug, session, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, typeof body === 'string' ? body : JSON.stringify(body));
+    return full;
+}
+
+const SECOND = 'bbbb2222-3333-4444-5555-666677778888';
+
 test('scanRuns separates a finished run from a live one and a dead one', () => tree((t) => {
     runFixture(t, 'wf_done-1', { final: { ...FINAL, runId: 'wf_done-1' }, journal: [{ type: 'started', agentId: 'a1' }] });
     runFixture(t, 'wf_live-1', { journal: [{ type: 'started', agentId: 'a1' }] });
@@ -287,6 +299,10 @@ test('a snapshot with no run directory is still listed', () => tree((t) => {
     assert.equal(runs.length, 1);
     assert.equal(runs[0].state, 'finished');
     assert.equal(runs[0].runDir, '');
+    // The snapshot is written at the end, so its own timestamps say nothing
+    // about the start. Nine such runs on this machine would otherwise claim to
+    // have begun the moment they ended, one of them after 53 minutes of work.
+    assert.equal(runs[0].startedAt, 0);
 }));
 
 test('scanRuns takes the run start from the directory, never from startTime', () => tree((t) => {
@@ -295,8 +311,83 @@ test('scanRuns takes the run start from the directory, never from startTime', ()
     runFixture(t, 'wf_clock-1', {
         final: { ...FINAL, runId: 'wf_clock-1', startTime: Date.now() - 4 * 3600 * 1000 },
         journal: [{ type: 'started', agentId: 'a1' }],
+        script: "export const meta = { phases: [{ title: 'Review' }] }",
     });
     const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() });
     const dirBirth = fs.statSync(run.runDir).birthtimeMs || fs.statSync(run.runDir).mtimeMs;
     assert.ok(Math.abs(run.startedAt - dirBirth) < 2000);
+    // The script is named <workflow-name>-<runId>.js, and the run id is the tail.
+    assert.equal(path.basename(run.scriptPath), 'demo-wf_clock-1.js');
 }));
+
+// One run, two session directories: the half with the run directory and the
+// script under one session, the snapshot under another. Five such pairs on this
+// machine, each matching to about 20 ms at both ends — the same run, not two.
+test('two halves of one run in two sessions become one record', () => tree((t) => {
+    runFixture(t, 'wf_split-1', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        script: "export const meta = { phases: [{ title: 'Review' }] }",
+    });
+    writeAt(t, SECOND, 'workflows/wf_split-1.json', { ...FINAL, runId: 'wf_split-1' });
+
+    const runs = wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() });
+    assert.equal(runs.length, 1);
+    const [run] = runs;
+    assert.equal(run.state, 'finished');
+    assert.equal(run.name, 'review-changes');
+    assert.ok(run.runDir, 'the directory half survives the merge');
+    assert.ok(run.jsonPath, 'the snapshot half survives the merge');
+    // The script lives beside the directory, not beside the snapshot.
+    assert.equal(path.basename(run.scriptPath), 'demo-wf_split-1.js');
+    assert.equal(run.sessionId, SECOND);
+    assert.deepEqual([...run.sessions].sort(), [SECOND, t.session].sort());
+    // Merging hands the run the directory's birth, which the snapshot half alone
+    // could not supply.
+    assert.ok(run.startedAt > 0);
+}));
+
+// wf_00e91f74-a5b on this machine: killed with 7 agents and 1.0M tokens in one
+// session, completed with 65 agents and 7.8M in another, and the run directory
+// sits beside the killed one. These are two attempts sharing a run id, so
+// folding them together would show one run wearing the other's numbers.
+test('two snapshots of one run id stay two records', () => tree((t) => {
+    runFixture(t, 'wf_twice-1', {
+        final: { ...FINAL, runId: 'wf_twice-1', status: 'killed' },
+        journal: [{ type: 'started', agentId: 'a1' }],
+    });
+    writeAt(t, SECOND, 'workflows/wf_twice-1.json', { ...FINAL, runId: 'wf_twice-1', status: 'completed' });
+
+    const runs = wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() });
+    assert.equal(runs.length, 2);
+    assert.deepEqual(runs.map((r) => r.status).sort(), ['completed', 'killed']);
+}));
+
+test('a merged run is live while the session that owns its directory is', () => tree((t) => {
+    // The snapshot half is truncated, so the run is not finished and its state
+    // falls to liveness. The record is named after the snapshot's session, which
+    // is dead; the session doing the work is the one holding the directory, and
+    // testing sessionId alone would bury a live run.
+    runFixture(t, 'wf_half-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    writeAt(t, SECOND, 'workflows/wf_half-1.json', '{"runId": "wf_half');
+
+    const runs = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].sessionId, SECOND);
+    assert.equal(runs[0].state, 'running');
+}));
+
+test('outcomeOf calls a working agent inside a run that ended stopped', () => {
+    // 28 agents on this machine sit at progress or start inside runs that were
+    // killed weeks ago. They are not failures — nothing crashed, the run was cut
+    // from outside — and they are certainly not still running.
+    assert.equal(wf.outcomeOf('progress', 'finished'), 'stopped');
+    assert.equal(wf.outcomeOf('start', 'abandoned'), 'stopped');
+    assert.equal(wf.outcomeOf('progress', 'running'), 'running');
+    // A terminal word answers for itself, whatever the run went on to do.
+    assert.equal(wf.outcomeOf('done', 'abandoned'), 'done');
+    assert.equal(wf.outcomeOf('error', 'finished'), 'failed');
+    assert.equal(wf.outcomeOf('some-future-word', 'finished'), 'unknown');
+    // One argument answers exactly as it did before the second one existed.
+    assert.equal(wf.outcomeOf('progress'), 'running');
+    assert.equal(wf.outcomeOf('done'), 'done');
+});
