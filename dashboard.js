@@ -147,18 +147,25 @@ function heatmap(days, { weeks = 27, cell = 12 } = {}) {
     return `<svg class="chart heat" viewBox="0 0 ${w} ${7 * (cell + 2) + 16}" role="img">${months}${cells}</svg>`;
 }
 
-/** Horizontal bars for a keyed breakdown — models, projects, branches, skills. */
+/**
+ * A keyed breakdown — models, projects, branches, skills — as a borderless
+ * table. A table rather than free-floating rows because the columns then line
+ * up on their own: the name column sizes to the longest name, and the numbers
+ * share one right edge instead of drifting with the bar next to them.
+ */
 function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12 } = {}) {
     const rows = entries.slice(0, limit);
     if (rows.length === 0) return '<p class="empty">Nothing here yet.</p>';
     const max = Math.max(...rows.map(([, b]) => value(b)));
-    return `<div class="bars">${rows.map(([key, b], i) => {
+    return `<table class="bars">${rows.map(([key, b], i) => {
         const v = value(b);
         const w = max > 0 ? (v / max) * 100 : 0;
-        return `<div class="bar-row"><span class="bar-key" title="${esc(key)}">${esc(key)}</span>`
-            + `<span class="bar-track"><span class="bar-fill" style="width:${w.toFixed(1)}%;background:${modelColor(key, i)}"></span></span>`
-            + `<span class="bar-val">${esc(label(v, b))}</span></div>`;
-    }).join('')}</div>`;
+        return `<tr><th scope="row" title="${esc(key)}">${esc(key)}</th>`
+            + `<td class="bar-cell"><span class="bar-track">`
+            + `<span class="bar-fill" style="width:${w.toFixed(1)}%;background:${modelColor(key, i)}"></span>`
+            + `</span></td>`
+            + `<td class="bar-val">${esc(label(v, b))}</td></tr>`;
+    }).join('')}</table>`;
 }
 
 /** Activity by hour of day — 24 columns. */
@@ -348,12 +355,16 @@ nav button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--vscode
 .chip i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
-.bars { display: flex; flex-direction: column; gap: 5px; }
-.bar-row { display: grid; grid-template-columns: minmax(90px, 200px) 1fr minmax(96px, auto); gap: 10px; align-items: center; }
-.bar-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
-.bar-track { background: var(--vscode-editorWidget-background); border-radius: 3px; height: 14px; overflow: hidden; }
+.bars { width: 100%; border-collapse: collapse; }
+.bars th, .bars td { border: none; padding: 3px 0; vertical-align: middle; }
+.bars th { font: inherit; text-transform: none; letter-spacing: 0; opacity: .85;
+  text-align: left; white-space: nowrap; padding-right: 14px; width: 1%; }
+.bar-cell { width: 100%; padding-right: 14px !important; }
+.bar-track { display: block; background: var(--vscode-editorWidget-background);
+  border-radius: 3px; height: 14px; overflow: hidden; }
 .bar-fill { display: block; height: 100%; border-radius: 3px; }
-.bar-val { opacity: .7; text-align: right; font-variant-numeric: tabular-nums; }
+.bar-val { opacity: .7; text-align: right; white-space: nowrap;
+  font-variant-numeric: tabular-nums; width: 1%; }
 .hours { display: flex; align-items: flex-end; gap: 3px; height: 92px; }
 .hour { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; flex: 1; height: 100%; }
 .hour-bar { width: 100%; background: var(--vscode-charts-blue, hsl(200 60% 55%)); border-radius: 2px 2px 0 0; }

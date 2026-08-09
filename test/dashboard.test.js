@@ -67,7 +67,7 @@ test('heatmap keeps cells inside the calendar and never runs past today', () => 
 test('barList sorts by the caller and caps the list', () => {
     const entries = [['a', bucket(10)], ['b', bucket(5)], ['c', bucket(1)]];
     const html = db.barList(entries, { limit: 2 });
-    assert.equal((html.match(/bar-row/g) || []).length, 2);
+    assert.equal((html.match(/<tr>/g) || []).length, 2);
     assert.match(html, /width:100\.0%/); // the largest entry fills the track
     assert.ok(!html.includes('>c<'));
 });

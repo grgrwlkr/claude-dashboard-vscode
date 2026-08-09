@@ -143,3 +143,34 @@ test('findOwnSession does not invent a session when the registry has none', () =
     // A foreign pid and a non-existent workspace: no fallback should match.
     assert.equal(s.findOwnSession('/nope/not-a-workspace', 999999), null);
 });
+
+test('readTail widens the window when one record fills the whole tail', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
+    const file = path.join(dir, 'session.jsonl');
+
+    // A real transcript can carry a record of hundreds of kilobytes — a large
+    // file write, a long tool result. With a fixed 256 KB window the buffer is
+    // then a single truncated line and the context indicator silently vanishes.
+    const huge = JSON.stringify({
+        timestamp: new Date(NOW - 1000).toISOString(),
+        type: 'user',
+        message: { role: 'user', content: 'x'.repeat(400 * 1024) },
+    });
+    fs.writeFileSync(file, [JSON.stringify(rec()), huge, ''].join('\n'));
+
+    const last = s.readTail(file);
+    assert.ok(last, 'the record before the huge one must still be found');
+    assert.equal(s.contextOf(last).tokens, 201002);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('readTail gives up cleanly on a transcript that has no usage at all', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
+    const file = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, JSON.stringify({
+        timestamp: new Date(NOW).toISOString(), type: 'user',
+        message: { role: 'user', content: 'y'.repeat(300 * 1024) },
+    }) + '\n');
+    assert.equal(s.readTail(file), null);
+    fs.rmSync(dir, { recursive: true, force: true });
+});

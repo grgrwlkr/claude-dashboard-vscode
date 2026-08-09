@@ -12,9 +12,13 @@ const HOME = os.homedir();
 const SESSIONS = path.join(HOME, '.claude', 'sessions');
 const PROJECTS = path.join(HOME, '.claude', 'projects');
 
-// A quarter-megabyte tail covers the last few dozen records; exactly one of them
-// is needed — the most recent one carrying usage.
-const TAIL = 256 * 1024;
+// A quarter-megabyte tail usually covers the last few dozen records, and only
+// one of them is needed. Usually is not always: a single record can run to
+// hundreds of kilobytes (a large file write, a long tool result), and then the
+// whole buffer is one truncated line with nothing parseable in it. So the tail
+// grows until a record turns up, or the file runs out.
+const TAIL_STEPS = [256 * 1024, 1024 * 1024, 4 * 1024 * 1024, Infinity];
+const TAIL = TAIL_STEPS[0];
 
 // Transcript directory slug: the whole path with every non-alphanumeric
 // character turned into a hyphen (underscores included — easy to get wrong).
@@ -84,20 +88,44 @@ function newest(sessions) {
     return sessions.reduce((a, b) => (stamp(b) > stamp(a) ? b : a));
 }
 
+// The registry's own timestamps are unreliable — a session can sit there with no
+// updatedAt at all, and then every candidate scores zero and the "latest" one is
+// whatever the directory listing happened to return first. The transcript's
+// mtime is the honest signal: it moves on every write, so it says which session
+// is actually being used right now.
 function stamp(s) {
-    return Date.parse(s.updatedAt || s.statusUpdatedAt || s.startedAt || '') || 0;
+    const registry = Date.parse(s.updatedAt || s.statusUpdatedAt || s.startedAt || '') || 0;
+    let written = 0;
+    if (s.cwd && s.sessionId) {
+        try { written = fs.statSync(transcriptPath(s.cwd, s.sessionId)).mtimeMs; } catch { /* not started yet */ }
+    }
+    return Math.max(registry, written);
 }
 
 function transcriptPath(workspace, sessionId) {
     return path.join(PROJECTS, slugFor(workspace), `${sessionId}.jsonl`);
 }
 
-// The last record carrying usage, read from the tail. Subagent records are
-// skipped: they have their own window and would hijack the main thread's.
+// The last record carrying usage. Subagent records are skipped: they have their
+// own window and would hijack the main thread's.
+//
+// Reading grows in steps rather than fixing one buffer size, because a miss and
+// a genuinely empty transcript look identical from a fixed window — and the miss
+// showed up as a silently absent context indicator, not as an error.
 function readTail(file) {
     let size;
     try { size = fs.statSync(file).size; } catch { return null; }
-    const length = Math.min(TAIL, size);
+
+    for (const step of TAIL_STEPS) {
+        const length = Math.min(step, size);
+        const found = scanTail(file, size, length);
+        if (found) return found;
+        if (length >= size) break; // the whole file has been read; nothing there
+    }
+    return null;
+}
+
+function scanTail(file, size, length) {
     const buf = Buffer.alloc(length);
     let fd;
     try {
