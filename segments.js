@@ -1,0 +1,162 @@
+// The status bar as a template rather than a fixed layout.
+//
+// A segment is one status-bar item written as a string: literal text, `{field}`
+// placeholders, and `[optional groups]` that disappear whole when a field
+// inside them has nothing to say. That last part is what makes one template
+// work in every state — `[ dry {dry}]` is silent in the first half hour of a
+// window, when there is no forecast to make, and appears by itself later.
+//
+// No dependency on vscode: this builds strings, the extension turns them into
+// items, and `node --test` covers the whole grammar.
+
+// Which tooltip a segment gets, and which threshold colours it. A segment that
+// mentions fields from two topics gets both tooltips, in the order the fields
+// appear.
+const TOPICS = ['limits', 'context', 'money', 'work'];
+
+const pct = (n) => (Number.isFinite(n) && n >= 0 ? `${n}%` : '');
+const usd = (n, fmt) => (Number.isFinite(n) && n > 0 ? fmt(n) : '');
+
+/**
+ * Every field a template may use. `topic` picks the tooltip and the colour
+ * source; `doc` is what the placeholder-help command shows. A field returns an
+ * empty string when it has nothing to say, and emptiness is what drives both
+ * optional groups and hiding a segment entirely.
+ */
+function fields(helpers = {}) {
+    const { fmtCost = (n) => `$${n.toFixed(2)}`, fmtDry = () => '', fmtLeft = () => '',
+        fmtAbs = () => '', fmtDuration = () => '', tok = (n) => String(n), shortModel = (m) => m } = helpers;
+
+    return {
+        // --- limits ---------------------------------------------------------
+        weekly: { topic: 'limits', doc: 'weekly limit used, e.g. 33%', get: (d) => pct(d.weekly?.pct) },
+        weeklyBar: { topic: 'limits', doc: 'spend-against-plan bar for the week', get: (d) => d.bar || '' },
+        plan: { topic: 'limits', doc: 'share of the weekly window already elapsed', get: (d) => pct(d.pace?.plan) },
+        drift: {
+            topic: 'limits',
+            doc: 'distance from an even pace, in percentage points (+ is ahead of plan)',
+            get: (d) => {
+                if (!d.weekly || !d.pace) return '';
+                const diff = d.weekly.pct - d.pace.plan;
+                return diff === 0 ? '0pp' : `${diff > 0 ? '+' : ''}${diff}pp`;
+            },
+        },
+        dry: { topic: 'limits', doc: 'when the weekly window runs out at this pace, blank if that is after the reset', get: (d) => (d.pace?.dry ? fmtDry(d.pace.dry) : '') },
+        dryAt: { topic: 'limits', doc: 'the same forecast even when it lands past the reset', get: (d) => (d.pace?.dryAt ? fmtDry(d.pace.dryAt) : '') },
+        dryLeft: { topic: 'limits', doc: 'how long until that forecast, e.g. 2d4h', get: (d) => (d.pace?.dry ? fmtLeft(d.pace.dry, d.now) : '') },
+        reset: { topic: 'limits', doc: 'clock time the weekly window resets', get: (d) => (d.weekly?.reset ? fmtAbs(d.weekly.reset) : '') },
+        resetLeft: { topic: 'limits', doc: 'time left until the weekly reset', get: (d) => (d.weekly?.reset ? fmtLeft(d.weekly.reset, d.now) : '') },
+        session5h: { topic: 'limits', doc: 'the rolling five-hour limit', get: (d) => pct(d.session?.pct) },
+        session5hLeft: { topic: 'limits', doc: 'time left in the five-hour window', get: (d) => (d.session?.reset ? fmtLeft(d.session.reset, d.now) : '') },
+        scoped: {
+            topic: 'limits',
+            doc: 'per-model windows; {scoped} lists all, {scoped:Opus} picks one',
+            get: (d, arg) => {
+                const rows = d.scoped || [];
+                if (!arg) return rows.map((r) => `${r.scope.toLowerCase()} ${r.pct}%`).join(' ');
+                const hit = rows.find((r) => r.scope.toLowerCase().startsWith(arg.toLowerCase()));
+                return hit ? `${hit.pct}%` : '';
+            },
+        },
+
+        // --- context --------------------------------------------------------
+        ctx: { topic: 'context', doc: 'share of the context window in use', get: (d) => (d.ctx ? `${d.ctx.estimated ? '~' : ''}${d.ctx.pct}%` : '') },
+        ctxTokens: { topic: 'context', doc: 'tokens in the context window, e.g. 294k', get: (d) => (d.ctx ? tok(d.ctx.tokens) : '') },
+        ctxWindow: { topic: 'context', doc: 'size of the context window, e.g. 1M', get: (d) => (d.ctx ? tok(d.ctx.window) : '') },
+        ctxCache: { topic: 'context', doc: 'share of the context served from cache', get: (d) => pct(d.ctx?.cachePct) },
+        compact: { topic: 'context', doc: 'auto-compact threshold as a share of the window', get: (d) => pct(d.compactPct) },
+        model: { topic: 'context', doc: 'model of the last reply, e.g. opus 5', get: (d) => (d.ctx?.model ? shortModel(d.ctx.model) : '') },
+        effort: { topic: 'context', doc: 'reasoning effort of the last reply', get: (d) => d.ctx?.effort || '' },
+        advisor: { topic: 'context', doc: 'advisor model, when one is configured', get: (d) => (d.settings?.advisor ? shortModel(d.settings.advisor) : '') },
+        thinking: { topic: 'context', doc: 'the word "thinking" when the last reply carried a thinking block', get: (d) => (d.ctx?.thinking ? 'thinking' : '') },
+        outputStyle: { topic: 'context', doc: 'output style in force', get: (d) => d.settings?.outputStyle || '' },
+        branch: { topic: 'context', doc: 'git branch recorded on the last request', get: (d) => d.ctx?.branch || '' },
+        version: { topic: 'context', doc: 'client version of this session', get: (d) => d.version?.current || '' },
+        update: { topic: 'context', doc: 'a newer client version already unpacked and waiting', get: (d) => d.version?.latest || '' },
+
+        // --- money ----------------------------------------------------------
+        cost: { topic: 'money', doc: 'estimated spend of this session', get: (d) => usd(d.stats?.cost, fmtCost) },
+        burn: { topic: 'money', doc: 'estimated spend per hour', get: (d) => usd(d.stats?.burn, fmtCost) },
+        today: { topic: 'money', doc: "today's spend across every project on the machine", get: (d) => usd(d.todayUsd, fmtCost) },
+        requests: { topic: 'money', doc: 'requests made in this session', get: (d) => (d.stats?.messages > 0 ? String(d.stats.messages) : '') },
+        duration: { topic: 'money', doc: 'wall-clock length of this session', get: (d) => fmtDuration(d.stats?.durationMs || 0) },
+        apiShare: { topic: 'money', doc: 'share of the session spent waiting on the model', get: (d) => pct(d.stats?.apiPct) },
+        added: { topic: 'money', doc: 'lines added during this session', get: (d) => (d.stats?.added > 0 ? `+${d.stats.added}` : '') },
+        removed: { topic: 'money', doc: 'lines removed during this session', get: (d) => (d.stats?.removed > 0 ? `-${d.stats.removed}` : '') },
+
+        // --- work -----------------------------------------------------------
+        peers: { topic: 'work', doc: 'other live sessions in this repository', get: (d) => (d.peers?.total > 0 ? String(d.peers.total) : '') },
+        peersBusy: { topic: 'work', doc: 'how many of those are busy right now', get: (d) => (d.peers?.busy > 0 ? String(d.peers.busy) : '') },
+        todo: { topic: 'work', doc: "this session's task list as done/total", get: (d) => (d.todo ? `${d.todo.done}/${d.todo.total}` : '') },
+        todoActive: { topic: 'work', doc: 'the task currently in progress', get: (d) => d.todo?.active || '' },
+        jobs: { topic: 'work', doc: 'background jobs still working, machine-wide', get: (d) => (d.machine?.jobs > 0 ? String(d.machine.jobs) : '') },
+        sessions: { topic: 'work', doc: 'live Claude sessions on the whole machine', get: (d) => (d.machine?.sessions > 0 ? String(d.machine.sessions) : '') },
+        openTasks: { topic: 'work', doc: 'unfinished task-list items across every session', get: (d) => (d.machine?.openTasks > 0 ? String(d.machine.openTasks) : '') },
+    };
+}
+
+// `{name}` or `{name:argument}`; `[...]` marks a group that stands or falls
+// with the fields inside it. A backslash escapes any of the four characters.
+const TOKEN_RE = /\\(.)|\{([a-zA-Z0-9]+)(?::([^}]*))?\}|\[([^\][]*)\]/g;
+
+/**
+ * Render one segment. Returns the text, which topics it touched, and whether
+ * anything was actually filled in — a segment whose every field came back empty
+ * is hidden rather than shown as punctuation with no numbers in it.
+ */
+function renderSegment(template, data, registry) {
+    const topics = [];
+    let filled = 0;
+    let placeholders = 0;
+
+    const substitute = (text) => text.replace(TOKEN_RE, (m, escaped, name, arg, group) => {
+        if (escaped !== undefined) return escaped;
+        if (group !== undefined) {
+            const before = filled;
+            const seen = placeholders;
+            const inner = substitute(group);
+            // A group holding no placeholders is literal text and always stays;
+            // one whose placeholders all came back empty disappears whole.
+            if (placeholders > seen && filled === before) return '';
+            return inner;
+        }
+        const field = registry[name];
+        if (!field) return m; // an unknown name is left visible rather than eaten
+        placeholders++;
+        const value = String(field.get(data, arg) ?? '');
+        if (value) {
+            filled++;
+            if (!topics.includes(field.topic)) topics.push(field.topic);
+        }
+        return value;
+    });
+
+    const text = substitute(template).replace(/\s{2,}/g, ' ').trim();
+    return { text, topics, filled, placeholders, visible: text.length > 0 && (placeholders === 0 || filled > 0) };
+}
+
+/** The default bar: what the extension showed before any of this was settable. */
+const DEFAULT_SEGMENTS = [
+    '✻ 7d {weekly} {weeklyBar}[ dry {dry}]',
+    '▤ {ctx} {ctxTokens}/{ctxWindow}',
+    '[~{cost}][ {burn}/h]',
+    '[⧉ {peers}][ ▸ {todo}]',
+];
+
+// Placeholders alone, groups ignored: this scans for names wherever they sit,
+// including inside an optional group, which TOKEN_RE swallows as one token.
+const NAME_RE = /\{([a-zA-Z0-9]+)(?::([^}]*))?\}/g;
+
+/** Field names a set of templates actually uses — the extension skips
+ *  collecting what nothing asks for. */
+function usedFields(templates, registry) {
+    const used = new Set();
+    for (const tpl of templates || []) {
+        for (const m of String(tpl).matchAll(NAME_RE)) {
+            if (registry[m[1]]) used.add(m[1]);
+        }
+    }
+    return used;
+}
+
+module.exports = { TOPICS, DEFAULT_SEGMENTS, fields, renderSegment, usedFields, TOKEN_RE, NAME_RE };

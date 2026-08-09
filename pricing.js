@@ -4,10 +4,13 @@
 // figure in the UI carries a tilde.
 //
 // Cache: a write costs 1.25x input at the 5-minute TTL and 2x at the hourly one;
-// a read costs 0.1x. The client writes the five-minute cache by default and the
-// transcript does not record which TTL was used, so 1.25x is assumed — with an
-// hourly cache the estimate runs low.
-const CACHE_WRITE = 1.25;
+// a read costs 0.1x. Which TTL was used is on disk — `usage.cache_creation`
+// splits the write into `ephemeral_5m_input_tokens` and
+// `ephemeral_1h_input_tokens` — and the split matters: across the transcripts
+// this was built against it runs roughly half and half, so pricing every write
+// at 1.25x understated the total by about 10%.
+const CACHE_WRITE_5M = 1.25;
+const CACHE_WRITE_1H = 2;
 const CACHE_READ = 0.1;
 
 const RATES = {
@@ -33,18 +36,46 @@ function ratesFor(model) {
     return { rates: RATES[id] || FALLBACK, known: Boolean(RATES[id]) };
 }
 
+/**
+ * How a record's cache write splits across the two TTLs. An older record with no
+ * `cache_creation` block, or one whose parts do not add up to the total, has the
+ * remainder counted as five-minute: that is the client's default and the
+ * cheaper of the two, so an unknown write is never over-billed.
+ */
+function cacheSplit(usage) {
+    const total = (usage && usage.cache_creation_input_tokens) || 0;
+    const parts = (usage && usage.cache_creation) || null;
+    const hour = parts ? (parts.ephemeral_1h_input_tokens || 0) : 0;
+    const min5 = parts ? (parts.ephemeral_5m_input_tokens || 0) : 0;
+    const rest = Math.max(0, total - hour - min5);
+    return { hour, min5: min5 + rest, total };
+}
+
 // Cost of a single transcript record from its usage block.
 function costOf(model, usage) {
     if (!usage) return 0;
     const { rates } = ratesFor(model);
+    const cache = cacheSplit(usage);
     const M = 1e6;
     return (
         ((usage.input_tokens || 0) * rates.in
             + (usage.output_tokens || 0) * rates.out
-            + (usage.cache_creation_input_tokens || 0) * rates.in * CACHE_WRITE
+            + cache.hour * rates.in * CACHE_WRITE_1H
+            + cache.min5 * rates.in * CACHE_WRITE_5M
             + (usage.cache_read_input_tokens || 0) * rates.in * CACHE_READ)
         / M
     );
+}
+
+/**
+ * What the cache saved on one record: reading a cached token costs 0.1x what
+ * sending it as fresh input would have. The write that put it there is a
+ * separate, already-paid cost — this is the return on it, not a net figure.
+ */
+function cacheSaving(model, usage) {
+    if (!usage) return 0;
+    const { rates } = ratesFor(model);
+    return ((usage.cache_read_input_tokens || 0) * rates.in * (1 - CACHE_READ)) / 1e6;
 }
 
 function fmtCost(usd) {
@@ -53,4 +84,7 @@ function fmtCost(usd) {
     return `$${usd.toFixed(2)}`;
 }
 
-module.exports = { RATES, ratesFor, costOf, fmtCost };
+module.exports = {
+    RATES, CACHE_WRITE_5M, CACHE_WRITE_1H, CACHE_READ,
+    ratesFor, costOf, cacheSplit, cacheSaving, fmtCost,
+};

@@ -2,6 +2,9 @@ const vscode = require('vscode');
 const u = require('./usage');
 const s = require('./session');
 const ix = require('./indexer');
+const hist = require('./history');
+const sys = require('./system');
+const seg = require('./segments');
 const dashboard = require('./dashboard');
 const { fmtCost, ratesFor } = require('./pricing');
 
@@ -22,6 +25,15 @@ function background(pct) {
     return undefined;
 }
 
+// A minimal stand-in for MarkdownString while a tooltip is being assembled: the
+// same appendMarkdown call site, but the result is a plain string that can be
+// concatenated with another section.
+class Markdown {
+    constructor() { this.value = ''; }
+
+    appendMarkdown(text) { this.value += text; return this; }
+}
+
 // A tooltip has room a status bar does not, so it gets sections and full rows
 // instead of the terminal's single dense line. Each fact lives on its own row
 // with a label, and nothing is packed into a heading to save space.
@@ -30,8 +42,11 @@ function table(rows, head) {
     return header + rows.map((cells) => `| ${cells.join(' | ')} |`).join('\n') + '\n';
 }
 
+// The tooltips build markdown rather than a MarkdownString: a segment can carry
+// fields from two topics, and then its tooltip is both sections joined — which
+// is only possible if each section is a string first.
 function limitsTooltip(lim, pc, now, stale) {
-    const md = new vscode.MarkdownString('', true);
+    const md = new Markdown();
     const rows = [];
     const row = (label, pct, reset) =>
         [label, `**${pct}%**`, reset ? `${u.fmtLeft(reset, now)} → ${u.fmtAbs(reset)}` : ''];
@@ -65,7 +80,7 @@ function limitsTooltip(lim, pc, now, stale) {
 
     if (stale) md.appendMarkdown('\n$(warning) showing cached data — refresh failed\n');
     md.appendMarkdown(`\n_updated ${u.fmtAbs(u.mtime(u.CACHE))}_`);
-    return md;
+    return md.value;
 }
 
 // A round million reads as "1M", not "1.0M" — the model window is written the
@@ -78,7 +93,8 @@ const tok = (n) => {
 
 function contextTooltip(state) {
     const { context: ctx, settings, version } = state;
-    const md = new vscode.MarkdownString('', true);
+    if (!ctx) return '';
+    const md = new Markdown();
     md.appendMarkdown(`### ${short(ctx.model)}\n\n`);
 
     // The terminal packs model, effort, thinking and advisor into one line
@@ -111,12 +127,13 @@ function contextTooltip(state) {
     if (version.latest) {
         md.appendMarkdown(`\n$(arrow-up) **${version.latest}** is unpacked and starts with the next launch\n`);
     }
-    return md;
+    return md.value;
 }
 
 function moneyTooltip(state) {
     const { stats, todayUsd, context: ctx } = state;
-    const md = new vscode.MarkdownString('', true);
+    if (!stats) return '';
+    const md = new Markdown();
     md.appendMarkdown(`### ~${fmtCost(stats.cost)} this session\n\n`);
 
     const spend = [['today', `~${fmtCost(todayUsd)}`]];
@@ -134,7 +151,7 @@ function moneyTooltip(state) {
     md.appendMarkdown(known
         ? '\n_estimated from public rates — not a bill. Click for the full dashboard._'
         : '\n_estimated at Opus rates: this model has no published rate. Click for the full dashboard._');
-    return md;
+    return md.value;
 }
 
 // The bar needs the model, not the full id: "claude-opus-5" → "opus 5".
@@ -146,96 +163,156 @@ function short(model) {
         .replace(/-(\d)$/, ' $1');
 }
 
-function render(state) {
-    renderLimits(state);
-    renderContext(state);
-    renderMoney(state);
-    renderWork(state);
-}
-
-function renderLimits({ limitsItem }) {
-    const now = Math.floor(Date.now() / 1000);
-    const payload = u.readCache(now);
-    if (!payload) {
-        limitsItem.text = '✻ 7d —';
-        limitsItem.tooltip = 'Claude: no recent limit data';
-        limitsItem.backgroundColor = undefined;
-        limitsItem.show();
-        return;
-    }
-    const lim = u.limitsOf(payload);
-    if (!lim.weekly) { limitsItem.hide(); return; }
-
-    const pc = u.pace(lim.weekly, now);
-    limitsItem.text = u.barText(lim.weekly, pc);
-    limitsItem.tooltip = limitsTooltip(lim, pc, now, now - u.mtime(u.CACHE) > STALE_AFTER);
-    limitsItem.backgroundColor = background(lim.weekly.pct);
-    limitsItem.show();
-}
-
-function renderContext(state) {
-    const { contextItem, workspace } = state;
-    const own = state.session;
-    if (!own || !workspace) { contextItem.hide(); return; }
-
-    const ctx = s.contextOf(s.readTail(s.transcriptPath(workspace, own.sessionId)));
-    if (!ctx) {
-        // The panel is open but nothing has been exchanged yet — the transcript
-        // appears with the first message. A dash is honester than emptiness,
-        // which reads as a broken item.
-        contextItem.text = '▤ —';
-        contextItem.tooltip = 'Session open, nothing exchanged yet — context is empty';
-        contextItem.backgroundColor = undefined;
-        contextItem.show();
-        return;
-    }
-    state.context = ctx;
-
-    const approx = ctx.estimated ? '~' : '';
-    contextItem.text = `▤ ${approx}${ctx.pct}% ${tok(ctx.tokens)}/${tok(ctx.window)}`;
-    contextItem.tooltip = contextTooltip(state);
-    contextItem.backgroundColor = background(ctx.pct);
-    contextItem.show();
-}
-
-// Spend gets its own item: it is the one figure that cannot be taken from the
-// client exactly, and keeping it next to an exact limit percentage would be
-// misleading. That is what the tilde in the bar text is for.
-function renderMoney(state) {
-    const { moneyItem, stats } = state;
-    if (!stats || stats.cost <= 0) { moneyItem.hide(); return; }
-    const burn = stats.burn > 0 ? ` ${fmtCost(stats.burn)}/h` : '';
-    moneyItem.text = `~${fmtCost(stats.cost)}${burn}`;
-    moneyItem.tooltip = moneyTooltip(state);
-    moneyItem.backgroundColor = undefined;
-    moneyItem.show();
-}
-
-function renderWork(state) {
-    const { workItem, workspace } = state;
-    const own = state.session;
-    if (!own || !workspace) { workItem.hide(); return; }
-
-    const peers = s.peersOf(workspace, own.sessionId);
-    const todo = s.todoOf(own.sessionId);
-    const parts = [];
-    if (peers.total > 0) parts.push(peers.busy > 0 ? `⧉ ${peers.total}(${peers.busy})` : `⧉ ${peers.total}`);
-    if (todo) parts.push(`▸ ${todo.done}/${todo.total}`);
-    if (parts.length === 0) { workItem.hide(); return; }
-
-    workItem.text = parts.join(' ');
-    const md = new vscode.MarkdownString('', true);
+function workTooltip(state) {
+    const { peers, todo } = state.data;
+    if (!peers && !todo) return '';
+    const md = new Markdown();
     if (todo) {
         md.appendMarkdown(`### Tasks ${todo.done}/${todo.total}\n\n`);
         if (todo.active) md.appendMarkdown(`$(play) ${todo.active}\n\n`);
     }
-    if (peers.total > 0) {
+    if (peers && peers.total > 0) {
         const rows = [['sessions', String(peers.total)]];
         if (peers.busy > 0) rows.push(['busy right now', String(peers.busy)]);
         md.appendMarkdown(`${todo ? '**Other sessions here**' : '### Other sessions here'}\n\n${table(rows)}`);
     }
-    workItem.tooltip = md;
-    workItem.show();
+    return md.value;
+}
+
+// One builder per topic, so a segment that mixes topics gets both sections
+// joined rather than a tooltip about half of what it shows.
+const TOOLTIPS = {
+    limits: (state) => {
+        const d = state.data;
+        if (!d.limits || !d.weekly) return '';
+        return limitsTooltip(d.limits, d.pace, d.now, d.now - u.mtime(u.CACHE) > STALE_AFTER);
+    },
+    context: contextTooltip,
+    money: moneyTooltip,
+    work: workTooltip,
+};
+
+// The percentage a topic colours by. A segment showing both a limit and a
+// context fill takes the louder of the two: the point of the colour is to be
+// noticed, and the quieter number would hide the other one.
+const COLOUR_BY = {
+    limits: (d) => (d.weekly ? d.weekly.pct : -1),
+    context: (d) => (d.ctx ? d.ctx.pct : -1),
+    money: () => -1,
+    work: () => -1,
+};
+
+function render(state) {
+    const registry = state.registry;
+    state.items.forEach((item, i) => {
+        const template = state.segments[i];
+        const out = seg.renderSegment(template, state.data, registry);
+        if (!out.visible) { item.hide(); return; }
+
+        item.text = out.text;
+        const sections = out.topics.map((topic) => TOOLTIPS[topic](state)).filter(Boolean);
+        if (sections.length) {
+            const md = new vscode.MarkdownString(sections.join('\n\n---\n\n'), true);
+            item.tooltip = md;
+        } else {
+            item.tooltip = 'Claude — click for the usage dashboard';
+        }
+        const worst = Math.max(-1, ...out.topics.map((topic) => COLOUR_BY[topic](state.data)));
+        item.backgroundColor = background(worst);
+        item.show();
+    });
+}
+
+// Fields whose value comes out of the single expensive pass over the whole
+// transcript, and the context fields that come from its tail.
+const MONEY_FIELDS = ['cost', 'burn', 'requests', 'duration', 'apiShare', 'added', 'removed'];
+const CONTEXT_FIELDS = ['ctx', 'ctxTokens', 'ctxWindow', 'ctxCache', 'model', 'effort', 'thinking', 'branch', 'compact'];
+
+// Everything cheap enough for the ten-second tick: the transcript tail, and the
+// two registry reads behind peers and the task list.
+function collectFast(state) {
+    const d = state.data;
+    d.now = Math.floor(Date.now() / 1000);
+    const own = state.session;
+    if (!own || !state.workspace) {
+        d.ctx = null; d.peers = null; d.todo = null;
+        state.context = null;
+        return;
+    }
+    if (CONTEXT_FIELDS.some((f) => state.needs.has(f))) {
+        d.ctx = s.contextOf(s.readTail(s.transcriptPath(state.workspace, own.sessionId)));
+        state.context = d.ctx;
+    }
+    if (state.needs.has('peers') || state.needs.has('peersBusy')) {
+        d.peers = s.peersOf(state.workspace, own.sessionId);
+    }
+    if (state.needs.has('todo') || state.needs.has('todoActive')) {
+        d.todo = s.todoOf(own.sessionId);
+    }
+}
+
+// The expensive half: the limit cache, the full transcript pass, today's spend
+// across every project, and the machine-wide counters. Only what some segment
+// actually asks for is read — a bar that never mentions {today} does not pay
+// for a walk over every project directory.
+function collectSlow(state) {
+    const d = state.data;
+    d.now = Math.floor(Date.now() / 1000);
+
+    const payload = u.readCache(d.now);
+    const lim = payload ? u.limitsOf(payload) : null;
+    d.limits = lim;
+    d.weekly = lim && lim.weekly ? lim.weekly : null;
+    d.session = lim && lim.session ? lim.session : null;
+    d.scoped = lim ? lim.scoped : [];
+    d.pace = d.weekly ? u.pace(d.weekly, d.now) : null;
+    d.bar = d.weekly && d.pace ? u.bar(d.weekly.pct, d.pace.plan) : '';
+    // Every window in this VS Code session records the same reading, and only
+    // the first one to see a change writes a row — the rest find it unchanged.
+    // The endpoint keeps no history, so if nobody writes it down, the shape of
+    // the week is gone.
+    if (lim && lim.weekly && state.storageDir) hist.recordLimits(state.storageDir, lim);
+
+    if (state.session && state.workspace) {
+        // The whole transcript is parsed for this, so it only happens when some
+        // segment asks a question that needs it.
+        if (MONEY_FIELDS.some((f) => state.needs.has(f))) {
+            state.stats = s.sessionStats(s.transcriptPath(state.workspace, state.session.sessionId));
+            d.stats = state.stats;
+        }
+        if (state.needs.has('today')) { state.todayUsd = s.costToday().usd; d.todayUsd = state.todayUsd; }
+        state.compactPct = s.autoCompactPct(state.workspace, state.context?.window || 0);
+        state.settings = s.settingsOf(state.workspace);
+        state.version = s.versionInfo(state.session.version);
+        d.compactPct = state.compactPct;
+        d.settings = state.settings;
+        d.version = state.version;
+    } else {
+        state.stats = null;
+        d.stats = null;
+    }
+
+    if (state.needs.has('jobs') || state.needs.has('sessions') || state.needs.has('openTasks')) {
+        d.machine = machineCounters(state.needs);
+    }
+}
+
+// Machine-wide counters, read straight from ~/.claude. Sizes are skipped — a
+// status bar has no use for them and they are what makes that walk slow.
+function machineCounters(needs) {
+    const out = { jobs: 0, sessions: 0, openTasks: 0 };
+    try {
+        if (needs.has('jobs')) {
+            out.jobs = sys.jobs(sys.ROOT, { withSizes: false }).filter((j) => j.state === 'working').length;
+        }
+        if (needs.has('sessions')) {
+            out.sessions = sys.live().sessions.filter((x) => x.alive).length;
+        }
+        if (needs.has('openTasks')) {
+            out.openTasks = sys.tasks().reduce((a, t) => a + t.open.length, 0);
+        }
+    } catch { /* a half-readable tree must not take the bar down */ }
+    return out;
 }
 
 // The heavy work — the network call for limits and the full transcript pass for
@@ -243,17 +320,17 @@ function renderWork(state) {
 function slowTick(state) {
     if (u.stampExpired(Math.floor(Date.now() / 1000))) {
         u.touchStamp();
-        u.refreshUsage().then(() => renderLimits(state), () => { /* draw from cache */ });
+        u.refreshUsage().then(() => { collectSlow(state); render(state); }, () => { /* draw from cache */ });
     }
     refreshSession(state);
-    if (state.session && state.workspace) {
-        const file = s.transcriptPath(state.workspace, state.session.sessionId);
-        state.stats = s.sessionStats(file);
-        state.todayUsd = s.costToday().usd;
-        state.compactPct = s.autoCompactPct(state.workspace, state.context?.window || 0);
-        state.settings = s.settingsOf(state.workspace);
-        state.version = s.versionInfo(state.session.version);
-    }
+    collectFast(state);
+    collectSlow(state);
+    render(state);
+}
+
+function fastTick(state) {
+    refreshSession(state);
+    collectFast(state);
     render(state);
 }
 
@@ -298,11 +375,52 @@ async function buildIndex(storageDir, { force = false } = {}) {
     });
 }
 
+// The installation snapshot without the disk walk takes milliseconds; with it,
+// a second or two over three gigabytes. So the sizes are measured on the first
+// open, kept for an hour, and re-measured whenever Reindex is pressed.
+const SYSTEM_TTL = 3600 * 1000;
+let systemCache = null;
+
+function systemSnapshot(state, index, { force = false } = {}) {
+    const fresh = systemCache && !force && Date.now() - systemCache.at < SYSTEM_TTL;
+    if (fresh) return systemCache;
+
+    // Project directories and the session→project map come from the index, so
+    // the snapshot can name a task list's repository and price project memory
+    // without walking the transcript tree a second time.
+    const projects = new Set();
+    const sessionProjects = {};
+    for (const entry of Object.values(index.files)) {
+        for (const row of (entry && entry.agg ? entry.agg.sessions : [])) {
+            if (row.kind === 'main' && row.id) sessionProjects[row.id] = row.project;
+        }
+    }
+    for (const folder of vscode.workspace.workspaceFolders || []) projects.add(folder.uri.fsPath);
+    if (state && state.workspace) projects.add(state.workspace);
+
+    try {
+        systemCache = sys.snapshot({
+            workspace: (state && state.workspace) || '',
+            projects: [...projects],
+            sessionProjects,
+        });
+    } catch {
+        // A tree that is half-readable must not take the dashboard down with it.
+        systemCache = null;
+    }
+    return systemCache;
+}
+
 async function showDashboard(context, { force = false } = {}) {
     const storageDir = context.globalStorageUri.fsPath;
     const { index, stats } = await buildIndex(storageDir, { force });
     const total = ix.summarize(index);
-    const html = dashboard.render(index, total, { files: stats.total, lastRun: Date.now() });
+    const html = dashboard.render(index, total, {
+        files: stats.total,
+        lastRun: Date.now(),
+        history: hist.readHistory(storageDir),
+        system: systemSnapshot(context.claudeState, index, { force }),
+    });
 
     if (!panel) {
         panel = vscode.window.createWebviewPanel(
@@ -319,24 +437,62 @@ async function showDashboard(context, { force = false } = {}) {
     panel.webview.html = html;
 }
 
-function activate(context) {
+// The helpers the field registry formats with. They live in usage.js and
+// session.js, and are passed in rather than imported there so segments.js stays
+// a string builder with no idea where its numbers come from.
+function buildRegistry() {
+    return seg.fields({
+        fmtCost,
+        fmtDry: (ts) => u.fmtDry(ts),
+        fmtLeft: u.fmtLeft,
+        fmtAbs: (ts) => u.fmtAbs(ts),
+        fmtDuration: s.fmtDuration,
+        tok,
+        shortModel: short,
+    });
+}
+
+/**
+ * Create one status-bar item per segment, discarding whatever was there before.
+ * Called on activation and again whenever the configuration changes, so a new
+ * template — or a different alignment — takes effect without a window reload.
+ */
+function applyConfig(state) {
     const cfg = vscode.workspace.getConfiguration('claudeStatusline');
+    const configured = cfg.get('segments');
+    state.segments = Array.isArray(configured) && configured.length > 0
+        ? configured.map(String) : seg.DEFAULT_SEGMENTS;
+    // Only the fields some segment mentions are ever collected; the rest of the
+    // reads are skipped entirely.
+    state.needs = seg.usedFields(state.segments, state.registry);
+
     const align = cfg.get('alignment') === 'left'
         ? vscode.StatusBarAlignment.Left
         : vscode.StatusBarAlignment.Right;
     const priority = cfg.get('priority');
-    // Every item opens the dashboard: each number raises the same question —
-    // where did this go — and the answer is one page, not four destinations.
-    const item = (id, name, offset) => {
-        const bar = vscode.window.createStatusBarItem(id, align, priority - offset);
-        bar.name = name;
+
+    for (const item of state.items) item.dispose();
+    // Priority descends along the list, so segments appear left to right in the
+    // order they are written whichever side of the bar they sit on.
+    state.items = state.segments.map((template, i) => {
+        const bar = vscode.window.createStatusBarItem(`claudeStatusline.segment${i}`, align, priority - i);
+        bar.name = `Claude ${i + 1}`;
+        // Every item opens the dashboard: each number raises the same question —
+        // where did this go — and the answer is one page, not four destinations.
         bar.command = 'claudeStatusline.dashboard';
-        context.subscriptions.push(bar);
         return bar;
-    };
+    });
+}
+
+function activate(context) {
+    const cfg = vscode.workspace.getConfiguration('claudeStatusline');
 
     const state = {
         workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
+        // The limit history lives beside the index, in storage the extension
+        // owns. ~/.claude belongs to Claude Code; reading it is one thing,
+        // leaving files of ours in it is another.
+        storageDir: context.globalStorageUri.fsPath,
         session: null,
         context: null,
         stats: null,
@@ -344,20 +500,31 @@ function activate(context) {
         compactPct: -1,
         settings: { outputStyle: '', advisor: '', model: '' },
         version: { current: '', latest: '' },
-        limitsItem: item('claudeStatusline.limits', 'Claude limits', 0),
-        contextItem: item('claudeStatusline.context', 'Claude context', 1),
-        moneyItem: item('claudeStatusline.money', 'Claude spend', 2),
-        workItem: item('claudeStatusline.work', 'Claude work', 3),
+        registry: buildRegistry(),
+        segments: [],
+        needs: new Set(),
+        items: [],
+        // Everything the templates read, refilled by the two collectors.
+        data: { now: 0, scoped: [], bar: '', machine: null },
     };
+    // The dashboard is opened from a command, which is handed the extension
+    // context rather than this state; parking it here keeps the workspace
+    // available there without a second module-level variable.
+    context.claudeState = state;
 
+    applyConfig(state);
     slowTick(state);
 
     const slow = setInterval(() => slowTick(state), Math.max(15, cfg.get('refreshInterval')) * 1000);
-    const fast = setInterval(() => { refreshSession(state); renderContext(state); renderWork(state); },
-        CONTEXT_TICK * 1000);
+    const fast = setInterval(() => fastTick(state), CONTEXT_TICK * 1000);
 
     context.subscriptions.push(
-        { dispose: () => { clearInterval(slow); clearInterval(fast); } },
+        { dispose: () => { clearInterval(slow); clearInterval(fast); for (const i of state.items) i.dispose(); } },
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            if (!e.affectsConfiguration('claudeStatusline')) return;
+            applyConfig(state);
+            slowTick(state);
+        }),
         // Focus returning to the window is the only sensible "the user is looking
         // again" signal; there is no event channel from the CLI itself.
         vscode.window.onDidChangeWindowState((w) => { if (w.focused) slowTick(state); }),
@@ -368,7 +535,37 @@ function activate(context) {
             await u.refreshUsage();
             slowTick(state);
         }),
+        vscode.commands.registerCommand('claudeStatusline.placeholders', () => showPlaceholders(state)),
     );
+}
+
+/**
+ * The list of placeholders with what each one says right now. A template is
+ * written against live data, so a static table in a README is the wrong place
+ * to learn it from: here every row shows the value this machine would put in
+ * the bar this minute, and picking one copies it.
+ */
+async function showPlaceholders(state) {
+    collectFast(state);
+    collectSlow(state);
+    const items = Object.entries(state.registry).map(([name, field]) => {
+        let value = '';
+        try { value = String(field.get(state.data, '') ?? ''); } catch { value = ''; }
+        return {
+            label: `{${name}}`,
+            description: value ? `→ ${value}` : '(nothing to show right now)',
+            detail: `${field.topic} · ${field.doc}`,
+            name,
+        };
+    });
+    const picked = await vscode.window.showQuickPick(items, {
+        title: 'Claude statusline placeholders',
+        placeHolder: 'Pick one to copy it — paste into claudeStatusline.segments',
+        matchOnDetail: true,
+    });
+    if (!picked) return;
+    await vscode.env.clipboard.writeText(picked.label);
+    vscode.window.showInformationMessage(`${picked.label} copied — put it in claudeStatusline.segments`);
 }
 
 function deactivate() {}

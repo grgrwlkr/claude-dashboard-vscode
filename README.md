@@ -35,31 +35,127 @@ and the lines added and removed during the session.
 **Work.** `⧉` counts other live sessions in this repository (busy ones in
 parentheses), `▸` tracks the current session's task list.
 
+## Configuring the bar
+
+The four items above are just the default value of `claudeStatusline.segments`.
+One string is one status-bar item, left to right:
+
+```jsonc
+"claudeStatusline.segments": [
+  "✻ 7d {weekly} {weeklyBar}[ dry {dry}]",
+  "▤ {ctx} {ctxTokens}/{ctxWindow}",
+  "[~{cost}][ {burn}/h]",
+  "[⧉ {peers}][ ▸ {todo}]"
+]
+```
+
+Anything outside `{…}` is literal, so the icons and separators are yours to
+choose — including VS Code's own `$(flame)` codicons. Square brackets mark an
+**optional group**: it disappears whole when a placeholder inside it has nothing
+to say, which is how `[ dry {dry}]` stays silent for the first half hour of a
+window and appears by itself once a forecast exists. A segment whose
+placeholders are *all* empty hides itself; a segment of pure text always shows.
+A backslash escapes `{`, `}`, `[` and `]`.
+
+Run **Claude Statusline: List status-bar placeholders** to see every name
+alongside the value it has on this machine right now, and copy one.
+
+| Group | Placeholders |
+| --- | --- |
+| Limits | `{weekly}` `{weeklyBar}` `{plan}` `{drift}` `{dry}` `{dryAt}` `{dryLeft}` `{reset}` `{resetLeft}` `{session5h}` `{session5hLeft}` `{scoped}` `{scoped:Opus}` |
+| Session | `{ctx}` `{ctxTokens}` `{ctxWindow}` `{ctxCache}` `{compact}` `{model}` `{effort}` `{advisor}` `{thinking}` `{outputStyle}` `{branch}` `{version}` `{update}` |
+| Spend | `{cost}` `{burn}` `{today}` `{requests}` `{duration}` `{apiShare}` `{added}` `{removed}` |
+| Work | `{peers}` `{peersBusy}` `{todo}` `{todoActive}` `{jobs}` `{sessions}` `{openTasks}` |
+
+A few worked examples:
+
+```jsonc
+// One dense item instead of four
+["✻{weekly} ▤{ctx} ~{cost}[ ⧉{peers}]"]
+
+// Pace and per-model windows, which the default bar leaves to the tooltip
+["7d {weekly} ({drift})[ · opus {scoped:Opus}]", "resets {resetLeft}"]
+
+// Machine-wide rather than session-scoped
+["$(server) {sessions} sessions[ · {jobs} jobs][ · {openTasks} open]", "today ~{today}"]
+```
+
+Tooltips are not configurable and do not need to be: each segment gets the full
+tooltip of every topic it mentions, so hiding a number from the bar never hides
+it from the hover. Colour follows the same rule — a segment carrying a limit or
+a context fill turns yellow past 50 % and red past 80 %.
+
+Reading is lazy: a field no segment mentions is never collected, so a bar
+without `{today}` does not pay for the walk across every project it needs.
+
 ## Usage dashboard
 
-Click any status-bar item, or run **Claude: Open usage dashboard**. Seven tabs, drawn
-from an index of every transcript on the machine:
+Click any status-bar item, or run **Claude: Open usage dashboard**. Twenty tabs in
+four sections: three drawn from an index of every transcript on the machine, and
+one that reads the installation itself.
+
+**Spend** — where the money went:
 
 | Tab | What it answers |
 | --- | --- |
 | Overview | spend all-time / 30d / 7d / today, daily stacked chart by model, a calendar heatmap, model breakdown, hour-of-day profile |
-| Sessions | every transcript as a row: project, kind, models, duration, requests, tokens, spend |
+| Sessions | every transcript as a row: its own title, project, kind, entrypoint, models and effort, duration, requests, tokens, spend |
 | Projects | which repository the money went to |
 | Branches | spend per git branch, accumulated across sessions |
-| Agents & workflows | main vs subagent vs workflow spend, and each workflow run with its agent count |
+
+**Work** — what it was spent on:
+
+| Tab | What it answers |
+| --- | --- |
+| Agents & workflows | main vs subagent vs workflow spend, what one agent costs (median, p90, max output tokens), agents per workflow run |
+| Tools & MCP | which tools were called and how often, which of them fail, which MCP servers earn their place in the config, how many advisor consultations there were |
+| Files | every file an edit or write touched, by edit count and by lines changed, plus the per-project numbers the client keeps for itself |
 | Skills | which skill was driving when the tokens burned, from the transcript's own `attributionSkill` |
-| Content | prompt counts, length histogram, where prompts came from, and the words you use |
+| Content | prompt counts, length histogram, where prompts came from, the words you use, and the client's own prompt log in aggregate |
+
+**Efficiency** — whether it was spent well:
+
+| Tab | What it answers |
+| --- | --- |
+| Models & effort | spend as a model × effort matrix, which client the requests came from (`cli`, `claude-vscode`, `sdk-py`), output per request per tier |
+| Cache | share served from cache, what the reads saved, reads per token written, the 1h/5m TTL split, tokens by day |
+| Friction | failed tool calls, denials, compactions and the context they dropped, sessions with the most failures |
+| Limits | the weekly window over time, one line per week, overlaid against the even-spend diagonal |
+
+**Setup** — the installation rather than its usage, read live from `~/.claude`:
+
+| Tab | What it answers |
+| --- | --- |
+| Health | settings as they resolve, MCP servers, plugins and what each ships — each marked used or idle by whether anything of it appears in the transcripts — hooks, permission rules |
+| Background jobs | every background agent: state, tokens burned, the session it holds, and the scratch directory it never cleaned up |
+| Live now | sessions whose process is alive, editors attached, daemon workers — and registry entries left by sessions that crashed |
+| Task lists | todo lists left behind by sessions, and what is still open in them |
+| Disk | every directory under `~/.claude` by size, with the leftovers named: a finished job's scratch, abandoned marketplace clones, superseded plugin copies |
+| Context budget | the files loaded into every prompt — `CLAUDE.md`, `rules/`, project memory — sized in tokens and priced across every request made |
+| Changelog | the client's own changelog, cut at the version currently running |
+
+Nothing in the Setup section writes to `~/.claude`, and there is no delete
+button anywhere in it: the numbers are the point, the decision is the user's.
+Two files are never read at all — `.credentials.json`, and the `authToken` an
+IDE lock file carries.
 
 The Agents tab is the reason this exists: subagents and workflow agents write
 their own transcripts, so on a machine that runs them their spend is the larger
 half — and it is invisible in the terminal statusline, which only ever sees one
-session.
+session. The Models & effort tab answers the question next to it: a subagent
+dispatched without an explicit model or effort silently inherits the session's,
+and nothing else on the machine shows that it happened.
 
 **Indexing.** The first run reads every transcript — about 1.1 GB and 4–5 s on
 the machine this was built on — behind a progress notification. After that a
 file whose size and mtime are unchanged is reused as-is, so a refresh costs tens
 of milliseconds. The index lives in the extension's global storage, holds only
 aggregates, and is rebuilt from scratch by **Claude: Rebuild the usage index**.
+
+Only a fraction of the lines in a transcript are parsed: a line is JSON-decoded
+only if it carries a marker that matters (usage, a typed prompt, a failed tool
+result, a denial, a compaction, a title). The rest — the bulk of the file, tool
+traffic — is skipped by a single regex test.
 
 **The Content tab never stores prompt text** — only counts, a length histogram
 and word tallies. Words shorter than five letters are ignored, and anything
@@ -88,7 +184,16 @@ Nothing is asked of the CLI — it has no channel to ask.
 - **Spend** — computed from public per-million-token rates in `pricing.js`
   (checked 2026-08-08). It is an **estimate, not a bill**: the real figure
   depends on plan and discounts. An unrecognised model is priced at Opus rates
-  and flagged as such in the tooltip.
+  and flagged as such in the tooltip. A cache write is priced by the TTL the
+  record reports — `usage.cache_creation` splits it into 5-minute and hourly
+  tokens, billed at 1.25x and 2x input respectively; a record too old to carry
+  the split is priced at the cheaper of the two.
+- **Limit history** — nowhere, until this extension writes it: the usage
+  endpoint answers only for the present moment. A row is appended to
+  `limits-history.jsonl` in the extension's global storage whenever a percentage
+  moves, plus a heartbeat every six hours so a quiet stretch is distinguishable
+  from a closed laptop. Nothing of ours is written into `~/.claude`, which
+  belongs to Claude Code.
 
 Two figures are deliberately marked with a tilde: spend, and the share of time
 spent waiting on the model — there is no exact `api_duration_ms` on disk, so it

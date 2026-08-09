@@ -132,6 +132,136 @@ test('an index written by an older version is discarded, not misread', () => tre
     assert.deepEqual(loaded.files, {});
 }));
 
+test('a reply is attributed to its model, effort, entrypoint and speed together', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [
+        rec({ effort: 'xhigh', entrypoint: 'cli' }),
+        rec({ effort: 'low', entrypoint: 'cli' }),
+        rec({ entrypoint: 'sdk-py' }, { speed: 'fast' }),
+    ]);
+    const agg = ix.indexFile(file);
+    assert.equal(agg.efforts[ix.effortKey('claude-opus-5', 'xhigh')].msgs, 1);
+    assert.equal(agg.efforts[ix.effortKey('claude-opus-5', 'low')].msgs, 1);
+    // An SDK session reports no effort at all — that is a fact worth keeping,
+    // not a hole to fill with the session's own tier.
+    assert.equal(agg.efforts[ix.effortKey('claude-opus-5', '')].msgs, 1);
+    assert.equal(agg.entrypoints.cli.msgs, 2);
+    assert.equal(agg.entrypoints['sdk-py'].msgs, 1);
+    assert.equal(agg.speeds.fast.msgs, 1);
+    assert.deepEqual(agg.sessions[0].efforts.sort(), ['low', 'xhigh']);
+}));
+
+test('a cache write is split by TTL all the way into the aggregate', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [rec({}, {
+        output_tokens: 0,
+        cache_read_input_tokens: 1e6,
+        cache_creation_input_tokens: 1e6,
+        cache_creation: { ephemeral_1h_input_tokens: 6e5, ephemeral_5m_input_tokens: 4e5 },
+    })]);
+    const b = ix.indexFile(file).models['claude-opus-5'];
+    assert.equal(b.cw1h, 6e5);
+    assert.equal(b.cw5m, 4e5);
+    assert.equal(b.cw1h + b.cw5m, b.cacheWrite);
+    // 0.6M at 2x $5 + 0.4M at 1.25x $5 + 1M read at 0.1x $5
+    assert.ok(Math.abs(b.cost - (6 + 2.5 + 0.5)) < 1e-9);
+    assert.equal(b.saved, 4.5); // what those reads would have cost as fresh input
+}));
+
+test('tool calls are counted and a failed result is blamed on the right tool', () => tree(({ write }) => {
+    const call = (id, name) => JSON.stringify({
+        timestamp: new Date(T0).toISOString(),
+        message: {
+            model: 'claude-opus-5',
+            usage: { input_tokens: 0, output_tokens: 1 },
+            content: [{ type: 'tool_use', id, name }],
+        },
+    });
+    const result = (id, isError, over = {}) => JSON.stringify({
+        type: 'user',
+        timestamp: new Date(T0).toISOString(),
+        message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError }] },
+        ...over,
+    });
+
+    const file = write('sess-1.jsonl', [
+        call('t1', 'Bash'), result('t1', true),
+        call('t2', 'Bash'), result('t2', false),
+        call('t3', 'Read'), result('t3', false, { toolDenialKind: 'user-rejected' }),
+        JSON.stringify({
+            timestamp: new Date(T0).toISOString(),
+            message: {
+                model: 'claude-opus-5',
+                usage: { input_tokens: 0, output_tokens: 1 },
+                content: [{ type: 'server_tool_use', id: 's1', name: 'advisor' }],
+            },
+        }),
+    ]);
+    const agg = ix.indexFile(file);
+    assert.equal(agg.tools.Bash.calls, 2);
+    assert.equal(agg.tools.Bash.errors, 1);
+    assert.equal(agg.tools.Read.denials, 1);
+    assert.equal(agg.tools.advisor.calls, 1);
+    assert.equal(agg.friction.toolErrors, 1);
+    assert.equal(agg.friction.denials['user-rejected'], 1);
+    assert.equal(agg.sessions[0].tools, 4);
+    assert.equal(agg.sessions[0].errors, 1);
+}));
+
+test('compaction is recorded with the context it threw away', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [
+        rec(),
+        JSON.stringify({
+            timestamp: new Date(T0).toISOString(),
+            compactMetadata: {
+                trigger: 'auto', preTokens: 500000, postTokens: 20000,
+                cumulativeDroppedTokens: 480000, durationMs: 120000,
+            },
+        }),
+        JSON.stringify({ timestamp: new Date(T0).toISOString(), interruptedByShutdown: true, message: { usage: null } }),
+    ]);
+    const f = ix.indexFile(file).friction;
+    assert.equal(f.compactions.auto, 1);
+    assert.equal(f.droppedTokens, 480000);
+    assert.equal(f.compactMs, 120000);
+    assert.equal(f.shutdowns, 1);
+}));
+
+test('a session takes the last title written, and a typed one wins', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [
+        rec(),
+        JSON.stringify({ type: 'ai-title', sessionId: 'sess-1', aiTitle: 'What the model called it' }),
+        JSON.stringify({ type: 'custom-title', sessionId: 'sess-1', customTitle: 'What I called it' }),
+    ]);
+    assert.equal(ix.indexFile(file).sessions[0].title, 'What I called it');
+}));
+
+test('summarize folds the new dimensions and the friction counters', () => tree(({ root, store, write }) => {
+    write('a.jsonl', [rec({ effort: 'xhigh', entrypoint: 'cli' })]);
+    write('b.jsonl', [
+        rec({ effort: 'xhigh', entrypoint: 'claude-vscode' }),
+        JSON.stringify({
+            timestamp: new Date(T0).toISOString(),
+            compactMetadata: { trigger: 'manual', cumulativeDroppedTokens: 1000 },
+        }),
+    ]);
+    const total = ix.summarize(ix.refreshIndex(store, { root }).index);
+    assert.equal(total.efforts[ix.effortKey('claude-opus-5', 'xhigh')].msgs, 2);
+    assert.equal(total.entrypoints.cli.msgs, 1);
+    assert.equal(total.entrypoints['claude-vscode'].msgs, 1);
+    assert.equal(total.friction.compactions.manual, 1);
+    assert.equal(total.friction.droppedTokens, 1000);
+}));
+
+test('the line prefilter skips tool traffic but not a record that matters', () => {
+    assert.ok(ix.INTERESTING.test('{"message":{"usage":{"input_tokens":1}}}'));
+    assert.ok(ix.INTERESTING.test('{"type":"user","toolDenialKind":"user-rejected"}'));
+    assert.ok(ix.INTERESTING.test('{"content":[{"type":"tool_result","is_error":true}]}'));
+    assert.ok(ix.INTERESTING.test('{"type":"ai-title","aiTitle":"x"}'));
+    assert.ok(ix.INTERESTING.test('{"compactMetadata":{"trigger":"auto"}}'));
+    // The bulk of a transcript: a successful tool result carrying a file.
+    assert.ok(!ix.INTERESTING.test('{"type":"user","toolUseResult":{"stdout":"ok","interrupted":false}}'));
+    assert.ok(!ix.INTERESTING.test('{"type":"system","hookErrors":[],"level":"suggestion"}'));
+});
+
 test('dayKey uses local dates, so a day boundary is the user\'s midnight', () => {
     const noon = new Date(2026, 7, 8, 12, 0, 0).getTime();
     assert.equal(ix.dayKey(noon), '2026-08-08');

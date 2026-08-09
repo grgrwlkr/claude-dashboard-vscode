@@ -4,7 +4,10 @@ const db = require('../dashboard');
 const ix = require('../indexer');
 
 function bucket(cost, msgs = 1, extra = {}) {
-    return { in: 0, out: 0, cacheRead: 0, cacheWrite: 0, cost, msgs, ...extra };
+    return {
+        in: 0, out: 0, cacheRead: 0, cacheWrite: 0,
+        cw1h: 0, cw5m: 0, saved: 0, cost, msgs, ...extra,
+    };
 }
 
 test('esc neutralises markup coming from paths and branch names', () => {
@@ -89,35 +92,227 @@ test('dayModelMatrix splits a file across its days without inventing spend', () 
     assert.ok(Math.abs(m['2026-08-08']['claude-opus-5'] - 10) < 1e-9);
 });
 
-test('render produces one pane per tab and escapes hostile project names', () => {
-    const index = {
+function demoIndex(over = {}) {
+    return {
         files: {
             '/x.jsonl': {
                 agg: {
-                    days: { '2026-08-08': bucket(5) },
-                    models: { 'claude-opus-5': bucket(5) },
+                    days: { '2026-08-08': bucket(5, 1, { in: 100, out: 50, cacheRead: 900, cacheWrite: 400, cw1h: 300, cw5m: 100, saved: 4 }) },
+                    models: { 'claude-opus-5': bucket(5, 1, { in: 100, out: 50, cacheRead: 900, cacheWrite: 400, cw1h: 300, cw5m: 100, saved: 4 }) },
                     branches: { '<b>main': bucket(5) },
                     skills: {},
                     hours: { 14: bucket(5) },
+                    efforts: { [ix.effortKey('claude-opus-5', 'xhigh')]: bucket(5, 1, { out: 50 }) },
+                    entrypoints: { cli: bucket(5) },
+                    speeds: { standard: bucket(5) },
+                    tools: { Bash: { calls: 9, errors: 2, denials: 1 }, 'mcp__qmd__query': { calls: 3, errors: 0, denials: 0 } },
+                    friction: {
+                        toolErrors: 2, denials: { 'user-rejected': 1 }, interrupts: 0, hookErrors: 0,
+                        shutdowns: 1, compactions: { auto: 2 }, droppedTokens: 40000, compactMs: 60000,
+                    },
                     sessions: [{
-                        id: 'sess', kind: 'main', project: '<img src=x>', slug: 's',
-                        start: 1, end: 2, msgs: 3, cost: 5, tokens: 10, models: ['claude-opus-5'],
-                        branch: 'main', agentId: '', workflowId: '',
+                        id: 'sess', kind: 'main', project: '<img src=x>', slug: 's', title: '<i>titled</i>',
+                        entrypoint: 'cli', start: 1, end: 2, msgs: 3, cost: 5, tokens: 10, out: 50,
+                        cacheRead: 900, cacheWrite: 400, tools: 9, errors: 2,
+                        models: ['claude-opus-5'], efforts: ['xhigh'], branch: 'main', agentId: '', workflowId: '',
                     }],
                     prompts: { count: 2, chars: 100, longest: 80, byHour: { 14: 2 }, bySource: { typed: 2 }, words: { hello: 3 }, lens: { 0: 2 } },
+                    ...over,
                 },
             },
         },
     };
-    const total = ix.summarize(index);
-    const html = db.render(index, total, { files: 1, lastRun: Date.now() });
+}
 
-    assert.equal((html.match(/role="tab"/g) || []).length, 7);
-    assert.equal((html.match(/class="tab"/g) || []).length, 7);
+test('render produces one pane per tab and escapes hostile project names', () => {
+    const index = demoIndex();
+    const total = ix.summarize(index);
+    const html = db.render(index, total, { files: 1, lastRun: Date.now(), history: [] });
+
+    const tabCount = db.SECTIONS.reduce((a, [, , items]) => a + items.length, 0);
+    assert.equal((html.match(/role="tab"/g) || []).length, tabCount);
+    assert.equal((html.match(/class="tab"/g) || []).length, tabCount);
     assert.ok(!html.includes('<img src=x>'), 'a project name must not reach the DOM raw');
     assert.ok(!html.includes('<b>main'), 'a branch name must not reach the DOM raw');
+    assert.ok(!html.includes('<i>titled</i>'), 'a session title must not reach the DOM raw');
     assert.match(html, /Content-Security-Policy/);
     assert.ok(!/undefined|NaN/.test(html), 'no placeholder leaked into the page');
+});
+
+test('only the first section is on screen, and every tab belongs to one', () => {
+    const html = db.navHtml();
+    const shown = [...html.matchAll(/<button role="tab" data-tab="([^"]+)" data-section="([^"]+)"([^>]*)>/g)];
+    assert.equal(shown.length, db.SECTIONS.reduce((a, [, , items]) => a + items.length, 0));
+    const visible = shown.filter((m) => !m[3].includes('hidden'));
+    assert.deepEqual(visible.map((m) => m[2]), Array(4).fill('spend'));
+    assert.equal((html.match(/aria-selected="true"/g) || []).length, 2); // one section, one tab
+});
+
+test('the page survives an index with none of the new dimensions in it', () => {
+    // An aggregate written before those fields existed: the version guard makes
+    // this unlikely, but a half-written index must degrade, not throw.
+    const index = demoIndex();
+    const agg = index.files['/x.jsonl'].agg;
+    delete agg.efforts; delete agg.entrypoints; delete agg.speeds;
+    delete agg.tools; delete agg.friction;
+    const total = ix.summarize(index);
+    const html = db.render(index, total, { files: 1, lastRun: Date.now(), history: null });
+    assert.match(html, /No tool calls recorded/);
+    assert.ok(!/undefined|NaN/.test(html));
+});
+
+test('effortMatrix orders tiers by depth and keeps a missing effort visible', () => {
+    const efforts = {
+        [ix.effortKey('claude-opus-5', 'xhigh')]: bucket(30),
+        [ix.effortKey('claude-opus-5', 'low')]: bucket(5),
+        [ix.effortKey('claude-fable-5', '')]: bucket(10),
+    };
+    const m = db.effortMatrix(efforts);
+    assert.deepEqual(m.tiers, ['low', 'xhigh', 'not sent']);
+    assert.deepEqual(m.models, ['claude-opus-5', 'claude-fable-5']); // by spend
+    assert.equal(m.get('claude-opus-5', 'xhigh').cost, 30);
+    assert.equal(m.get('claude-fable-5', 'xhigh'), null);
+});
+
+test('mcpServer reads the server out of a tool name, and only for MCP tools', () => {
+    assert.equal(db.mcpServer('mcp__qmd__query'), 'qmd');
+    assert.equal(db.mcpServer('mcp__n8n-mcp__get_node'), 'n8n-mcp');
+    assert.equal(db.mcpServer('mcp__claude_ai_Gmail__get_message'), 'claude_ai_Gmail');
+    assert.equal(db.mcpServer('Bash'), null);
+});
+
+test('quantiles describe the fleet, not the outlier', () => {
+    assert.equal(db.quantiles([]), null);
+    const q = db.quantiles([10, 20, 30, 40, 1000]);
+    assert.equal(q.n, 5);
+    assert.equal(q.p50, 30);
+    assert.equal(q.max, 1000);
+});
+
+test('sessionLabel prefers a title and falls back to what the transcript is called', () => {
+    assert.equal(db.sessionLabel({ title: 'Fixing the parser', kind: 'main', id: 'abcdef123456' }), 'Fixing the parser');
+    assert.equal(db.sessionLabel({ title: '', kind: 'main', id: 'abcdef123456' }), 'abcdef12');
+    assert.equal(db.sessionLabel({ title: '', kind: 'agent', id: 'x', agentId: 'a7' }), 'agent a7');
+});
+
+test('lineChart draws one path per window and marks the plan', () => {
+    const svg = db.lineChart([
+        { label: 'last week', current: false, points: [{ x: 0, y: 0 }, { x: 7, y: 80 }] },
+        { label: 'this week', current: true, points: [{ x: 0, y: 0 }, { x: 3, y: 50 }] },
+    ]);
+    assert.equal((svg.match(/class="line"/g) || []).length, 2);
+    assert.match(svg, /class="plan"/);
+    assert.match(svg, /100%/);
+    assert.match(db.lineChart([]), /Nothing recorded/);
+});
+
+test('stackedTokens stacks the parts it is given and labels the busiest day', () => {
+    const days = {
+        '2026-08-07': bucket(0, 1, { cacheRead: 1000, cw1h: 500 }),
+        '2026-08-08': bucket(0, 1, { cacheRead: 3000, cw1h: 0 }),
+    };
+    const svg = db.stackedTokens(days, db.CACHE_PARTS);
+    assert.equal((svg.match(/<rect /g) || []).length, 3); // two parts one day, one the next
+    assert.match(svg, /3k/);
+});
+
+function demoSystem(over = {}) {
+    return {
+        at: Date.now(),
+        versions: { current: '2.1.226', latest: '2.1.226', waiting: false, installed: [{ version: '2.1.226' }] },
+        settings: { values: { model: { value: 'claude-opus-5', from: '~/.claude/settings.json' } }, env: { FOO: 'bar' } },
+        hooks: [{ event: 'PreToolUse', matcher: 'Bash', kind: 'command', command: 'guard.sh', from: '~/.claude/settings.json' }],
+        permissions: [{ mode: 'allow', rule: 'Bash(git status)', from: '~/.claude/settings.json' }],
+        mcp: [
+            { name: 'qmd', scope: 'user', transport: 'stdio', command: 'npx', project: '' },
+            { name: 'ghost', scope: 'user', transport: 'stdio', command: 'npx', project: '' },
+        ],
+        plugins: [
+            { name: 'used-one', marketplace: 'official', enabled: true, version: '1.0.0', copies: 1,
+                components: { skills: ['code-review'], agents: [], commands: [], hooks: 0, mcp: [] } },
+            { name: 'idle-one', marketplace: 'official', enabled: true, version: '2.0.0', copies: 3,
+                components: { skills: ['never-run'], agents: [], commands: [], hooks: 1, mcp: [] } },
+            { name: 'ghost-plugin', marketplace: 'official', enabled: true, copies: 0, missing: true,
+                components: { skills: [], agents: [], commands: [], hooks: 0, mcp: [] } },
+        ],
+        jobs: [{ id: 'aaa', name: '<script>x</script>', state: 'working', detail: '', tokens: 5000,
+            cliVersion: '2.1.226', cwd: '~/repo', sessionId: 'sess-1234', children: 0, at: Date.now(),
+            bytes: 700e6, tmpBytes: 654e6 }],
+        live: {
+            sessions: [{ id: 'a1b2c3d4', pid: 1, alive: true, cwd: '~/repo', entrypoint: 'cli', status: 'busy', name: '', version: '2.1.226', startedAt: Date.now() }],
+            ide: [{ pid: 2, alive: true, name: 'Visual Studio Code', transport: 'ws', folders: ['~/repo'] }],
+            daemon: { supervisorPid: 3, alive: true, workers: [{ short: 'w1', pid: 4, alive: true, sessionId: 's1', cwd: '~/repo', cliVersion: '2.1.226' }] },
+        },
+        tasks: [{ session: 'sess-1234', project: 'demo', at: Date.now(), total: 3, done: 1, open: ['finish the parser'] }],
+        disk: {
+            total: 3.1e9,
+            dirs: [{ name: 'projects', bytes: 1.2e9, kind: 'keep' }, { name: 'plugins', bytes: 800e6, kind: 'regenerable' }],
+            hogs: [{ path: 'jobs/aaa/tmp', bytes: 654e6, note: 'scratch of "wasm"' }],
+        },
+        context: { globalTokens: 24387, files: [{ path: '~/.claude/CLAUDE.md', scope: 'global', bytes: 68000, tokens: 17000 }] },
+        changelog: [{ version: '2.1.227', entries: ['something <b>new</b>'] }],
+        projects: [{ path: '~/repo', name: 'repo', lastCost: 1.5, lastDuration: 600000, apiDuration: 300000,
+            added: 100, removed: 20, webSearches: 3, fps: 58.2, fpsLow: 22, trusted: true, allowedTools: 4, mcpServers: 1, startedAt: Date.now() }],
+        prompts: { count: 1575, pasted: 10, byDay: { '2026-08-08': 40 }, byProject: { demo: 100 }, first: Date.now(), last: Date.now() },
+        ...over,
+    };
+}
+
+test('the Setup section renders every panel and escapes what it reads from disk', () => {
+    const index = demoIndex();
+    const total = ix.summarize(index);
+    const html = db.render(index, total, { files: 1, lastRun: Date.now(), history: [], system: demoSystem() });
+
+    assert.match(html, /data-tab="health"/);
+    assert.match(html, /data-tab="jobs"/);
+    assert.match(html, /data-tab="live"/);
+    assert.match(html, /data-tab="disk"/);
+    assert.match(html, /data-tab="context"/);
+    assert.match(html, /data-tab="changelog"/);
+    assert.match(html, /data-tab="tasks"/);
+    assert.ok(!html.includes('<script>x</script>'), 'a job name must not reach the DOM raw');
+    assert.ok(!html.includes('something <b>new</b>'), 'a changelog line must not reach the DOM raw');
+    assert.ok(!/undefined|NaN/.test(html));
+});
+
+test('health marks a plugin idle when nothing of it ever ran', () => {
+    const total = ix.summarize(demoIndex());
+    total.skills = { 'code-review': { cost: 1, msgs: 1 } };
+    total.tools = { 'mcp__qmd__query': { calls: 5, errors: 0, denials: 0 } };
+    const html = db.healthTab(total, demoSystem());
+
+    const row = (name) => html.slice(html.indexOf(`>${name}<`)).slice(0, 600);
+    assert.match(row('used-one'), /class="ok"/);
+    assert.match(row('idle-one'), /class="idle"/);
+    assert.match(row('ghost-plugin'), /missing/);
+    // The MCP server that shows up in tool names is used; the other is not.
+    assert.match(row('qmd'), /class="ok"/);
+    assert.match(row('ghost'), /class="idle"/);
+});
+
+test('the Setup panels degrade to a message when there is no snapshot', () => {
+    const total = ix.summarize(demoIndex());
+    for (const tab of [db.healthTab(total, null), db.jobsTab(null), db.diskTab(null), db.tasksTab(null)]) {
+        assert.match(tab, /class="empty"/);
+    }
+    assert.match(db.liveTab(null), /Live sessions/);
+    assert.match(db.changelogTab(null), /Nothing newer/);
+    assert.match(db.contextTab(total, null), /Context/i);
+});
+
+test('bytes reads in the unit a human would pick', () => {
+    assert.equal(db.bytes(0), '0');
+    assert.equal(db.bytes(900), '900 B');
+    assert.equal(db.bytes(54000), '54 KB');
+    assert.equal(db.bytes(654e6), '654 MB');
+    assert.equal(db.bytes(3.17e9), '3.2 GB');
+});
+
+test('matrixTable tints by weight and shows an empty cell as empty', () => {
+    const html = db.matrixTable(['a', 'b'], ['x', 'y'],
+        (r, c) => (r === 'a' && c === 'x' ? 10 : 0));
+    assert.match(html, /\$10\.00/);
+    assert.equal((html.match(/class="num dim"/g) || []).length, 3);
 });
 
 // Colour is load-bearing here: the legend is the only key to a stacked chart,

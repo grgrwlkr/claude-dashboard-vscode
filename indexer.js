@@ -11,11 +11,15 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { costOf } = require('./pricing');
+const { costOf, cacheSplit, cacheSaving } = require('./pricing');
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
-const INDEX_VERSION = 1;
+
+// Bump on every change to the shape of a per-file aggregate. A file whose size
+// and mtime are unchanged is never re-read, so without a bump the old shape is
+// reused forever and the new fields stay empty for everything already indexed.
+const INDEX_VERSION = 3;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only
@@ -24,15 +28,43 @@ const SUBAGENT_RE = /\/([^/]+)\/subagents\/(?:workflows\/([^/]+)\/)?agent-([^/]+
 
 function emptyAgg() {
     return {
-        days: {},      // YYYY-MM-DD → bucket
-        models: {},    // model id → bucket
-        branches: {},  // git branch → bucket
-        skills: {},    // attributionSkill → bucket
-        hours: {},     // 0..23 → bucket
-        sessions: [],  // one row per file
+        days: {},        // YYYY-MM-DD → bucket
+        models: {},      // model id → bucket
+        branches: {},    // git branch → bucket
+        skills: {},      // attributionSkill → bucket
+        hours: {},       // 0..23 → bucket
+        efforts: {},     // model and effort in one key → bucket
+        entrypoints: {}, // cli | claude-vscode | sdk-py | … → bucket
+        speeds: {},      // usage.speed, i.e. standard vs fast mode → bucket
+        tools: {},       // tool name → { calls, errors, denials }
+        files: {},       // absolute path → { edits, added, removed }
+        friction: emptyFriction(),
+        sessions: [],    // one row per file
         prompts: emptyPrompts(),
     };
 }
+
+// Everything that went sideways. None of it is priced: a rejected tool call
+// still cost the tokens that proposed it, and those are already counted as
+// spend — this is the record of what that spend ran into.
+function emptyFriction() {
+    return {
+        toolErrors: 0,
+        denials: {},          // toolDenialKind → count
+        interrupts: 0,        // tool results the user stopped mid-run
+        hookErrors: 0,
+        shutdowns: 0,         // work cut off by the client going away
+        compactions: {},      // compactMetadata.trigger → count
+        droppedTokens: 0,     // context thrown away by those compactions
+        compactMs: 0,
+    };
+}
+
+// The tool name a result belongs to is not in the result: a tool_result carries
+// only the id of the call. The mapping lives in the assistant record that made
+// the call, so it is collected per file as the pass goes and looked up when the
+// result turns up a few records later.
+const UNKNOWN_TOOL = 'unknown';
 
 // Prompt statistics, never prompt text. Only counts, lengths and word tallies
 // are stored, so the index cannot leak what was written — and nothing here
@@ -80,29 +112,69 @@ function trimWords(words, limit = TOP_WORDS_PER_FILE) {
     return out;
 }
 
+// cw1h and cw5m split cacheWrite by TTL — the two are billed at different
+// multiples of the input rate, so a total alone cannot be re-priced later.
+// `saved` is what the reads in this bucket would have cost as fresh input.
 function bucket() {
-    return { in: 0, out: 0, cacheRead: 0, cacheWrite: 0, cost: 0, msgs: 0 };
+    return {
+        in: 0, out: 0, cacheRead: 0, cacheWrite: 0,
+        cw1h: 0, cw5m: 0, saved: 0, cost: 0, msgs: 0,
+    };
 }
+
+const BUCKET_FIELDS = ['in', 'out', 'cacheRead', 'cacheWrite', 'cw1h', 'cw5m', 'saved', 'cost', 'msgs'];
 
 function add(map, key, usage, model) {
     if (!key) return;
     const b = map[key] || (map[key] = bucket());
+    const cache = cacheSplit(usage);
     b.in += usage.input_tokens || 0;
     b.out += usage.output_tokens || 0;
     b.cacheRead += usage.cache_read_input_tokens || 0;
-    b.cacheWrite += usage.cache_creation_input_tokens || 0;
+    b.cacheWrite += cache.total;
+    b.cw1h += cache.hour;
+    b.cw5m += cache.min5;
+    b.saved += cacheSaving(model, usage);
     b.cost += costOf(model, usage);
     b.msgs++;
 }
 
 function mergeBucket(target, key, src) {
     const b = target[key] || (target[key] = bucket());
-    b.in += src.in;
-    b.out += src.out;
-    b.cacheRead += src.cacheRead;
-    b.cacheWrite += src.cacheWrite;
-    b.cost += src.cost;
-    b.msgs += src.msgs;
+    // Aggregates written by an older index version lack the newer fields; the
+    // index version guards against that, but a missing field must still add
+    // zero rather than turn the total into NaN.
+    for (const f of BUCKET_FIELDS) b[f] += src[f] || 0;
+}
+
+function mergeFriction(target, src) {
+    if (!src) return;
+    target.toolErrors += src.toolErrors || 0;
+    target.interrupts += src.interrupts || 0;
+    target.hookErrors += src.hookErrors || 0;
+    target.shutdowns += src.shutdowns || 0;
+    target.droppedTokens += src.droppedTokens || 0;
+    target.compactMs += src.compactMs || 0;
+    for (const [k, n] of Object.entries(src.denials || {})) target.denials[k] = (target.denials[k] || 0) + n;
+    for (const [k, n] of Object.entries(src.compactions || {})) target.compactions[k] = (target.compactions[k] || 0) + n;
+}
+
+function mergeTools(target, src) {
+    for (const [name, t] of Object.entries(src || {})) {
+        const into = target[name] || (target[name] = { calls: 0, errors: 0, denials: 0 });
+        into.calls += t.calls || 0;
+        into.errors += t.errors || 0;
+        into.denials += t.denials || 0;
+    }
+}
+
+function mergeFiles(target, src) {
+    for (const [file, f] of Object.entries(src || {})) {
+        const into = target[file] || (target[file] = { edits: 0, added: 0, removed: 0 });
+        into.edits += f.edits || 0;
+        into.added += f.added || 0;
+        into.removed += f.removed || 0;
+    }
 }
 
 const dayKey = (ms) => {
@@ -143,10 +215,15 @@ function projectName(slug) {
     return parts[parts.length - 1] || slug;
 }
 
+// Which lines are worth a JSON.parse. The bulk of a transcript is tool traffic
+// that carries none of these markers, and skipping it is what keeps a full pass
+// in the tens of milliseconds per file. One alternation scans each line once;
+// a chain of includes() calls would scan it once per marker.
+const INTERESTING = /"usage"|"promptSource"|"is_error":true|"toolDenialKind"|"compactMetadata"|"aiTitle"|"customTitle"|"interrupted":true|"interruptedByShutdown":true|"hookErrors":\[\{|"structuredPatch"/;
+
 /**
- * Aggregate a single transcript. Only records carrying usage matter, so lines
- * are pre-filtered by substring before JSON.parse — that alone roughly halves
- * the cost of a full pass.
+ * Aggregate a single transcript. Only records matching INTERESTING are parsed,
+ * which is what makes a full pass over a gigabyte of transcripts affordable.
  */
 function indexFile(file, root = PROJECTS) {
     let text;
@@ -161,29 +238,44 @@ function indexFile(file, root = PROJECTS) {
         kind: meta.kind,
         project: projectName(meta.slug),
         slug: meta.slug,
+        title: '',
+        entrypoint: '',
         start: 0,
         end: 0,
         msgs: 0,
         cost: 0,
         tokens: 0,
+        out: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        tools: 0,
+        errors: 0,
         models: [],
+        efforts: [],
         branch: '',
     };
 
     const models = new Set();
+    const efforts = new Set();
+    const toolNames = new Map();
 
     const rawWords = {};
 
     for (const line of text.split('\n')) {
         if (line.length < 50 || line[0] !== '{') continue;
-        // Two kinds of record matter: model replies (usage) and typed prompts
-        // (promptSource). Pre-filtering by substring keeps JSON.parse off the
-        // tool-result traffic, which is the bulk of a transcript.
-        const hasUsage = line.includes('"usage"');
-        const hasPrompt = line.includes('"promptSource"');
-        if (!hasUsage && !hasPrompt) continue;
+        if (!INTERESTING.test(line)) continue;
         let r;
         try { r = JSON.parse(line); } catch { continue; }
+
+        // A title is written as its own record and rewritten as the session goes
+        // on; the last one is the one the client shows. A title the user typed
+        // wins over the generated one, which is why both are read.
+        if (r.aiTitle) row.title = r.aiTitle;
+        if (r.customTitle) row.title = r.customTitle;
+        if (r.entrypoint) row.entrypoint = r.entrypoint;
+
+        noteFriction(agg, r, toolNames, row);
+        noteEdit(agg, r);
 
         // A prompt is a user turn that carries promptSource — that is what
         // separates something typed from a tool result replayed as a user turn.
@@ -224,18 +316,126 @@ function indexFile(file, root = PROJECTS) {
         add(agg.models, model, usage, model);
         if (r.gitBranch) { add(agg.branches, r.gitBranch, usage, model); row.branch = r.gitBranch; }
         if (r.attributionSkill) add(agg.skills, r.attributionSkill, usage, model);
+        // The reasoning tier is recorded per reply, so a session that switched
+        // effort mid-way is counted honestly on both sides of the switch. Model
+        // and effort share a key because neither is meaningful without the other.
+        add(agg.efforts, effortKey(model, r.effort), usage, model);
+        if (r.entrypoint) add(agg.entrypoints, r.entrypoint, usage, model);
+        if (usage.speed) add(agg.speeds, usage.speed, usage, model);
+
+        noteTools(agg, r.message.content, toolNames, row);
 
         models.add(model);
+        efforts.add(r.effort || '');
         row.msgs++;
         row.cost += cost;
         row.tokens += tokens;
+        row.out += usage.output_tokens || 0;
+        row.cacheRead += usage.cache_read_input_tokens || 0;
+        row.cacheWrite += usage.cache_creation_input_tokens || 0;
     }
 
     if (row.msgs === 0 && agg.prompts.count === 0) return null;
     row.models = [...models].filter(Boolean);
+    row.efforts = [...efforts].filter(Boolean);
     agg.prompts.words = trimWords(rawWords);
     agg.sessions.push(row);
     return agg;
+}
+
+// Model and effort in one key, with a separator that cannot occur in either.
+const EFFORT_SEP = '|';
+const effortKey = (model, effort) => `${model}${EFFORT_SEP}${effort || ''}`;
+const splitEffort = (key) => {
+    const at = key.indexOf(EFFORT_SEP);
+    return at < 0 ? { model: key, effort: '' } : { model: key.slice(0, at), effort: key.slice(at + 1) };
+};
+
+// Tool calls, from the reply that made them. They ride along in records the
+// pass already parses for usage, so counting them costs nothing extra — and the
+// id→name map they build is what lets a failed result be blamed on a tool.
+function noteTools(agg, content, toolNames, row) {
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+        if (!block || (block.type !== 'tool_use' && block.type !== 'server_tool_use')) continue;
+        const name = block.name || UNKNOWN_TOOL;
+        if (block.id) toolNames.set(block.id, name);
+        const t = agg.tools[name] || (agg.tools[name] = { calls: 0, errors: 0, denials: 0 });
+        t.calls++;
+        row.tools++;
+    }
+}
+
+/**
+ * Which files were written, and by how much. The result of an edit carries the
+ * absolute path and the patch, which is a truer record than `~/.claude/file-
+ * history`: the backups there are named by a hash of the path, so the tree
+ * cannot say what it is holding without reading the transcripts anyway.
+ */
+function noteEdit(agg, r) {
+    const res = r.toolUseResult;
+    if (!res || typeof res !== 'object') return;
+    const path = res.filePath || (res.file && res.file.filePath);
+    if (!path) return;
+    const f = agg.files[path] || (agg.files[path] = { edits: 0, added: 0, removed: 0 });
+    f.edits++;
+    for (const hunk of (Array.isArray(res.structuredPatch) ? res.structuredPatch : [])) {
+        for (const line of hunk.lines || []) {
+            if (line[0] === '+') f.added++;
+            else if (line[0] === '-') f.removed++;
+        }
+    }
+}
+
+// Everything that went wrong, from whichever record records it.
+function noteFriction(agg, r, toolNames, row) {
+    const f = agg.friction;
+
+    if (r.toolDenialKind) {
+        f.denials[r.toolDenialKind] = (f.denials[r.toolDenialKind] || 0) + 1;
+        blameTool(agg, r, toolNames, 'denials');
+    }
+    if (r.interruptedByShutdown) f.shutdowns++;
+    if (Array.isArray(r.hookErrors) && r.hookErrors.length) f.hookErrors += r.hookErrors.length;
+    if (r.toolUseResult && r.toolUseResult.interrupted === true) f.interrupts++;
+
+    const c = r.compactMetadata;
+    if (c) {
+        const trigger = c.trigger || 'unknown';
+        f.compactions[trigger] = (f.compactions[trigger] || 0) + 1;
+        // What compaction actually costs is the context it throws away: those
+        // tokens were paid for once and have to be paid for again on the way
+        // back in. cumulativeDroppedTokens is the client's own count of it.
+        f.droppedTokens += c.cumulativeDroppedTokens
+            || Math.max(0, (c.preTokens || 0) - (c.postTokens || 0));
+        f.compactMs += c.durationMs || 0;
+    }
+
+    // A failed tool result is a user record: the error travels back in as the
+    // content of the turn that answers the call.
+    const content = r.message && r.message.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+        if (!block || block.type !== 'tool_result' || block.is_error !== true) continue;
+        f.toolErrors++;
+        row.errors++;
+        const name = toolNames.get(block.tool_use_id) || UNKNOWN_TOOL;
+        const t = agg.tools[name] || (agg.tools[name] = { calls: 0, errors: 0, denials: 0 });
+        t.errors++;
+    }
+}
+
+// A denial record names no tool either, but it answers one call — the id is on
+// the result block it carries.
+function blameTool(agg, r, toolNames, field) {
+    const content = r.message && r.message.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+        if (!block || block.type !== 'tool_result') continue;
+        const name = toolNames.get(block.tool_use_id) || UNKNOWN_TOOL;
+        const t = agg.tools[name] || (agg.tools[name] = { calls: 0, errors: 0, denials: 0 });
+        t[field]++;
+    }
 }
 
 // Every transcript on disk, main and subagent alike.
@@ -318,6 +518,7 @@ function refreshIndex(storageDir, { root = PROJECTS, onProgress } = {}) {
 function summarize(index) {
     const total = {
         days: {}, models: {}, branches: {}, skills: {}, hours: {},
+        efforts: {}, entrypoints: {}, speeds: {}, tools: {}, files: {}, friction: emptyFriction(),
         sessions: [], projects: {}, prompts: emptyPrompts(),
     };
     // How many files each word appeared in — the basis for dropping filler.
@@ -332,6 +533,12 @@ function summarize(index) {
         for (const [k, v] of Object.entries(agg.branches)) mergeBucket(total.branches, k, v);
         for (const [k, v] of Object.entries(agg.skills)) mergeBucket(total.skills, k, v);
         for (const [k, v] of Object.entries(agg.hours)) mergeBucket(total.hours, k, v);
+        for (const [k, v] of Object.entries(agg.efforts || {})) mergeBucket(total.efforts, k, v);
+        for (const [k, v] of Object.entries(agg.entrypoints || {})) mergeBucket(total.entrypoints, k, v);
+        for (const [k, v] of Object.entries(agg.speeds || {})) mergeBucket(total.speeds, k, v);
+        mergeTools(total.tools, agg.tools);
+        mergeFiles(total.files, agg.files);
+        mergeFriction(total.friction, agg.friction);
         for (const row of agg.sessions) {
             total.sessions.push(row);
             const p = total.projects[row.project] || (total.projects[row.project] = bucket());
@@ -376,7 +583,8 @@ function summarize(index) {
 }
 
 module.exports = {
-    PROJECTS, INDEX_VERSION, SUBAGENT_RE,
+    PROJECTS, INDEX_VERSION, SUBAGENT_RE, INTERESTING,
     describeFile, projectName, indexFile, walk, loadIndex, saveIndex, refreshIndex,
-    summarize, dayKey, bucket, emptyAgg, promptText, tallyWords, trimWords, lenBucket, LEN_BUCKETS,
+    summarize, dayKey, bucket, emptyAgg, emptyFriction, effortKey, splitEffort,
+    promptText, tallyWords, trimWords, lenBucket, LEN_BUCKETS,
 };
