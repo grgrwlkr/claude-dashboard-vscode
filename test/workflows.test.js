@@ -118,6 +118,30 @@ test('readFinal ignores an agent entry with no id', () => tree(({ write }) => {
     assert.deepEqual(final.agents, []);
 }));
 
+// The two fields that only the live side used to have. A snapshot carries both —
+// `agentType` on 17 of the 1356 real entries, `lastProgressAt` on all of them —
+// so a renderer drawing finished and running agents from one shape gets a value
+// for each rather than undefined.
+test('readFinal carries the two fields a live agent also has', () => tree(({ write }) => {
+    const final = wf.readFinal(write('workflows/wf_type-1.json', {
+        runId: 'wf_type-1',
+        workflowProgress: [{
+            type: 'workflow_agent', agentId: 'd1', state: 'done',
+            agentType: 'general-purpose', lastProgressAt: 1785004565521,
+        }],
+    }));
+
+    assert.equal(final.agents[0].agentType, 'general-purpose');
+    assert.equal(final.agents[0].lastActivity, 1785004565521);
+    // An entry without them says so with a zero, not with undefined.
+    const bare = wf.readFinal(write('workflows/wf_type-2.json', {
+        runId: 'wf_type-2',
+        workflowProgress: [{ type: 'workflow_agent', agentId: 'd2', state: 'done' }],
+    }));
+    assert.equal(bare.agents[0].agentType, '');
+    assert.equal(bare.agents[0].lastActivity, 0);
+}));
+
 test('phasesFromScript pulls the phase titles out of the meta literal', () => {
     const script = `export const meta = {
     name: 'review-changes',
@@ -449,10 +473,55 @@ test('scanRuns fills a running workflow with its live agents', () => tree((t) =>
     assert.deepEqual(run.phases, [{ title: 'Scan', detail: '' }]);
 }));
 
+// The other direction of the same race: the transcript file exists before the
+// journal has written the line that started it. This is the branch the roster
+// walks the directory for, and nothing on real data exercises it.
+test('readLive counts an agent whose transcript beat the journal', () => tree((t) => {
+    runFixture(t, 'wf_live-5', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        agents: { a1: AGENT_LINES('a1'), a2: AGENT_LINES('a2') },
+    });
+    const live = wf.readLive(path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_live-5'));
+    assert.equal(live.total, 2);
+    assert.equal(live.agents.find((a) => a.agentId === 'a2').state, 'running');
+}));
+
+// A finished run answers the same question from its own agents, so a panel does
+// not have to ask it differently depending on which state the run is in. A word
+// the client invented later is not counted as either outcome.
+test('totals.done counts the settled agents of a finished run, crashes included', () => tree((t) => {
+    runFixture(t, 'wf_settled-1', {
+        final: {
+            ...FINAL,
+            runId: 'wf_settled-1',
+            workflowProgress: [
+                ...FINAL.workflowProgress,
+                { type: 'workflow_agent', agentId: 'a33333333333333', state: 'some-future-word' },
+            ],
+        },
+    });
+    const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set(), now: Date.now() });
+
+    assert.equal(run.totals.agents, 3);
+    assert.equal(run.totals.done, 2);
+}));
+
 test('snapshotArrived notices a run that just finished', () => tree((t) => {
     runFixture(t, 'wf_fin-1', { journal: [{ type: 'started', agentId: 'a1' }] });
     const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
     assert.equal(wf.snapshotArrived(run), false);
     t.write('workflows/wf_fin-1.json', { ...FINAL, runId: 'wf_fin-1' });
+    assert.equal(wf.snapshotArrived(run), true);
+}));
+
+// Five runs on this machine write their snapshot into a session other than the
+// one holding the run directory. While the run is going that session does not
+// exist yet, so no path derived from the run can name it — every session of the
+// project has to be asked.
+test('snapshotArrived finds a snapshot that landed in a sibling session', () => tree((t) => {
+    runFixture(t, 'wf_sib-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    assert.equal(wf.snapshotArrived(run), false);
+    writeAt(t, SECOND, 'workflows/wf_sib-1.json', { ...FINAL, runId: 'wf_sib-1' });
     assert.equal(wf.snapshotArrived(run), true);
 }));

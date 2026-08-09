@@ -75,6 +75,13 @@ function agentOf(entry) {
         // the size of a row is ours to decide, not the client's to hand us.
         promptPreview: clip(entry.promptPreview),
         resultPreview: clip(entry.resultPreview),
+        // The two fields a live agent also carries, so one renderer draws both
+        // kinds of row. `agentType` is on 17 of the 1356 entries here — a
+        // workflow agent usually has none, and the ones that do name a dispatched
+        // subagent ("general-purpose"). `lastProgressAt` is on all 1356 and is
+        // epoch milliseconds, the same clock the live side reads off an mtime.
+        agentType: entry.agentType || '',
+        lastActivity: entry.lastProgressAt || 0,
     };
 }
 
@@ -191,7 +198,23 @@ function phasesFromScript(text) {
 // this machine is 8.4 MB, and a single run holds 208 of them — while the tick
 // that draws the tree runs every ten seconds.
 const TAIL_BYTES = 64 * 1024;
-const HEAD_BYTES = 8 * 1024;
+
+// The head grows in steps rather than sitting at one size, the way session.js
+// reads a transcript tail and for the same reason: the first record is the
+// agent's entire brief on a single JSON line, and those lines have a long tail —
+// half fit in 4.6 KB, one in ten needs more than 15 KB, and the longest here is
+// 293 KB. A fixed window is the worst of both: it misses on the long ones, where
+// the miss is indistinguishable from an agent that has no prompt at all, and it
+// still pays its full size on every agent that would have fit in 8 KB. Measured
+// over 1470 real transcripts these steps read every prompt at 23.6 KB per agent,
+// against 32 KB per agent for a fixed 32 KB window that reaches 98.1 %.
+const HEAD_STEPS = [8 * 1024, 64 * 1024, 512 * 1024];
+
+// The saved workflow script, read only for its `meta` literal, which every one of
+// the 64 scripts here opens with. Its own constant because its size answers a
+// different question than a transcript's head does, and the two would otherwise
+// move together for no reason.
+const SCRIPT_BYTES = 8 * 1024;
 
 // A live agent's prompt is the whole brief it was dispatched with, not the
 // client's own capped preview, so it is cut far shorter than a snapshot's: it
@@ -208,7 +231,7 @@ const JOURNAL_BYTES = 1024 * 1024;
 // One end of a file, without reading the rest of it. A cut lands mid-record at
 // both ends, and that record is dropped rather than repaired: half a line of JSON
 // is not evidence of anything.
-function readChunk(file, { fromEnd = false, length = TAIL_BYTES } = {}) {
+function readChunk(file, { fromEnd = false, length = fromEnd ? TAIL_BYTES : HEAD_STEPS[0] } = {}) {
     const st = statOf(file);
     if (!st || st.size === 0) return '';
     const size = Math.min(length, st.size);
@@ -237,12 +260,17 @@ function parsedLines(text) {
 // has: its label exists solely in the runtime and reaches disk with the final
 // snapshot, long after anyone wanted to know what this agent is for.
 function promptOf(file) {
-    for (const r of parsedLines(readChunk(file, { length: HEAD_BYTES }))) {
-        if (r.type !== 'user' || !r.message) continue;
-        const c = r.message.content;
-        const text = typeof c === 'string' ? c
-            : (Array.isArray(c) ? c.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ') : '');
-        if (text) return clip(text, LIVE_PREVIEW_CHARS);
+    const size = statOf(file)?.size || 0;
+    for (const step of HEAD_STEPS) {
+        const length = Math.min(step, size);
+        for (const r of parsedLines(readChunk(file, { length }))) {
+            if (r.type !== 'user' || !r.message) continue;
+            const c = r.message.content;
+            const text = typeof c === 'string' ? c
+                : (Array.isArray(c) ? c.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ') : '');
+            if (text) return clip(text, LIVE_PREVIEW_CHARS);
+        }
+        if (length >= size) break; // the whole file has been read; nothing there
     }
     return '';
 }
@@ -282,6 +310,7 @@ function readLive(runDir) {
     }
     // A transcript can exist for an agent the journal has not recorded yet.
     for (const entry of entries) {
+        if (!entry.isFile()) continue;
         const id = (/^agent-(.+)\.jsonl$/.exec(entry.name) || [])[1];
         if (id && !started.includes(id)) started.push(id);
     }
@@ -303,8 +332,9 @@ function readLive(runDir) {
             lastToolName: tail.lastToolName,
             promptPreview: st ? promptOf(file) : '',
             // The same keys a snapshot's agent has, so one renderer draws both.
-            // The counts are not among them: totalling a running transcript means
-            // reading all of it, which is the one thing this must not do.
+            // The zeros are absences, not unread data: a result exists only once
+            // the agent returns, and totalling a running transcript would mean
+            // reading all of it — the one thing this must not do.
             resultPreview: '',
             agentType: meta.agentType || '',
             tokens: 0,
@@ -314,7 +344,10 @@ function readLive(runDir) {
         };
     });
 
-    return { agents, done: done.size, total: started.length };
+    // Intersected with the roster, so the count can never read "3 of 2": a
+    // `result` for an agent that has neither a `started` line nor a transcript is
+    // not something this format produces today, and the guard costs one pass.
+    return { agents, done: started.filter((id) => done.has(id)).length, total: started.length };
 }
 
 // "review-changes-wf_a01fe790-8b6.js" → "review-changes".
@@ -323,21 +356,28 @@ function nameFromScriptPath(scriptPath) {
     return path.basename(scriptPath, '.js').replace(/-wf_[A-Za-z0-9-]+$/, '');
 }
 
-// Where a run's snapshot will appear: two levels up from the run directory, in
-// the session's own workflows folder. A running run has no jsonPath yet — that
-// field is filled by the scan, and the scan is exactly what the fast tick must
-// not do — so the path is derived instead of looked up.
-function snapshotPath(run) {
-    if (run.jsonPath) return run.jsonPath;
-    if (!run.runDir) return '';
-    const session = path.dirname(path.dirname(path.dirname(run.runDir)));
-    return path.join(session, 'workflows', `${run.runId}.json`);
-}
-
-/** Has the run that was going written its snapshot yet? */
+/**
+ * Has the run that was going written its snapshot yet? A running run has no
+ * jsonPath — that field is filled by the scan, and the scan is exactly what the
+ * fast tick must not do — so the file is looked for instead of being asked for.
+ *
+ * Every session of the project is asked, not the run's own: five runs on this
+ * machine keep their directory under one session and their snapshot under
+ * another, and while the run is still going that second session does not exist
+ * on disk yet, so neither the run record nor its path can name it. The cost is
+ * one readdir and at most 37 stats — the widest project here — against the whole
+ * tree the full scan walks.
+ */
 function snapshotArrived(run) {
-    const file = snapshotPath(run);
-    return Boolean(file && statOf(file));
+    if (run.jsonPath) return Boolean(statOf(run.jsonPath));
+    if (!run.runDir) return false;
+    // <slug>/<session>/subagents/workflows/<runId>: four levels up is the project.
+    const slugRoot = path.dirname(path.dirname(path.dirname(path.dirname(run.runDir))));
+    for (const entry of listDir(slugRoot)) {
+        if (!entry.isDirectory()) continue;
+        if (statOf(path.join(slugRoot, entry.name, 'workflows', `${run.runId}.json`))) return true;
+    }
+    return false;
 }
 
 // How long a run directory may sit untouched before it stops counting as live.
@@ -391,6 +431,18 @@ function outcomeOf(state, runState) {
         return runState && runState !== 'running' ? 'stopped' : 'running';
     }
     return 'unknown';
+}
+
+// An agent that will not move again, however it got there: it finished, it
+// crashed, or the run was cut from under it. Counting these is what makes
+// `totals.done` mean one thing on both kinds of run — the journal's roll call
+// while the run is going, each agent's last recorded state once it is over. A
+// word we have never seen stays out of the count rather than being read as
+// success, exactly as in outcomeOf.
+const SETTLED = new Set(['done', 'failed', 'stopped']);
+
+function settledCount(agents, runState) {
+    return agents.filter((a) => SETTLED.has(outcomeOf(a.state, runState))).length;
 }
 
 // Everything one session knows about one run. A run can appear in one tree and
@@ -514,7 +566,7 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() 
         // agent, 208 of them on the biggest run here — while the second is one
         // bounded read, so an abandoned run still gets a name instead of a blank.
         const live = state === 'running' && run.runDir ? readLive(run.runDir) : null;
-        const script = !final && run.scriptPath ? readChunk(run.scriptPath, { length: HEAD_BYTES }) : '';
+        const script = !final && run.scriptPath ? readChunk(run.scriptPath, { length: SCRIPT_BYTES }) : '';
 
         return {
             ...run,
@@ -533,12 +585,13 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now() 
             durationMs: final ? final.durationMs : 0,
             phases: final ? final.phases : phasesFromScript(script),
             agents: final ? final.agents : (live ? live.agents : []),
-            // The four counts keep their shape whether or not a snapshot exists,
-            // so a caller reading a total off a running run gets a zero rather
-            // than undefined. `done` is the exception and only a running run has
-            // it: a finished one carries each agent's own state instead, and
-            // counting that here would be a second answer to the same question.
-            totals: final ? final.totals
+            // The same five counts whether or not a snapshot exists, so a caller
+            // reading a total off a running run gets a zero rather than
+            // undefined. `done` is the one that has to be built twice, because
+            // the two states record it in different places: the journal's roll
+            // call while the run is going, each agent's own last state after.
+            totals: final
+                ? { ...final.totals, done: settledCount(final.agents, state) }
                 : { agents: live ? live.total : 0, reported: 0, tokens: 0, toolCalls: 0, done: live ? live.done : 0 },
         };
     });
