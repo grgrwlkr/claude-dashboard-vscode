@@ -673,8 +673,10 @@ function priceOf(run, agent, known, key, live, root) {
 // place would understate a run by that factor, so ours goes in `tokens`, theirs
 // is kept beside it under its own name, and neither is ever mixed into the
 // other. `reported` is read first so pricing the same runs twice cannot
-// overwrite the client's number with our own.
-const reportedOf = (x) => x.reportedTokens || x.tokens || 0;
+// overwrite the client's number with our own — by presence and not by truth,
+// because a live agent starts at zero on both sides and `||` cannot tell the
+// client's own zero from a field that was never filled in.
+const reportedOf = (x) => (x.reportedTokens === undefined ? (x.tokens || 0) : x.reportedTokens);
 
 function pricedRun(run, known, claimed, live, root) {
     let cost = 0;

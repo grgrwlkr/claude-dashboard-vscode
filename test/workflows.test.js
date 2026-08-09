@@ -581,6 +581,16 @@ test('a live run is priced only when the caller asks for it', () => tree((t) => 
     const full = wf.withCost(runs, { index: { files: {} }, live: true, root: t.root });
     assert.ok(full[0].agents[0].tokens > 0, 'the slow path reads the transcript');
     assert.ok(full[0].totals.cost > 0, 'and prices what it read');
+
+    // A live agent has nothing on the client's side of the fence and never will
+    // until the snapshot lands, so both its figures start at zero. Pricing the
+    // result again must leave that zero alone rather than read our own count
+    // into it — the one place where "already priced" cannot be told from
+    // "priced at nothing" by truthiness.
+    const again = wf.withCost(full, { index: { files: {} }, live: true, root: t.root });
+    assert.equal(again[0].agents[0].reportedTokens, 0);
+    assert.equal(again[0].totals.reportedTokens, 0);
+    assert.deepEqual(again[0], full[0]);
 }));
 
 // The index is rebuilt when the dashboard is opened, which can happen in the
