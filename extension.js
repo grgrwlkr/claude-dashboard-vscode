@@ -238,14 +238,6 @@ function refreshSession(state) {
     state.session = s.findOwnSession(state.workspace);
 }
 
-async function openClaude() {
-    try {
-        await vscode.commands.executeCommand('claude-vscode.editor.openLast');
-    } catch {
-        vscode.window.showWarningMessage('Claude Code extension is not responding — cannot open the panel.');
-    }
-}
-
 // --- dashboard --------------------------------------------------------------
 
 // One panel, reused. A second invocation reveals the existing one rather than
@@ -304,10 +296,12 @@ function activate(context) {
         ? vscode.StatusBarAlignment.Left
         : vscode.StatusBarAlignment.Right;
     const priority = cfg.get('priority');
-    const item = (id, name, offset, command = 'claudeStatusline.open') => {
+    // Every item opens the dashboard: each number raises the same question —
+    // where did this go — and the answer is one page, not four destinations.
+    const item = (id, name, offset) => {
         const bar = vscode.window.createStatusBarItem(id, align, priority - offset);
         bar.name = name;
-        bar.command = command;
+        bar.command = 'claudeStatusline.dashboard';
         context.subscriptions.push(bar);
         return bar;
     };
@@ -323,9 +317,7 @@ function activate(context) {
         version: { current: '', latest: '' },
         limitsItem: item('claudeStatusline.limits', 'Claude limits', 0),
         contextItem: item('claudeStatusline.context', 'Claude context', 1),
-        // Clicking spend opens the dashboard: that is the question the number
-        // raises, so the click should answer it rather than open a chat panel.
-        moneyItem: item('claudeStatusline.money', 'Claude spend', 2, 'claudeStatusline.dashboard'),
+        moneyItem: item('claudeStatusline.money', 'Claude spend', 2),
         workItem: item('claudeStatusline.work', 'Claude work', 3),
     };
 
@@ -340,7 +332,6 @@ function activate(context) {
         // Focus returning to the window is the only sensible "the user is looking
         // again" signal; there is no event channel from the CLI itself.
         vscode.window.onDidChangeWindowState((w) => { if (w.focused) slowTick(state); }),
-        vscode.commands.registerCommand('claudeStatusline.open', openClaude),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
         vscode.commands.registerCommand('claudeStatusline.refresh', async () => {

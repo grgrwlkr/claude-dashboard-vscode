@@ -37,7 +37,7 @@ parentheses), `▸` tracks the current session's task list.
 
 ## Usage dashboard
 
-Click the spend item, or run **Claude: Open usage dashboard**. Seven tabs, drawn
+Click any status-bar item, or run **Claude: Open usage dashboard**. Seven tabs, drawn
 from an index of every transcript on the machine:
 
 | Tab | What it answers |
