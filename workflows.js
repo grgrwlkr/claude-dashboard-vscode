@@ -692,10 +692,14 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now(),
 
         // The two places a run without a snapshot describes itself: the roster
         // and the transcripts for its agents, the saved script for its name and
-        // its phases. Only a running run pays for the first — it opens a file per
-        // agent, 208 of them on the biggest run here — while the second is one
-        // bounded read, so an abandoned run still gets a name instead of a blank.
-        const live = state === 'running' && run.runDir
+        // its phases. The first opens a file per agent — 208 of them on the
+        // biggest run here — so it is paid for a run that is going, and for one
+        // that stalled within the hour. A stalled run without its roster is a
+        // row saying zero agents and nothing else, which is worse than not
+        // drawing it; older ones are history and stay a name and a date.
+        const worthReading = state === 'running'
+            || (state === 'abandoned' && touched > 0 && now - touched < RUN_STALE_LIVE_MS);
+        const live = worthReading && run.runDir
             ? readLive(run.runDir, { known: known ? known.get(run.runId) : null })
             : null;
         const script = !final && run.scriptPath ? readChunk(run.scriptPath, { length: SCRIPT_BYTES }) : '';

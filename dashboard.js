@@ -669,6 +669,21 @@ function runRows(runs) {
     return { rows, shown: shown.length, carded };
 }
 
+/**
+ * The runs table, drawn once for both places that show runs: Work, where it is
+ * every run on the machine, and Now, where it is the handful still going. The
+ * two were separate renderings for about an hour and the Now one was the poorer
+ * of the two — no money, no duration, and no way to open an agent and read what
+ * it was told.
+ */
+function runsTableOf(table) {
+    return `<table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
+          <th>Status</th><th class="opt2">Phases</th><th class="num">Agents</th>
+          <th class="num opt2">Duration</th><th class="num">Spend</th></tr></thead>
+          <tbody>${table.rows}</tbody></table>
+        ${table.carded < table.shown ? `<p class="note">Agents are drawn only for the ${table.carded} newest runs of the ${table.shown} above. A fan-out of hundreds carries every prompt and every result into the page, so the rest keep their row without them — the tree in the sidebar draws the agents of every run it lists, and it lists the ${wfm.TREE_FINISHED} newest finished runs beside everything still going or abandoned.</p>` : ''}`;
+}
+
 function agentsTab(total, runs = []) {
     const agents = total.sessions.filter((s) => s.kind === 'agent');
     const wf = total.sessions.filter((s) => s.kind === 'workflow');
@@ -702,11 +717,7 @@ function agentsTab(total, runs = []) {
         </tbody></table>
         <p class="note">Multiply the median by the fleet size for the usual case, and the p90 for the bad one.</p>`;
 
-    const runsTable = `<table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
-          <th>Status</th><th class="opt2">Phases</th><th class="num">Agents</th>
-          <th class="num opt2">Duration</th><th class="num">Spend</th></tr></thead>
-          <tbody>${table.rows}</tbody></table>
-        ${table.carded < table.shown ? `<p class="note">Agents are drawn only for the ${table.carded} newest runs of the ${table.shown} above. A fan-out of hundreds carries every prompt and every result into the page, so the rest keep their row without them — the tree in the sidebar draws the agents of every run it lists, and it lists the ${wfm.TREE_FINISHED} newest finished runs beside everything still going or abandoned.</p>` : ''}`;
+    const runsTable = runsTableOf(table);
 
     // A share of the total, so the three kinds of transcript rank against each
     // other rather than only against their own figure.
@@ -1505,75 +1516,18 @@ function statusBlocks(blocks) {
  * behind what the hover says, and a number hidden from a narrow bar is still
  * here in full.
  */
-/**
- * Every workflow still going, as one table: a run is a row, and its agents are
- * the rows under it. Several runs stack in the same table rather than each
- * taking a panel of its own.
- *
- * Every agent, not only the ones still working. A fan-out of forty is forty
- * rows and that is the point — the tab is where you watch a run, and an agent
- * that has returned is still part of what the run did. Working ones come first,
- * because a finished agent is a fact and a running one is a question.
- */
-function liveRuns(runs) {
-    const body = runs.map((run) => {
-        const agents = run.agents || [];
-        // Dispatch order, as the journal recorded it. Sorting the working ones to
-        // the top made a row move the moment its agent finished, which is the
-        // one thing you do not want while watching a particular agent.
-
-        const facts = [
-            run.project,
-            wfm.countLabel(run, { always: true }) ? `${wfm.countLabel(run, { always: true })} settled` : '',
-            run.elapsed ? `going ${run.elapsed}` : '',
-            run.cost > 0 ? `~${fmtCost(run.cost)}` : '',
-        ].filter(Boolean).join(' · ');
-
-        const stalled = run.state === 'abandoned'
-            ? ' <span class="kind o-stopped">no snapshot — nothing written lately</span>' : '';
-        const head = `<tr class="run-head"><th colspan="5">${esc(run.name || run.runId)}
-            <span class="dim">${esc(facts)}</span>${stalled}</th></tr>`;
-
-        const rows = agents.map((a) => {
-            const outcome = wfm.outcomeOf(a.state, run.state);
-            // One column, not an id beside a name. `agentLabel` gives the name
-            // the workflow chose where it is known, and while a run is still
-            // going it is not: the journal records only an id, and the label
-            // reaches the disk with the snapshot at the end. Until then the
-            // first line of what the agent was told is its name, and the id is
-            // in the hover with the rest of the prompt.
-            return `<tr class="run-agent">
-            <td class="wrap" title="${esc(`${a.agentId.slice(0, 8)} · ${a.promptPreview || ''}`)}">${esc(wfm.agentLabel(a))}</td>
-            <td>${a.model ? esc(shortModel(a.model)) : '<span class="dim">—</span>'}</td>
-            <td>${a.effort ? `<span class="kind">${esc(a.effort)}</span>` : '<span class="dim">—</span>'}</td>
-            <td class="dim opt">${esc(a.lastToolName || '')}</td>
-            <td><span class="kind o-${esc(outcome)}">${esc(outcome)}</span></td></tr>`;
-        }).join('');
-
-        const empty = agents.length === 0
-            ? '<tr class="run-agent"><td colspan="5" class="dim">no agent has written anything yet</td></tr>'
-            : '';
-
-        return head + rows + empty;
-    }).join('');
-
-    return `<table><thead><tr><th>Agent</th><th>Model</th>
-        <th>Effort</th><th class="opt">Doing</th><th>State</th></tr></thead>
-      <tbody>${body}</tbody></table>`;
-}
-
 function nowTab(sections, workflows, metrics) {
     const rows = sections || [];
     const m = metrics || {};
-    // A run that has written no snapshot is either working or stuck, and both
-    // belong on a tab called Now — a fan-out whose last agent has been silent
-    // for half an hour is exactly what someone opens this to find. Only the
-    // recent ones: a run abandoned last week is history, and nothing ever takes
-    // one off the disk.
-    const RECENT_MS = 2 * 60 * 60 * 1000;
+    // Anything that wrote something in the last hour, whatever state it is in: a
+    // run still going, one that finished ten minutes ago, one that stalled and
+    // never wrote a snapshot. All three are what "now" means on a machine that
+    // dispatches fan-outs, and only the last hour — nothing ever takes a run off
+    // the disk, and a graveyard is not a status.
+    const RECENT_MS = 60 * 60 * 1000;
     const now = Date.now();
     const active = (workflows || []).filter((r) => r.state === 'running' || r.active
-        || (r.state === 'abandoned' && r.lastActivity > 0 && now - r.lastActivity < RECENT_MS));
+        || (r.lastActivity > 0 && now - r.lastActivity < RECENT_MS));
 
     if (rows.length === 0) {
         return `<section class="tab" data-tab="now">
@@ -1609,9 +1563,9 @@ function nowTab(sections, workflows, metrics) {
         <div class="cols">
           ${rows.map((section) => panel(section.title, statusBlocks(section.blocks), { id: section.id })).join('')}
         </div>
-        ${active.length ? panel('Running right now', liveRuns(active), {
+        ${active.length ? panel('Workflows in the last hour', runsTableOf(runRows(active)), {
         flush: true,
-        note: 'One block per workflow still going, and under it every agent it dispatched — the model and the effort each got, and what it is doing now. What each was told in full and what it answered is under Work → Agents &amp; workflows.',
+        note: 'Every run that wrote something in the last hour — still going, just finished, or stalled without a snapshot. Open one for its agents: what each was told, what it answered, the model and the effort it got, and what it cost. The same table over every run on the machine is under Work → Agents &amp; workflows.',
     }) : ''}
     </section>`;
 }
@@ -1769,20 +1723,6 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
   background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border));
   box-shadow: 0 2px 8px rgb(0 0 0 / .35); pointer-events: none; }
-
-/* A workflow is a row and its agents are the rows beneath it, so several runs
-   stack in one table instead of each taking a panel. The run's row is a heading
-   inside the table body — heavier, with a rule above it — and its agents are
-   indented under it. */
-.run-head > th { padding-top: 14px; font-size: 12.5px; font-weight: 600;
-  text-transform: none !important; letter-spacing: 0; opacity: 1;
-  border-top: 1px solid var(--vscode-panel-border); }
-.run-head:first-child > th { padding-top: 4px; border-top: none; }
-.run-head .dim { font-weight: 400; font-size: 11.5px; margin-left: 8px; }
-.run-agent > td { border-bottom: none; }
-.run-agent > td.wrap { max-width: 52ch; }
-.run-agent > td:first-child { padding-left: 16px; }
-.run-agent > td[colspan] { padding-left: 16px; font-size: 11.5px; padding-bottom: 6px; }
 
 /* A share drawn under the number rather than beside it: it costs no column, and
    a rule under the figure cannot fight the figure. A block behind the text was
