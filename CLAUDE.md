@@ -47,7 +47,8 @@ without committing is how a dozen versions ended up as one uncommitted pile. Pac
 ## Architecture
 
 `extension.js` is the **only** module allowed to `require('vscode')`. `usage.js`, `session.js`,
-`indexer.js`, `pricing.js`, `history.js`, `system.js`, `segments.js`, `workflows.js` and `dashboard.js` are
+`indexer.js`, `pricing.js`, `history.js`, `system.js`, `segments.js`, `status.js`, `workflows.js` and
+`dashboard.js` are
 deliberately vscode-free so `node --test` can cover them without a harness — put new logic there, not in
 `extension.js`. `workflows.js` owns everything about a workflow run — the walk, the three states, the money,
 the tree nodes and the words on a row — because the tree, the dashboard tab and the bar fields must not
@@ -64,6 +65,12 @@ escape) and the field registry — a new number in the bar is a new entry there 
 nothing else reads, a line in `collectFast`/`collectSlow`. Fields declare a `topic`, which picks both
 the tooltip sections and the colour source. Collection is driven by `state.needs`, so a field no
 segment mentions is never read.
+
+**One answer, two renderings.** What the status-bar tooltips say lives in `status.js` as sections of
+`{ kind: 'table' | 'subtitle' | 'note' }` — never markdown, never codicons. `extension.js` renders
+them as a hover and the dashboard's Now tab renders the same list as panels; a `tone` on a note says
+what it means (`alarm`, `safe`, `warn`, `update`, `active`, `muted`) and each side picks its own
+icon or colour. Wording goes there, not into either renderer.
 
 **Two ticks, one state object.** `slowTick` (default 60 s) owns everything expensive: the network
 call for limits, the full-transcript pass in `sessionStats`, `costToday` across every project. The

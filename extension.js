@@ -7,6 +7,7 @@ const sys = require('./system');
 const seg = require('./segments');
 const dashboard = require('./dashboard');
 const wfm = require('./workflows');
+const status = require('./status');
 const { fmtCost, ratesFor } = require('./pricing');
 
 // Complaining about the cache is only meaningful once refreshes have failed for
@@ -43,44 +44,38 @@ function table(rows, head) {
     return header + rows.map((cells) => `| ${cells.join(' | ')} |`).join('\n') + '\n';
 }
 
-// The tooltips build markdown rather than a MarkdownString: a segment can carry
-// fields from two topics, and then its tooltip is both sections joined — which
-// is only possible if each section is a string first.
-function limitsTooltip(lim, pc, now, stale) {
+// The tooltips render the sections status.js describes. The wording, the rows
+// and which of them appear are decided there, so the Now tab of the dashboard
+// says exactly the same thing without a second copy of any of it.
+const TONE_ICON = {
+    alarm: '$(flame)',
+    safe: '$(check)',
+    warn: '$(warning)',
+    update: '$(arrow-up)',
+    active: '$(play)',
+};
+
+function renderSection(section) {
     const md = new Markdown();
-    const rows = [];
-    const row = (label, pct, reset) =>
-        [label, `**${pct}%**`, reset ? `${u.fmtLeft(reset, now)} → ${u.fmtAbs(reset)}` : ''];
-
-    if (lim.session) rows.push(row('5h', lim.session.pct, lim.session.reset));
-    if (lim.weekly) rows.push(row('7d', lim.weekly.pct, lim.weekly.reset));
-    // Per-model windows almost always reset together with the overall weekly one;
-    // repeating that date on every row would turn the table into noise.
-    for (const scoped of lim.scoped) {
-        const own = Math.abs(scoped.reset - (lim.weekly?.reset ?? 0)) > 60 ? scoped.reset : 0;
-        rows.push(row(scoped.scope.toLowerCase(), scoped.pct, own));
-    }
-    md.appendMarkdown(table(rows, ['limit', 'used', 'resets']));
-
-    if (pc && lim.weekly) {
-        // Pace as its own section: spend against plan is a comparison, and a
-        // comparison squeezed into a row label is the thing that was hard to read.
-        const diff = lim.weekly.pct - pc.plan;
-        const verdict = diff > 0 ? `${diff}% ahead of plan` : diff < 0 ? `${-diff}% under plan` : 'exactly on plan';
-        md.appendMarkdown(`\n**Pace** — ${lim.weekly.pct}% spent, ${pc.plan}% of the window elapsed: ${verdict}\n`);
-
-        // The forecast is stated even when it lands past the reset. "You will not
-        // run out" is worth far more with the date that would have been.
-        if (pc.dryAt && pc.elapsed >= 1800 && lim.weekly.pct >= 2) {
-            const when = `**${u.fmtWhen(pc.dryAt)}**, in ${u.fmtLeft(pc.dryAt, now)}`;
-            md.appendMarkdown(pc.beforeReset
-                ? `\n$(flame) **Forecast** — 100% around ${when}, before the window resets\n`
-                : `\n$(check) **Forecast** — 100% would be ${when}, which is after the reset: you do not get there\n`);
+    md.appendMarkdown(`### ${section.title}\n\n`);
+    for (const block of section.blocks) {
+        if (block.kind === 'table') {
+            if (block.rows.length === 0) continue;
+            // The first column is a label and the second the answer, so the
+            // answer is the one in bold — the same emphasis in both renderers.
+            const rows = block.head
+                ? block.rows.map(([a, b, c]) => [a, `**${b}**`, c])
+                : block.rows.map(([a, b]) => [a, b]);
+            md.appendMarkdown(table(rows, block.head));
+        }
+        if (block.kind === 'subtitle') md.appendMarkdown(`\n**${block.text}**\n\n`);
+        if (block.kind === 'note') {
+            const icon = TONE_ICON[block.tone];
+            const label = block.label ? `**${block.label}** — ` : '';
+            const body = `${icon ? `${icon} ` : ''}${label}${block.text}`;
+            md.appendMarkdown(block.tone === 'muted' ? `\n_${block.text}_\n` : `\n${body}\n`);
         }
     }
-
-    if (stale) md.appendMarkdown('\n$(warning) showing cached data — refresh failed\n');
-    md.appendMarkdown(`\n_updated ${u.fmtAbs(u.mtime(u.CACHE))}_`);
     return md.value;
 }
 
@@ -90,76 +85,6 @@ function limitsTooltip(lim, pc, now, stale) {
 // allowed to require vscode, so what both sides share lives on the other side.
 const tok = wfm.tokenLabel;
 
-function contextTooltip(state) {
-    const { context: ctx, settings, version } = state;
-    if (!ctx) return '';
-    const md = new Markdown();
-    md.appendMarkdown(`### ${short(ctx.model)}\n\n`);
-
-    // The terminal packs model, effort, thinking and advisor into one line
-    // because it has one line. Here each is a labelled row: the values are
-    // unrelated to each other and reading them as a run of dot-separated words
-    // means parsing the separator rather than the fact.
-    const advisor = ctx.advisor || settings.advisor;
-    const model = [];
-    if (ctx.effort) model.push(['effort', ctx.effort]);
-    // The setting, not the last reply. Reading it off the last record said
-    // "off" for every answer that happened to be a tool call — which is most of
-    // them in agentic work, while the model was thinking the whole time.
-    // Summaries being hidden is worth saying: with them off the reasoning still
-    // happens and simply never appears, in this tooltip or anywhere else.
-    model.push(['thinking', settings.thinking
-        ? (settings.thinkingSummaries ? 'on' : 'on · summaries hidden')
-        : 'off']);
-    if (advisor) model.push(['advisor', short(advisor)]);
-    if (settings.outputStyle) model.push(['output style', settings.outputStyle]);
-    md.appendMarkdown(table(model));
-
-    const win = `${tok(ctx.tokens)} / ${tok(ctx.window)}`;
-    const fill = [['window', `**${ctx.estimated ? '~' : ''}${ctx.pct}%** — ${win}`]];
-    if (ctx.estimated) fill.push(['note', 'window size unknown for this model']);
-    if (ctx.cachePct >= 0) fill.push(['from cache', `${ctx.cachePct}%`]);
-    if (state.compactPct > 0) {
-        const left = state.compactPct - ctx.pct;
-        fill.push(['auto-compact', left > 0 ? `at ${state.compactPct}% — ${left}% away` : `at ${state.compactPct}% — due`]);
-    }
-    md.appendMarkdown(`\n**Context**\n\n${table(fill)}`);
-
-    const env = [];
-    if (ctx.branch) env.push(['branch', ctx.branch]);
-    if (version.current) env.push(['client', `v${version.current}`]);
-    if (env.length) md.appendMarkdown(`\n**Environment**\n\n${table(env)}`);
-
-    if (version.latest) {
-        md.appendMarkdown(`\n$(arrow-up) **${version.latest}** is unpacked and starts with the next launch\n`);
-    }
-    return md.value;
-}
-
-function moneyTooltip(state) {
-    const { stats, todayUsd, context: ctx } = state;
-    if (!stats) return '';
-    const md = new Markdown();
-    md.appendMarkdown(`### ~${fmtCost(stats.cost)} this session\n\n`);
-
-    const spend = [['today', `~${fmtCost(todayUsd)}`]];
-    if (stats.burn > 0) spend.push(['burn rate', `~${fmtCost(stats.burn)}/h`]);
-    md.appendMarkdown(table(spend));
-
-    const work = [];
-    if (stats.durationMs > 0) work.push(['duration', s.fmtDuration(stats.durationMs)]);
-    work.push(['requests', String(stats.messages)]);
-    if (stats.apiPct >= 0) work.push(['waiting on model', `~${stats.apiPct}% of that time`]);
-    if (stats.added || stats.removed) work.push(['edits', `+${stats.added} / −${stats.removed} lines`]);
-    md.appendMarkdown(`\n**This session**\n\n${table(work)}`);
-
-    const known = ctx ? ratesFor(ctx.model).known : true;
-    md.appendMarkdown(known
-        ? '\n_estimated from public rates — not a bill. Click for the full dashboard._'
-        : '\n_estimated at Opus rates: this model has no published rate. Click for the full dashboard._');
-    return md.value;
-}
-
 // The bar needs the model, not the full id: "claude-opus-5" → "opus 5". The rule
 // itself lives in dashboard.js, which draws the same model ids in its tables and
 // may not require vscode — so, like tokenLabel above, it sits on the other side
@@ -168,20 +93,33 @@ function moneyTooltip(state) {
 // say has to stay empty so it can hide itself.
 const short = (model) => (model ? dashboard.shortModel(model) : '');
 
-function workTooltip(state) {
-    const { peers, todo } = state.data;
-    if (!peers && !todo) return '';
-    const md = new Markdown();
-    if (todo) {
-        md.appendMarkdown(`### Tasks ${todo.done}/${todo.total}\n\n`);
-        if (todo.active) md.appendMarkdown(`$(play) ${todo.active}\n\n`);
-    }
-    if (peers && peers.total > 0) {
-        const rows = [['sessions', String(peers.total)]];
-        if (peers.busy > 0) rows.push(['busy right now', String(peers.busy)]);
-        md.appendMarkdown(`${todo ? '**Other sessions here**' : '### Other sessions here'}\n\n${table(rows)}`);
-    }
-    return md.value;
+// The formatting the sections are written against, shared with the segments so
+// a date or a cost reads the same in the bar, the tooltip and the page.
+function statusHelpers() {
+    return {
+        fmtCost,
+        fmtLeft: u.fmtLeft,
+        fmtAbs: (ts) => u.fmtAbs(ts),
+        fmtWhen: u.fmtWhen,
+        fmtDuration: s.fmtDuration,
+        tok,
+        shortModel: short,
+    };
+}
+
+/** Every section, for the dashboard: the same list the tooltips are cut from. */
+function statusNow(state) {
+    if (!state) return [];
+    const now = Math.floor(Date.now() / 1000);
+    return status.statusSections(state.data, statusHelpers(), {
+        stale: now - u.mtime(u.CACHE) > STALE_AFTER,
+        updatedAt: u.mtime(u.CACHE),
+    });
+}
+
+function sectionFor(state, id) {
+    const section = statusNow(state).find((x) => x.id === id);
+    return section ? renderSection(section) : '';
 }
 
 // What an agent is doing, as one icon. Every word outcomeOf can answer with is
@@ -271,14 +209,10 @@ function workflowTooltip(state) {
 // One builder per topic, so a segment that mixes topics gets both sections
 // joined rather than a tooltip about half of what it shows.
 const TOOLTIPS = {
-    limits: (state) => {
-        const d = state.data;
-        if (!d.limits || !d.weekly) return '';
-        return limitsTooltip(d.limits, d.pace, d.now, d.now - u.mtime(u.CACHE) > STALE_AFTER);
-    },
-    context: contextTooltip,
-    money: moneyTooltip,
-    work: workTooltip,
+    limits: (state) => sectionFor(state, 'limits'),
+    context: (state) => sectionFor(state, 'context'),
+    money: (state) => sectionFor(state, 'money'),
+    work: (state) => sectionFor(state, 'work'),
     // Both maps are looked up by topic on every draw, so an entry missing here
     // is not a segment without a tooltip — it is a throw inside render() that
     // hides the whole bar, the moment the first workflow starts.
@@ -829,6 +763,9 @@ async function showDashboard(context, { force = false } = {}) {
         history: hist.readHistory(storageDir),
         system: systemSnapshot(barState, index, { force }),
         config: configView(barState),
+        // The same sections the tooltips are cut from, so the Now tab and the
+        // hover cannot disagree about a number.
+        now: statusNow(barState),
         // Read from the state the ticks fill rather than scanned here: the panel
         // and the tree then show one reading of the machine, and opening the
         // dashboard does not pay for a second walk of every project directory.
@@ -1029,6 +966,9 @@ module.exports = {
     deactivate,
     __render: render,
     __collectWorkflowsFast: collectWorkflowsFast,
+    // The section list behind both the tooltips and the Now tab, exported so a
+    // test can hold the two renderings against each other.
+    __statusNow: statusNow,
     // The hover's own outcome table, exported for the one test that holds the
     // three of them — this, OUTCOME_ICONS and the stylesheet's `.o-*` rules —
     // against each other. They are three legitimate representations of one

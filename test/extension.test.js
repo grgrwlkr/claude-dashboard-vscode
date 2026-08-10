@@ -643,6 +643,36 @@ test('asking for the defaults returns the built-in bar, not the current one', as
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
+// The tooltip and the Now tab are two renderings of one list of sections. The
+// wording used to live in extension.js alone; a tab that copied it would have
+// been free to drift the moment either side changed.
+test('the Now tab and the tooltips are cut from the same sections', async () => {
+    const run = activate({ segments: ['{weekly}'], workspace: '' });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const html = panel.webview.html;
+        const state = run.context.claudeState;
+        const sections = ext.__statusNow(state);
+
+        assert.ok(sections.length > 0, 'the limit cache alone gives at least one section');
+        for (const section of sections) {
+            assert.ok(html.includes(`data-panel="${section.id}"`), `${section.id} missing from the page`);
+            // Every value the tooltip shows is on the page too — same strings,
+            // not a paraphrase.
+            for (const block of section.blocks) {
+                if (block.kind !== 'table') continue;
+                for (const row of block.rows) {
+                    for (const cell of row) {
+                        if (!cell) continue;
+                        assert.ok(html.includes(db.esc(cell)), `"${cell}" is in the tooltip but not on the page`);
+                    }
+                }
+            }
+        }
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
 // The settings tab shipped blank: every palette value a dash, every preview
 // "hidden", while the bar two inches below was full of numbers. The page read
 // the state through a property parked on the ExtensionContext, which the stub

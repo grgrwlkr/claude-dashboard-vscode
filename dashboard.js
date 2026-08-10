@@ -343,7 +343,7 @@ function statCards(total) {
 }
 
 function overviewTab(total, dayModels, modelOrder) {
-    return `<section class="tab" data-tab="overview">
+    return `<section class="tab" data-tab="overview" hidden>
         ${statCards(total)}
         <h2>Daily spend by model</h2>
         ${stackedDays(total.days, modelOrder, dayModels)}
@@ -1194,6 +1194,75 @@ function filesTab(total, sys) {
     </section>`;
 }
 
+// A tone is meaning, not colour: status.js says what a note means and each
+// renderer picks how to show it. The tooltip reaches for a codicon; here it is
+// a word and a stripe down the side.
+const TONE_LABEL = {
+    alarm: 'forecast',
+    safe: 'forecast',
+    warn: 'stale',
+    update: 'update',
+    active: 'in progress',
+};
+
+function statusBlocks(blocks) {
+    return blocks.map((block) => {
+        if (block.kind === 'subtitle') return `<h3 class="now-sub">${esc(block.text)}</h3>`;
+        if (block.kind === 'note') {
+            const label = block.label ? `<b>${esc(block.label)}</b> — ` : '';
+            const tag = TONE_LABEL[block.tone] && !block.label
+                ? `<span class="now-tag">${esc(TONE_LABEL[block.tone])}</span> ` : '';
+            return `<p class="now-note tone-${esc(block.tone || 'plain')}">${tag}${label}${esc(block.text)}</p>`;
+        }
+        if (block.rows.length === 0) return '';
+        const head = block.head
+            ? `<thead><tr>${block.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>` : '';
+        const body = block.rows.map((cells) => {
+            const [label, ...rest] = cells;
+            return `<tr><th scope="row">${esc(label)}</th>`
+                + rest.map((v, i) => `<td class="${i === 0 ? 'now-value' : 'dim'}">${esc(v)}</td>`).join('')
+                + '</tr>';
+        }).join('');
+        return `<table class="now-table">${head}<tbody>${body}</tbody></table>`;
+    }).join('');
+}
+
+/**
+ * Everything the status bar knows, on one page. The four panels are the four
+ * tooltips — the same sections, from the same module — so this tab cannot fall
+ * behind what the hover says, and a number hidden from a narrow bar is still
+ * here in full.
+ */
+function nowTab(sections, workflows) {
+    const rows = sections || [];
+    const active = (workflows || []).filter((r) => r.state === 'running' || r.active);
+
+    if (rows.length === 0) {
+        return `<section class="tab" data-tab="now">
+            <p class="empty">Nothing to report yet — no Claude session is open in this window, and no limits have been read.</p>
+        </section>`;
+    }
+
+    return `<section class="tab" data-tab="now">
+        <p class="note">The state of Claude as of the moment this page was opened: the same four panels that sit behind the status-bar items, at full width. Press Reindex to read them again.</p>
+        <div class="now-grid">
+          ${rows.map((section) => `<section class="now-panel" data-panel="${esc(section.id)}">
+            <h2 class="now-title">${esc(section.title)}</h2>
+            ${statusBlocks(section.blocks)}
+          </section>`).join('')}
+        </div>
+        ${active.length ? `<h2>Running right now</h2>
+        <p class="note">One line per workflow still going. The full picture — phases, agents, what each was told and what it answered — is under Work → Agents &amp; workflows.</p>
+        <table><thead><tr><th>Run</th><th>Project</th><th class="num">Agents</th><th class="num">Elapsed</th><th class="num">Spend</th></tr></thead><tbody>
+        ${active.map((r) => `<tr><td class="wrap">${esc(r.name || r.runId)}</td>
+          <td class="dim">${esc(r.project || '')}</td>
+          <td class="num">${esc(String((r.totals && r.totals.done) ?? ''))}${r.agents ? `/${r.agents.length}` : ''}</td>
+          <td class="num">${esc(r.elapsed || '')}</td>
+          <td class="num">${esc(r.cost > 0 ? fmtCost(r.cost) : '')}</td></tr>`).join('')}
+        </tbody></table>` : ''}
+    </section>`;
+}
+
 /**
  * The extension's own settings, edited here rather than in settings.json. The
  * bar is a template, and a template is written by trying it — so each segment
@@ -1442,6 +1511,28 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .preset-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
 .chip-seg { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8;
   background: var(--vscode-list-hoverBackground); border-radius: 3px; padding: 1px 5px; }
+.now-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px; align-items: start; margin-bottom: 8px; }
+.now-panel { min-width: 0; padding: 12px 14px; border-radius: 6px;
+  background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); }
+.now-title { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+.now-sub { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .55;
+  margin: 12px 0 4px; font-weight: 600; }
+.now-table { width: 100%; margin: 0; }
+.now-table th, .now-table td { border: none; padding: 3px 0; }
+.now-table th[scope="row"] { font: inherit; text-transform: none; letter-spacing: 0;
+  opacity: .6; text-align: left; white-space: nowrap; padding-right: 12px; width: 1%; }
+.now-table thead th { font-size: 10px; opacity: .45; padding-bottom: 2px; }
+.now-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.now-note { margin: 10px 0 0; padding-left: 9px; border-left: 2px solid var(--vscode-panel-border);
+  line-height: 1.5; opacity: .9; }
+.now-note.tone-muted { border-left-color: transparent; padding-left: 0; opacity: .5; font-size: 11.5px; }
+.now-note.tone-alarm { border-left-color: hsl(0 60% 57%); }
+.now-note.tone-safe { border-left-color: hsl(145 45% 50%); }
+.now-note.tone-warn { border-left-color: hsl(35 72% 55%); }
+.now-note.tone-update { border-left-color: hsl(200 62% 55%); }
+.now-note.tone-active { border-left-color: hsl(265 60% 62%); }
+.now-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; opacity: .5; }
 .segs { list-style: none; margin: 0 0 10px; padding: 0; max-width: 110ch; }
 .seg { margin-bottom: 8px; }
 .seg-head { display: flex; align-items: center; gap: 6px; }
@@ -1700,6 +1791,9 @@ function dayModelMatrix(index) {
 // what did the work, what was it spent well on — and only one section's tabs are
 // ever on screen.
 const SECTIONS = [
+    ['now', 'Now', [
+        ['now', 'Now'],
+    ]],
     ['spend', 'Spend', [
         ['overview', 'Overview'],
         ['sessions', 'Sessions'],
@@ -1732,11 +1826,14 @@ const SECTIONS = [
 ];
 
 function navHtml() {
+    // The page opens on whichever section leads SECTIONS — naming one here is
+    // how the tabs and the panes came to disagree about which was first.
+    const lead = SECTIONS[0][0];
     const sections = SECTIONS.map(([id, label], i) =>
         `<button class="section" data-section="${id}" aria-selected="${i === 0}">${esc(label)}</button>`).join('');
     const tabs = SECTIONS.flatMap(([sid, , items]) => items.map(([id, label], j) =>
-        `<button role="tab" data-tab="${id}" data-section="${sid}" aria-selected="${sid === 'spend' && j === 0}"`
-        + `${sid === 'spend' ? '' : ' hidden'}>${esc(label)}</button>`)).join('');
+        `<button role="tab" data-tab="${id}" data-section="${sid}" aria-selected="${sid === lead && j === 0}"`
+        + `${sid === lead ? '' : ' hidden'}>${esc(label)}</button>`)).join('');
     return `<nav class="sections">${sections}</nav><nav class="tabs" role="tablist">${tabs}</nav>`;
 }
 
@@ -1756,6 +1853,7 @@ function render(index, total, meta) {
 <p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
  · <button id="refresh" class="link">Reindex</button></p>
 ${navHtml()}
+${nowTab(meta.now, meta.workflows)}
 ${overviewTab(total, dayModels, modelOrder)}
 ${sessionsTab(total)}
 ${breakdownTab('projects', 'Spend by project', projects, 'Grouped by the repository a session ran in.')}

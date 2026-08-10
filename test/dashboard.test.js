@@ -144,8 +144,13 @@ test('only the first section is on screen, and every tab belongs to one', () => 
     const html = db.navHtml();
     const shown = [...html.matchAll(/<button role="tab" data-tab="([^"]+)" data-section="([^"]+)"([^>]*)>/g)];
     assert.equal(shown.length, db.SECTIONS.reduce((a, [, , items]) => a + items.length, 0));
+    // Whichever section leads the list is the one on screen, and every visible
+    // tab belongs to it — the assertion follows SECTIONS rather than naming a
+    // section, so reordering them cannot leave this passing while the page opens
+    // on a pane whose tab is hidden.
+    const [leadId, , leadTabs] = db.SECTIONS[0];
     const visible = shown.filter((m) => !m[3].includes('hidden'));
-    assert.deepEqual(visible.map((m) => m[2]), Array(4).fill('spend'));
+    assert.deepEqual(visible.map((m) => m[2]), Array(leadTabs.length).fill(leadId));
     assert.equal((html.match(/aria-selected="true"/g) || []).length, 2); // one section, one tab
 });
 

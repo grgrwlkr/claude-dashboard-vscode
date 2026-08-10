@@ -121,9 +121,20 @@ without `{today}` does not pay for the walk across every project it needs.
 
 ## Usage dashboard
 
-Click any status-bar item, or run **Claude: Open usage dashboard**. Twenty-one
-tabs in four sections: three drawn from an index of every transcript on the machine, and
-one that reads the installation itself.
+Click any status-bar item, or run **Claude: Open usage dashboard**. Twenty-two
+tabs in five sections: one for the state of Claude right now, three drawn from an
+index of every transcript on the machine, and one that reads the installation
+itself.
+
+**Now** — the state of Claude as the page was opened:
+
+| Tab | What it answers |
+| --- | --- |
+| Now | the four status-bar tooltips at full width — both limit windows with pace and forecast, the model and how full its context is, the session's spend and the work behind it, the task list and the neighbours — plus a line per running workflow |
+
+Those four panels are not a copy of the tooltips: both are rendered from the
+same sections in `status.js`, so the page cannot fall behind the hover, and a
+number squeezed out of a narrow bar is still here in full.
 
 **Spend** — where the money went:
 
