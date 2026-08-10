@@ -136,7 +136,18 @@ const THEMES = {
 };
 const THEME = THEMES[THEME_NAME];
 
-const wrap = (open, extra = '') => html
+// The preset cards ship their own templates in the markup and are filled in by
+// extension.js over a message — a channel that does not exist outside a webview,
+// so a screenshot taken here would show `{weekly}` where the editor shows 57%.
+// Same call, same renderer, invented values.
+const page = demo ? (() => {
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const previews = require('./demo-index').presetPreviews();
+    return html.replace(/(data-preset-preview="([^"]+)">)(?:<span class="chip-seg">[\s\S]*?<\/span>)*/g,
+        (m, head, id) => head + (previews[id] || []).map((line) => `<span class="chip-seg">${esc(line)}</span>`).join(''));
+})() : html;
+
+const wrap = (open, extra = '') => page
     .replace('</head>', `<style>${THEME}</style></head>`)
     .replace('</body>', (open ? `<script>addEventListener('load',()=>{
         document.querySelector('nav.sections [data-section="${open.section}"]').click();

@@ -225,6 +225,41 @@ function runs(now) {
     ];
 }
 
+// What every placeholder says on this invented machine. The palette shows these
+// beside the names, and the preset cards are rendered from them — in the editor
+// that rendering is done by extension.js over a live reading, and outside it the
+// preview harness has to stand in or the cards show their own templates back.
+const VALUES = {
+    weekly: '57%', weeklyBar: '▒▒▒▓░░', plan: '64%', drift: '-7%', dry: '', dryAt: 'Thu 13.08, ~19h',
+    dryLeft: '2d4h', reset: 'Wed 13.08 09:00', resetLeft: '2d12h', session5h: '43%', session5hLeft: '2h40m',
+    scoped: 'opus 61%', ctx: '29%', ctxTokens: '294k', ctxWindow: '1M', ctxCache: '78%', compact: '78%',
+    model: 'Opus 5', effort: 'xhigh', advisor: 'Fable 5', thinking: 'on', outputStyle: 'default',
+    branch: 'feat/checkout-v2', version: '2.1.224', update: '',
+    // Money and shares arrive without the tilde: it lives in the segment
+    // templates, so putting one here too prints "~~$114.29" on every card.
+    cost: '$114.29', burn: '$5.18', today: '$38.40',
+    requests: '486', duration: '6h12m', apiShare: '61%', added: '+4120', removed: '-1870',
+    peers: '3', peersBusy: '1', todo: '4/7', todoActive: 'Backfill the orders table',
+    jobs: '2', sessions: '5', openTasks: '9', wfName: 'schema-audit', wfAgents: '2/6',
+    wfElapsed: '22m', wfCost: '$14.20', wfRuns: '3',
+};
+
+// The same call extension.js makes for the Settings tab, against a registry that
+// answers from VALUES instead of from a machine.
+function presetPreviews() {
+    const real = seg.fields({});
+    const registry = Object.fromEntries(Object.entries(real).map(([name, f]) => [
+        name, { topic: f.topic, doc: f.doc, get: () => VALUES[name] ?? '' },
+    ]));
+    const out = {};
+    for (const preset of seg.PRESETS) {
+        out[preset.id] = preset.segments
+            .map((template) => seg.renderSegment(template, {}, registry).text)
+            .filter((line) => line);
+    }
+    return out;
+}
+
 function demo(now = Date.now()) {
     const index = { files: {} };
     PROJECTS.forEach((p, i) => {
@@ -279,18 +314,6 @@ function demo(now = Date.now()) {
         }
     }
 
-    const values = {
-        weekly: '57%', weeklyBar: '▒▒▒▓░░', plan: '64%', drift: '-7%', dry: '', dryAt: 'Thu 13.08, ~19h',
-        dryLeft: '2d4h', reset: 'Wed 13.08 09:00', resetLeft: '2d12h', session5h: '43%', session5hLeft: '2h40m',
-        scoped: 'opus 61%', ctx: '29%', ctxTokens: '294k', ctxWindow: '1M', ctxCache: '78%', compact: '78%',
-        model: 'Opus 5', effort: 'xhigh', advisor: 'Fable 5', thinking: 'on', outputStyle: 'default',
-        branch: 'feat/checkout-v2', version: '2.1.224', update: '', cost: '~$114.29', burn: '~$5.18',
-        today: '~$38.40', requests: '486', duration: '6h12m', apiShare: '~61%', added: '+4120', removed: '−1870',
-        peers: '3', peersBusy: '1', todo: '4/7', todoActive: 'Backfill the orders table',
-        jobs: '2', sessions: '5', openTasks: '9', wfName: 'schema-audit', wfAgents: '2/6',
-        wfElapsed: '22m', wfCost: '~$14.20', wfRuns: '3',
-    };
-
     return {
         index,
         total,
@@ -312,11 +335,11 @@ function demo(now = Date.now()) {
                 presets: seg.PRESETS,
                 alignment: 'right', priority: 100, refreshInterval: 60,
                 palette: Object.entries(seg.fields({})).map(([name, f]) => ({
-                    name, topic: f.topic, doc: f.doc, value: values[name] ?? '',
+                    name, topic: f.topic, doc: f.doc, value: VALUES[name] ?? '',
                 })),
             },
         },
     };
 }
 
-module.exports = { demo, PROJECTS };
+module.exports = { demo, presetPreviews, PROJECTS, VALUES };
