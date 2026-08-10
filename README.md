@@ -130,11 +130,19 @@ itself.
 
 | Tab | What it answers |
 | --- | --- |
-| Now | the four status-bar tooltips at full width — both limit windows with pace and forecast, the model and how full its context is, the session's spend and the work behind it, the task list and the neighbours — plus a line per running workflow |
+| Now | the four numbers that decide the next hour as headline tiles, the week as a track with spend, now and the forecast on one line, and under them the four status-bar tooltips at full width — both limit windows with pace and forecast, the model and how full its context is, the session's spend and the work behind it, the task list and the neighbours — plus a line per running workflow |
 
 Those four panels are not a copy of the tooltips: both are rendered from the
 same sections in `status.js`, so the page cannot fall behind the hover, and a
-number squeezed out of a narrow bar is still here in full.
+number squeezed out of a narrow bar is still here in full. A window is a share
+of something, so it is drawn as one on both sides — a fill on the page, and in
+the hover the same six block characters the status bar itself uses.
+
+The track above them is the one thing neither the bar nor a hover can say: the
+week as a length, with what has been spent measured from its left edge, a notch
+at this moment, and a flag where the forecast runs out. A forecast that lands
+past the reset draws no flag — the window refills before it arrives, and the
+foot says so instead.
 
 The whole page refreshes on `claudeStatusline.refreshInterval` — the same
 interval the bar uses, so both show one reading of the machine. It redraws in

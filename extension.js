@@ -41,7 +41,9 @@ class Markdown {
 // with a label, and nothing is packed into a heading to save space.
 function table(rows, head) {
     const header = head ? `| ${head.join(' | ')} |\n|${head.map(() => '---').join('|')}|\n` : '| | |\n|---|---|\n';
-    return header + rows.map((cells) => `| ${cells.join(' | ')} |`).join('\n') + '\n';
+    // The trailing blank line matters: two tables in a row without one are read
+    // as a single table, and the second one's header lands in it as a row.
+    return header + rows.map((cells) => `| ${cells.join(' | ')} |`).join('\n') + '\n\n';
 }
 
 // The tooltips render the sections status.js describes. The wording, the rows
@@ -59,6 +61,16 @@ function renderSection(section) {
     const md = new Markdown();
     md.appendMarkdown(`### ${section.title}\n\n`);
     for (const block of section.blocks) {
+        if (block.kind === 'meters') {
+            if (block.rows.length === 0) continue;
+            // The meter is the bar the status bar itself draws — same glyphs,
+            // same rounding, so a hover never disagrees with the item under it.
+            // Three columns, so the head has to be three wide: a row with more
+            // cells than the header loses the extras, which here is the reset.
+            md.appendMarkdown(table(block.rows.map((r) => [
+                r.label, `\`${u.bar(r.pct, 0)}\` **${r.value}**`, r.note ? `_${r.note}_` : '',
+            ]), ['', '', '']));
+        }
         if (block.kind === 'table') {
             if (block.rows.length === 0) continue;
             // The first column is a label and the second the answer, so the
@@ -115,6 +127,11 @@ function statusNow(state) {
         stale: now - u.mtime(u.CACHE) > STALE_AFTER,
         updatedAt: u.mtime(u.CACHE),
     });
+}
+
+/** The same state as numbers, for the meters and the track the page draws. */
+function statusMetrics(state) {
+    return state ? status.statusMetrics(state.data) : {};
 }
 
 function sectionFor(state, id) {
@@ -795,6 +812,7 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
         // The same sections the tooltips are cut from, so the Now tab and the
         // hover cannot disagree about a number.
         now: statusNow(barState),
+        metrics: statusMetrics(barState),
         // Read from the state the ticks fill rather than scanned here: the panel
         // and the tree then show one reading of the machine, and opening the
         // dashboard does not pay for a second walk of every project directory.
@@ -1011,4 +1029,8 @@ module.exports = {
     // against each other. They are three legitimate representations of one
     // vocabulary, and nothing but a test can keep them from drifting apart.
     __AGENT_ICON: AGENT_ICON,
+    // The markdown half of a section, exported so the shapes a live machine may
+    // not happen to produce — two tables in a row, a meter — can still be held
+    // to what a MarkdownString does with them.
+    __renderSection: renderSection,
 };

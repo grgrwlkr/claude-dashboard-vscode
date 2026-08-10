@@ -67,10 +67,13 @@ the tooltip sections and the colour source. Collection is driven by `state.needs
 segment mentions is never read.
 
 **One answer, two renderings.** What the status-bar tooltips say lives in `status.js` as sections of
-`{ kind: 'table' | 'subtitle' | 'note' }` — never markdown, never codicons. `extension.js` renders
-them as a hover and the dashboard's Now tab renders the same list as panels; a `tone` on a note says
-what it means (`alarm`, `safe`, `warn`, `update`, `active`, `muted`) and each side picks its own
-icon or colour. Wording goes there, not into either renderer.
+`{ kind: 'table' | 'meters' | 'subtitle' | 'note' }` — never markdown, never codicons. `extension.js`
+renders them as a hover and the dashboard's Now tab renders the same list as panels; a `tone` on a
+note says what it means (`alarm`, `safe`, `warn`, `update`, `active`, `muted`) and each side picks
+its own icon or colour. A `meters` row carries its share as a **number**, so the hover can write it
+with the same block characters `usage.js bar()` puts in the status bar while the page draws it as a
+fill. Wording goes there, not into either renderer. `statusMetrics` is the same state as bare
+numbers, for the headline tiles and the week track, which draw rather than read.
 
 **The dashboard redraws on the slow tick.** `refreshDashboard` rebuilds the open panel from the
 reading the tick just took, silently — `buildIndex({ silent: true })` skips the progress notification,

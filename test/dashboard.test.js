@@ -150,8 +150,26 @@ test('only the first section is on screen, and every tab belongs to one', () => 
     // on a pane whose tab is hidden.
     const [leadId, , leadTabs] = db.SECTIONS[0];
     const visible = shown.filter((m) => !m[3].includes('hidden'));
-    assert.deepEqual(visible.map((m) => m[2]), Array(leadTabs.length).fill(leadId));
-    assert.equal((html.match(/aria-selected="true"/g) || []).length, 2); // one section, one tab
+    // A section with one tab draws no tab row: the section button is the label,
+    // and a lone tab under it repeats the word and answers no question.
+    const expected = leadTabs.length === 1 ? [] : Array(leadTabs.length).fill(leadId);
+    assert.deepEqual(visible.map((m) => m[2]), expected);
+    // The selected tab is still marked even when its row is not drawn — opening
+    // the page has to leave exactly one pane on screen either way.
+    assert.equal((html.match(/aria-selected="true"/g) || []).length, 2);
+});
+
+test('a section holding one tab draws no tab row', () => {
+    const html = db.navHtml();
+    const [leadId, , leadTabs] = db.SECTIONS[0];
+    if (leadTabs.length === 1) {
+        assert.match(html, /nav class="tabs empty"/);
+        // The pane is still selected, so the page is not blank.
+        assert.match(html, new RegExp(`data-tab="${leadTabs[0][0]}"[^>]*aria-selected="true"`));
+    }
+    // A section with several tabs keeps its row.
+    const many = db.SECTIONS.find(([, , items]) => items.length > 1);
+    assert.ok(many, 'the dashboard still has a multi-tab section');
 });
 
 test('the page survives an index with none of the new dimensions in it', () => {

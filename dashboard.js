@@ -45,7 +45,7 @@ const fmtDay = (key) => key.slice(5).replace('-', '.');
 
 // Weekdays come from usage.js so the tooltips and these tables name a day the
 // same way; nothing else of that module is used here.
-const { WEEKDAYS } = require('./usage');
+const { WEEKDAYS, fmtLeft } = require('./usage');
 
 function fmtDateTime(ms) {
     if (!ms) return '—';
@@ -1194,6 +1194,64 @@ function filesTab(total, sys) {
     </section>`;
 }
 
+// The thresholds the bar colours by, so a number that is orange in the corner of
+// the editor is orange on the page too. Charts colours come from the theme, which
+// means high-contrast and light themes get their own without a second palette.
+const meterTone = (pct) => (pct >= 80 ? 'hot' : pct >= 50 ? 'warm' : 'cool');
+
+/**
+ * The week as a length of time rather than a percentage.
+ *
+ * A bar answers "how much is gone". The question underneath it is "how much is
+ * gone *by now*", and that needs two marks a bar cannot carry: where the window
+ * has got to, and where the forecast lands. Both live on one track here — the
+ * fill is spend, the notch is this moment, the flag is the forecast, and a flag
+ * past the right edge is the whole point of the reassuring case: you run out
+ * after the window has already reset, which is to say you do not.
+ */
+function paceTrack(w) {
+    if (!w) return '';
+    const pct = Math.max(0, Math.min(100, w.pct));
+    const now = Math.max(0, Math.min(1, w.now || 0)) * 100;
+    const tone = meterTone(pct);
+    const dry = w.dry;
+    const inside = dry !== null && dry !== undefined && dry <= 1;
+    const flagAt = inside ? Math.max(0, Math.min(100, dry * 100)) : null;
+
+    // A label near the right edge would run off the rail, so it changes sides;
+    // and two labels within a few percent of each other overprint, so the one
+    // that only repeats the tick beneath it gives way to the forecast.
+    const side = (at) => (at > 78 ? ' flip' : '');
+    const crowded = flagAt !== null && Math.abs(flagAt - now) < 11;
+
+    return `<div class="track">
+        <div class="track-head"><b>this week</b><span>spend against the window it has to last</span></div>
+        <div class="track-rail">
+          <div class="track-fill t-${tone}" style="width:${pct}%"></div>
+          <div class="track-edge t-${tone}" style="left:${pct}%"></div>
+          <div class="track-now${side(now)}" style="left:${now.toFixed(2)}%">${crowded ? '' : '<span>now</span>'}</div>
+          ${flagAt !== null ? `<div class="track-dry${side(flagAt)}" style="left:${flagAt.toFixed(2)}%"><span>dry</span></div>` : ''}
+        </div>
+        <div class="track-feet">
+          <span>window opened</span>
+          <span>${dry !== null && dry !== undefined && !inside
+        ? `forecast lands past the reset · resets in ${esc(fmtLeft(w.resetIn, 0))}`
+        : `resets in ${esc(fmtLeft(w.resetIn, 0))}`}</span>
+        </div>
+    </div>`;
+}
+
+/** One headline number with the meter that gives it a scale. */
+function meterTile({ label, value, sub, pct, tone, wide }) {
+    const width = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null;
+    return `<div class="tile${wide ? ' tile-wide' : ''}">
+        <span class="tile-label">${esc(label)}</span>
+        <span class="tile-value">${esc(value)}</span>
+        ${width !== null ? `<span class="tile-meter"><i class="t-${tone || meterTone(width)}" style="width:${width}%"></i></span>` : ''}
+        <span class="tile-sub">${esc(sub || '')}</span>
+    </div>`;
+}
+
 // A tone is meaning, not colour: status.js says what a note means and each
 // renderer picks how to show it. The tooltip reaches for a codicon; here it is
 // a word and a stripe down the side.
@@ -1208,6 +1266,16 @@ const TONE_LABEL = {
 function statusBlocks(blocks) {
     return blocks.map((block) => {
         if (block.kind === 'subtitle') return `<h3 class="now-sub">${esc(block.text)}</h3>`;
+        if (block.kind === 'meters') {
+            // A row of its own rather than a table cell: the meter needs the
+            // width, and the label reads better above it than beside it.
+            return `<div class="rows">${block.rows.map((r) => `<div class="row">
+                <span class="row-label">${esc(r.label)}</span>
+                <span class="row-meter"><i class="t-${meterTone(r.pct)}" style="width:${Math.max(0, Math.min(100, r.pct))}%"></i></span>
+                <span class="row-value">${esc(r.value)}</span>
+                <span class="row-note">${esc(r.note || '')}</span>
+            </div>`).join('')}</div>`;
+        }
         if (block.kind === 'note') {
             const label = block.label ? `<b>${esc(block.label)}</b> — ` : '';
             const tag = TONE_LABEL[block.tone] && !block.label
@@ -1233,8 +1301,9 @@ function statusBlocks(blocks) {
  * behind what the hover says, and a number hidden from a narrow bar is still
  * here in full.
  */
-function nowTab(sections, workflows) {
+function nowTab(sections, workflows, metrics) {
     const rows = sections || [];
+    const m = metrics || {};
     const active = (workflows || []).filter((r) => r.state === 'running' || r.active);
 
     if (rows.length === 0) {
@@ -1243,8 +1312,39 @@ function nowTab(sections, workflows) {
         </section>`;
     }
 
+    // The headline row answers the four questions in the order they get asked:
+    // will the week hold, will this hour hold, will the context hold, what is it
+    // costing. Each number carries its own meter rather than a shared axis —
+    // they measure different things and share only a scale of 0 to 100%.
+    const tiles = [];
+    if (m.weekly) {
+        tiles.push(meterTile({
+            label: 'weekly window', value: `${m.weekly.pct}%`, pct: m.weekly.pct,
+            sub: m.weekly.plan !== null ? `${m.weekly.plan}% of the week gone` : '',
+        }));
+    }
+    if (m.session5h) {
+        tiles.push(meterTile({
+            label: '5-hour window', value: `${m.session5h.pct}%`, pct: m.session5h.pct,
+            sub: `resets in ${fmtLeft(m.session5h.resetIn, 0)}`,
+        }));
+    }
+    if (m.context) {
+        tiles.push(meterTile({
+            label: 'context', value: `${m.context.estimated ? '~' : ''}${m.context.pct}%`, pct: m.context.pct,
+            sub: `${tok(m.context.tokens)} of ${tok(m.context.window)}`,
+        }));
+    }
+    if (m.spend) {
+        tiles.push(meterTile({
+            label: 'this session', value: `~${fmtCost(m.spend.cost)}`,
+            sub: m.spend.burn > 0 ? `~${fmtCost(m.spend.burn)} an hour` : '',
+        }));
+    }
+
     return `<section class="tab" data-tab="now">
-        <p class="note">The state of Claude as of the moment this page was opened: the same four panels that sit behind the status-bar items, at full width. Press Reindex to read them again.</p>
+        ${tiles.length ? `<div class="tiles">${tiles.join('')}</div>` : ''}
+        ${paceTrack(m.weekly)}
         <div class="now-grid">
           ${rows.map((section) => `<section class="now-panel" data-panel="${esc(section.id)}">
             <h2 class="now-title">${esc(section.title)}</h2>
@@ -1375,7 +1475,8 @@ nav button:hover { opacity: 1; }
 nav.sections { gap: 4px; margin-bottom: 2px; }
 nav.sections button { font-size: 15px; font-weight: 600; padding: 4px 12px; border-radius: 5px; }
 nav.sections button[aria-selected="true"] { opacity: 1; background: var(--vscode-editorWidget-background); }
-nav.tabs { border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 18px; }
+nav.tabs { border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 18px; min-height: 30px; }
+nav.tabs.empty { min-height: 0; margin-bottom: 14px; }
 nav.tabs button { border-bottom: 2px solid transparent; }
 nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--vscode-focusBorder); }
 .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
@@ -1511,27 +1612,95 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .preset-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
 .chip-seg { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8;
   background: var(--vscode-list-hoverBackground); border-radius: 3px; padding: 1px 5px; }
-.now-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 14px; align-items: start; margin-bottom: 8px; }
-.now-panel { min-width: 0; padding: 12px 14px; border-radius: 6px;
+/* The headline row. Numbers are set in the editor's own monospace at a size the
+   rest of the page never uses, so the four answers read before any label does;
+   labels drop to a small caps-like treatment and get out of the way. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 1px; background: var(--vscode-panel-border); border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
+.tile { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px 13px;
+  background: var(--vscode-editor-background); min-width: 0; }
+.tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; opacity: .5; }
+.tile-value { font-family: var(--vscode-editor-font-family); font-size: 25px; line-height: 1.05;
+  font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.tile-meter { display: block; height: 3px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
+.tile-meter i { display: block; height: 100%; border-radius: 2px; }
+.tile-sub { font-size: 11px; opacity: .55; min-height: 14px; margin-top: auto; }
+
+/* Spend, plan and forecast are three different jobs, so they get three roles
+   from the theme's own chart ramp rather than three invented hues. */
+.t-cool { background: var(--vscode-charts-blue, hsl(200 62% 55%)); }
+.t-warm { background: var(--vscode-charts-yellow, hsl(35 72% 55%)); }
+.t-hot { background: var(--vscode-charts-red, hsl(0 60% 57%)); }
+
+/* The signature: the week as a length of time. Fill is what has been spent,
+   the notch is this moment, the flag is where the forecast lands — and a
+   forecast that lands past the right edge simply is not drawn, because the
+   window resets before it arrives. */
+.track { margin: 0 0 20px; max-width: 980px; }
+.track-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.track-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
+  opacity: .5; font-weight: 600; }
+.track-head span { font-size: 11px; opacity: .5; }
+.track-rail { position: relative; height: 18px; border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); overflow: hidden; }
+/* The spend reads at its edge, not across its area: a recessive fill with a
+   solid cap is a length you can measure, where a bright slab is just a mass.
+   The cap is a sibling rather than a child because opacity composites the whole
+   subtree: inside the fill it could never be brighter than the fill. */
+.track-fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px 0 0 4px; opacity: .3; }
+.track-edge { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -2px; border-radius: 1px; }
+.track-now, .track-dry { position: absolute; top: 0; bottom: 0; width: 0; }
+.track-now::before, .track-dry::before { content: ''; position: absolute; top: 0; bottom: 0;
+  width: 2px; margin-left: -1px; }
+.track-now::before { background: var(--vscode-foreground); opacity: .8; }
+.track-dry::before { background: var(--vscode-charts-red, hsl(0 60% 57%)); }
+.track-now span, .track-dry span { position: absolute; top: 3px; left: 6px; font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; opacity: .85; }
+.track-now.flip span, .track-dry.flip span { left: auto; right: 6px; }
+.track-feet { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px;
+  font-size: 11px; opacity: .5; }
+.track-feet span:last-child { text-align: right; }
+
+/* Columns rather than a grid: the four panels are of wildly different heights,
+   and a grid leaves the short one's row half empty. Multicol packs them. */
+.now-grid { columns: 3 300px; column-gap: 14px; margin-bottom: 8px; }
+.now-panel { break-inside: avoid; margin: 0 0 14px; padding: 13px 15px 14px; border-radius: 6px;
   background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); }
-.now-title { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
-.now-sub { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .55;
-  margin: 12px 0 4px; font-weight: 600; }
+.now-title { font-size: 13.5px; font-weight: 600; margin: 0 0 11px; opacity: .8; }
+.now-sub { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; opacity: .45;
+  margin: 14px 0 4px; font-weight: 600; padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+/* label · meter · value · when — four columns that stay in their lanes, so a
+   column of windows reads down as easily as across. */
+.rows { display: flex; flex-direction: column; gap: 6px; }
+.row { display: grid; grid-template-columns: 3.2rem 1fr auto; gap: 4px 9px; align-items: center; }
+.row-label { font-size: 11.5px; opacity: .55; }
+.row-meter { height: 4px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
+.row-meter i { display: block; height: 100%; border-radius: 2px; }
+.row-value { font-family: var(--vscode-editor-font-family); font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.row-note { grid-column: 2 / -1; font-size: 11px; opacity: .45; }
+.row-note:empty { display: none; }
 .now-table { width: 100%; margin: 0; }
 .now-table th, .now-table td { border: none; padding: 3px 0; }
 .now-table th[scope="row"] { font: inherit; text-transform: none; letter-spacing: 0;
-  opacity: .6; text-align: left; white-space: nowrap; padding-right: 12px; width: 1%; }
-.now-table thead th { font-size: 10px; opacity: .45; padding-bottom: 2px; }
-.now-value { font-variant-numeric: tabular-nums; font-weight: 600; }
-.now-note { margin: 10px 0 0; padding-left: 9px; border-left: 2px solid var(--vscode-panel-border);
-  line-height: 1.5; opacity: .9; }
-.now-note.tone-muted { border-left-color: transparent; padding-left: 0; opacity: .5; font-size: 11.5px; }
-.now-note.tone-alarm { border-left-color: hsl(0 60% 57%); }
-.now-note.tone-safe { border-left-color: hsl(145 45% 50%); }
-.now-note.tone-warn { border-left-color: hsl(35 72% 55%); }
-.now-note.tone-update { border-left-color: hsl(200 62% 55%); }
-.now-note.tone-active { border-left-color: hsl(265 60% 62%); }
+  opacity: .55; text-align: left; white-space: nowrap; padding-right: 14px; width: 1%; }
+.now-table thead th { font-size: 10px; opacity: .4; padding-bottom: 3px; letter-spacing: .06em; }
+.now-value { font-family: var(--vscode-editor-font-family); font-size: 12.5px;
+  font-variant-numeric: tabular-nums; font-weight: 600; }
+.now-note { margin: 11px 0 0; padding-left: 10px; line-height: 1.5; font-size: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
+.now-note b { font-weight: 600; }
+.now-note.tone-muted { border-left: none; padding-left: 0; opacity: .45; font-size: 11px;
+  margin-top: 12px; }
+.now-note.tone-alarm { border-left-color: var(--vscode-charts-red, hsl(0 60% 57%)); }
+.now-note.tone-safe { border-left-color: var(--vscode-charts-green, hsl(145 45% 50%)); }
+.now-note.tone-warn { border-left-color: var(--vscode-charts-yellow, hsl(35 72% 55%)); }
+.now-note.tone-update { border-left-color: var(--vscode-charts-blue, hsl(200 62% 55%)); }
+.now-note.tone-active { border-left-color: var(--vscode-charts-purple, hsl(265 60% 62%)); }
 .now-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; opacity: .5; }
 .segs { list-style: none; margin: 0 0 10px; padding: 0; max-width: 110ch; }
 .seg { margin-bottom: 8px; }
@@ -1609,13 +1778,13 @@ function openTab(btn) {
 // rather than leaving the page on a pane whose tab is no longer visible.
 function openSection(id) {
   sections.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.section === id)));
-  let first = null;
-  tabs.forEach((b) => {
-    const mine = b.dataset.section === id;
-    b.hidden = !mine;
-    if (mine && !first) first = b;
-  });
-  if (first) openTab(first);
+  const mine = [...tabs].filter((b) => b.dataset.section === id);
+  // One tab under a section is not a choice, so the row that offers it is not
+  // drawn — the section button above already said where you are.
+  const lone = mine.length === 1;
+  tabs.forEach((b) => { b.hidden = b.dataset.section !== id || lone; });
+  document.querySelector('nav.tabs').classList.toggle('empty', lone);
+  if (mine[0]) openTab(mine[0]);
 }
 
 sections.forEach((btn) => btn.addEventListener('click', () => openSection(btn.dataset.section)));
@@ -1868,12 +2037,16 @@ function navHtml() {
     // The page opens on whichever section leads SECTIONS — naming one here is
     // how the tabs and the panes came to disagree about which was first.
     const lead = SECTIONS[0][0];
+    // A section holding one tab needs no second row: the section button already
+    // named the only thing under it, and a lone tab repeating that name reads as
+    // a control that does nothing.
+    const single = new Set(SECTIONS.filter(([, , items]) => items.length === 1).map(([id]) => id));
     const sections = SECTIONS.map(([id, label], i) =>
         `<button class="section" data-section="${id}" aria-selected="${i === 0}">${esc(label)}</button>`).join('');
     const tabs = SECTIONS.flatMap(([sid, , items]) => items.map(([id, label], j) =>
         `<button role="tab" data-tab="${id}" data-section="${sid}" aria-selected="${sid === lead && j === 0}"`
-        + `${sid === lead ? '' : ' hidden'}>${esc(label)}</button>`)).join('');
-    return `<nav class="sections">${sections}</nav><nav class="tabs" role="tablist">${tabs}</nav>`;
+        + `${sid === lead && !single.has(sid) ? '' : ' hidden'}>${esc(label)}</button>`)).join('');
+    return `<nav class="sections">${sections}</nav><nav class="tabs${single.has(lead) ? ' empty' : ''}" role="tablist">${tabs}</nav>`;
 }
 
 function render(index, total, meta) {
@@ -1892,7 +2065,7 @@ function render(index, total, meta) {
 <p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
  · <button id="refresh" class="link">Reindex</button></p>
 ${navHtml()}
-${nowTab(meta.now, meta.workflows)}
+${nowTab(meta.now, meta.workflows, meta.metrics)}
 ${overviewTab(total, dayModels, modelOrder)}
 ${sessionsTab(total)}
 ${breakdownTab('projects', 'Spend by project', projects, 'Grouped by the repository a session ran in.')}
@@ -1923,7 +2096,7 @@ module.exports = {
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, SECTIONS, CACHE_PARTS,
     agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
-    limitsTab, weekLabel,
+    limitsTab, weekLabel, nowTab, paceTrack, meterTile, meterTone,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

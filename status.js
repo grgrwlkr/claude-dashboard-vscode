@@ -8,6 +8,8 @@
 //
 // A section is `{ id, title, blocks }`, and a block is one of:
 //   { kind: 'table', head?, rows }   rows are [label, value] or a head-wide array
+//   { kind: 'meters', rows }         [{ label, value, pct, note }] — a share of
+//                                    something, drawn as a bar or written as one
 //   { kind: 'subtitle', text }       a heading inside the section
 //   { kind: 'note', text, tone }     a sentence under the rows
 // `tone` is meaning, not appearance: the tooltip turns it into a codicon and the
@@ -35,8 +37,15 @@ function limits(d, h, env) {
     const now = d.now;
     const blocks = [];
 
-    const row = (label, pct, reset) =>
-        [label, `${pct}%`, reset ? `${h.fmtLeft(reset, now)} → ${h.fmtAbs(reset)}` : ''];
+    // A window is a share of something, and a share wants a bar beside it —
+    // written with blocks in a tooltip, drawn as a meter on a page. The number
+    // travels as a number so each renderer can do that its own way.
+    const row = (label, pct, reset) => ({
+        label,
+        value: `${pct}%`,
+        pct,
+        note: reset ? `${h.fmtLeft(reset, now)} → ${h.fmtAbs(reset)}` : '',
+    });
     const rows = [];
     if (lim.session) rows.push(row('5h', lim.session.pct, lim.session.reset));
     if (lim.weekly) rows.push(row('7d', lim.weekly.pct, lim.weekly.reset));
@@ -46,7 +55,7 @@ function limits(d, h, env) {
         const own = Math.abs(scoped.reset - (lim.weekly ? lim.weekly.reset : 0)) > 60 ? scoped.reset : 0;
         rows.push(row(scoped.scope.toLowerCase(), scoped.pct, own));
     }
-    blocks.push({ kind: 'table', head: ['limit', 'used', 'resets'], rows });
+    blocks.push({ kind: 'meters', rows });
 
     const pc = d.pace;
     if (pc && lim.weekly) {
@@ -101,14 +110,23 @@ function context(d, h) {
     if (settings.outputStyle) model.push(['output style', settings.outputStyle]);
     blocks.push({ kind: 'table', rows: model });
 
-    const fill = [['window', `${ctx.estimated ? '~' : ''}${ctx.pct}% — ${h.tok(ctx.tokens)} / ${h.tok(ctx.window)}`]];
+    blocks.push({ kind: 'subtitle', text: 'Context' }, {
+        kind: 'meters',
+        rows: [{
+            label: 'window',
+            value: `${ctx.estimated ? '~' : ''}${ctx.pct}%`,
+            pct: ctx.pct,
+            note: `${h.tok(ctx.tokens)} / ${h.tok(ctx.window)}`,
+        }],
+    });
+    const fill = [];
     if (ctx.estimated) fill.push(['note', 'window size unknown for this model']);
     if (ctx.cachePct >= 0) fill.push(['from cache', `${ctx.cachePct}%`]);
     if (d.compactPct > 0) {
         const left = d.compactPct - ctx.pct;
         fill.push(['auto-compact', left > 0 ? `at ${d.compactPct}% — ${left}% away` : `at ${d.compactPct}% — due`]);
     }
-    blocks.push({ kind: 'subtitle', text: 'Context' }, { kind: 'table', rows: fill });
+    if (fill.length) blocks.push({ kind: 'table', rows: fill });
 
     const envRows = [];
     if (ctx.branch) envRows.push(['branch', ctx.branch]);
@@ -154,6 +172,19 @@ function work(d) {
     const { peers, todo } = d;
     if (!todo && !(peers && peers.total > 0)) return null;
     const blocks = [];
+    // How far along the list is, as a share — the title counts the tasks, so
+    // this says the thing counting them cannot: how much of it is behind you.
+    if (todo && todo.total > 0) {
+        blocks.push({
+            kind: 'meters',
+            rows: [{
+                label: 'done',
+                value: `${Math.round((todo.done / todo.total) * 100)}%`,
+                pct: Math.round((todo.done / todo.total) * 100),
+                note: '',
+            }],
+        });
+    }
     if (todo && todo.active) blocks.push({ kind: 'note', tone: 'active', text: todo.active });
     if (peers && peers.total > 0) {
         const rows = [['sessions', String(peers.total)]];
@@ -170,4 +201,41 @@ function work(d) {
     };
 }
 
-module.exports = { statusSections, limits, context, money, work };
+const WEEK_S = 604800;
+
+/**
+ * The same state as numbers rather than sentences, for the parts of a page that
+ * draw rather than read: a meter needs a fraction, not "52%".
+ *
+ * `dryAt` is returned as a position in the window — 0 at its start, 1 at the
+ * reset, past 1 when the forecast lands after it. That single number is what
+ * lets a track show spend, now and the forecast on one line, which is the thing
+ * neither the bar nor the tooltip can say.
+ */
+function statusMetrics(d = {}) {
+    const out = {};
+    const w = d.weekly;
+    if (w && w.reset > 0) {
+        const start = w.reset - WEEK_S;
+        const pos = (ts) => (ts ? (ts - start) / WEEK_S : null);
+        out.weekly = {
+            pct: w.pct,
+            plan: d.pace ? d.pace.plan : null,
+            now: Math.max(0, Math.min(1, (d.now - start) / WEEK_S)),
+            dry: d.pace ? pos(d.pace.dryAt) : null,
+            beforeReset: Boolean(d.pace && d.pace.beforeReset),
+            resetIn: Math.max(0, w.reset - d.now),
+        };
+    }
+    if (d.session) out.session5h = { pct: d.session.pct, resetIn: Math.max(0, d.session.reset - d.now) };
+    if (d.ctx) {
+        out.context = {
+            pct: d.ctx.pct, tokens: d.ctx.tokens, window: d.ctx.window,
+            estimated: d.ctx.estimated, compactAt: d.compactPct > 0 ? d.compactPct : null,
+        };
+    }
+    if (d.stats) out.spend = { cost: d.stats.cost, burn: d.stats.burn, today: d.todayUsd || 0 };
+    return out;
+}
+
+module.exports = { statusSections, statusMetrics, limits, context, money, work };

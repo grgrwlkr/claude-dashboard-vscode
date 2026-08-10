@@ -38,6 +38,7 @@ const data = {
 
 const rowsOf = (section, index = 0) =>
     section.blocks.filter((b) => b.kind === 'table')[index].rows;
+const metersOf = (section) => section.blocks.find((b) => b.kind === 'meters').rows;
 const notes = (section) => section.blocks.filter((b) => b.kind === 'note');
 const text = (section) => JSON.stringify(section.blocks);
 
@@ -50,7 +51,17 @@ test('every section is data, with no markdown or icons baked into it', () => {
         assert.ok(!text(section).includes('**'), `${section.id} carries markdown emphasis`);
         assert.ok(!text(section).includes('$('), `${section.id} carries a codicon`);
         for (const block of section.blocks) {
-            assert.ok(['table', 'subtitle', 'note'].includes(block.kind), `${section.id}: ${block.kind}`);
+            assert.ok(['table', 'meters', 'subtitle', 'note'].includes(block.kind), `${section.id}: ${block.kind}`);
+            if (block.kind === 'meters') {
+                for (const row of block.rows) {
+                    // The share travels as a number: a tooltip writes it with
+                    // blocks, a page draws it as a bar, and neither can do that
+                    // from "52%".
+                    assert.equal(typeof row.pct, 'number', `${section.id}: ${row.label} has no share`);
+                    assert.ok(row.pct >= 0 && row.pct <= 100, `${section.id}: ${row.label} is ${row.pct}`);
+                    assert.equal(typeof row.value, 'string');
+                }
+            }
             if (block.kind === 'table') {
                 for (const row of block.rows) assert.ok(row.every((c) => typeof c === 'string'));
                 if (block.head) {
@@ -63,10 +74,11 @@ test('every section is data, with no markdown or icons baked into it', () => {
 
 test('the limits section reads every window and says which side of plan it is on', () => {
     const [limits] = status.statusSections(data, helpers, { stale: false, updatedAt: NOW });
-    assert.deepEqual(rowsOf(limits).map((r) => r[0]), ['5h', '7d', 'fable']);
-    assert.equal(rowsOf(limits)[1][1], '52%');
+    assert.deepEqual(metersOf(limits).map((r) => r.label), ['5h', '7d', 'fable']);
+    assert.equal(metersOf(limits)[1].value, '52%');
+    assert.equal(metersOf(limits)[1].pct, 52);
     // A per-model window that resets with the weekly one does not repeat the date.
-    assert.equal(rowsOf(limits)[2][2], '');
+    assert.equal(metersOf(limits)[2].note, '');
 
     const pace = notes(limits).find((n) => n.label === 'Pace');
     assert.match(pace.text, /52% spent, 61% of the window elapsed: 9% under plan/);
@@ -136,6 +148,19 @@ test('the work section names itself once, whichever half of it exists', () => {
     assert.equal(both.title, 'Tasks 3/6');
     assert.deepEqual(both.blocks.filter((b) => b.kind === 'subtitle').map((b) => b.text), ['Other sessions here']);
     assert.ok(both.blocks.some((b) => b.kind === 'note' && b.text === 'writing the parser'));
+});
+
+test('a task list is a share, and says so beside the count', () => {
+    const work = status.statusSections(data, helpers, {}).find((x) => x.id === 'work');
+    // The title counts the tasks; the meter is the only thing that says how much
+    // of the list is behind you, so it is not a second copy of the count.
+    assert.deepEqual(metersOf(work), [{ label: 'done', value: '50%', pct: 50, note: '' }]);
+
+    // An empty list has no share to draw, and dividing by its length would say
+    // NaN% in the hover and stretch the meter off the panel.
+    const empty = { ...data, todo: { done: 0, total: 0, active: '' } };
+    const work2 = status.statusSections(empty, helpers, {}).find((x) => x.id === 'work');
+    assert.ok(!work2.blocks.some((b) => b.kind === 'meters'));
 });
 
 test('a section with nothing behind it is left out entirely', () => {

@@ -29,6 +29,7 @@ const ix = require('../indexer');
 const seg = require('../segments');
 const wf = require('../workflows');
 const db = require('../dashboard');
+const u = require('../usage');
 
 function activate({ segments, workspace = '' } = {}) {
     vscode.__reset();
@@ -159,6 +160,38 @@ test('an unknown placeholder does not stop the rest of the bar from drawing', ()
         assert.equal(vscode.__items[0].text, '{nope} still here');
         assert.equal(vscode.__items[0].visible, true);
     } finally { run.dispose(); }
+});
+
+// A tooltip is text, so a share is written with the same blocks the bar draws.
+// Both halves of this have been wrong once: a table row with more cells than its
+// header silently loses the extras, and two tables with no blank line between
+// them are read as one, which turns the second one into a wall of pipes.
+test('a share in the hover is the bar the status bar itself draws', () => {
+    const md = ext.__renderSection({
+        id: 'demo',
+        title: 'Demo',
+        blocks: [
+            { kind: 'meters', rows: [{ label: '7d', value: '52%', pct: 52, note: 'Thu 13.08' }] },
+            { kind: 'table', rows: [['from cache', '99%']] },
+        ],
+    });
+
+    const lines = md.split('\n');
+    const row = lines.find((line) => line.startsWith('| 7d '));
+    assert.ok(row.includes(`\`${u.bar(52, 0)}\``), `the meter is not the bar: ${row}`);
+
+    const width = (line) => line.split('|').length - 1;
+    lines.forEach((line, i) => {
+        if (!line.startsWith('|---')) return;
+        // A table's header is its `|---|` line and the row above it. Anything
+        // but a blank line above that pair means the previous table swallowed
+        // this one, and every row of it renders as text.
+        assert.ok(!(lines[i - 2] || '').startsWith('|'), `a table starts inside another one:\n${md}`);
+        // A row wider than the header loses its extra cells — here, the reset.
+        for (let j = i + 1; j < lines.length && lines[j].startsWith('|'); j++) {
+            assert.equal(width(lines[j]), width(line), `a row does not fit its header:\n${md}`);
+        }
+    });
 });
 
 test('workflow data is collected even when no segment mentions it', () => {
@@ -661,6 +694,14 @@ test('the Now tab and the tooltips are cut from the same sections', async () => 
             // Every value the tooltip shows is on the page too — same strings,
             // not a paraphrase.
             for (const block of section.blocks) {
+                if (block.kind === 'meters') {
+                    for (const row of block.rows) {
+                        for (const cell of [row.label, row.value, row.note]) {
+                            if (!cell) continue;
+                            assert.ok(html.includes(db.esc(cell)), `"${cell}" is in the tooltip but not on the page`);
+                        }
+                    }
+                }
                 if (block.kind !== 'table') continue;
                 for (const row of block.rows) {
                     for (const cell of row) {
