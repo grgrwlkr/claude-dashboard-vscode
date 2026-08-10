@@ -104,6 +104,36 @@ test('the commands the package manifest promises are all registered', () => {
     } finally { run.dispose(); }
 });
 
+// Both run commands read their run out of the tree node they are handed, so the
+// palette — where there is no node — can only make them apologise. The manifest
+// is the only place that decides this, which is why it is asserted here rather
+// than through activate().
+test('the run commands are wired to the tree row, not to the palette', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const menus = manifest.contributes.menus;
+    for (const command of ['claudeStatusline.openWorkflowScript', 'claudeStatusline.copyRunId']) {
+        assert.ok(
+            menus['view/item/context'].some((m) => m.command === command && /viewItem == run/.test(m.when)),
+            `${command} never reaches the run row`,
+        );
+        assert.ok(
+            menus.commandPalette.some((m) => m.command === command && m.when === 'false'),
+            `${command} has no node to act on in the palette`,
+        );
+    }
+    // An inline item is drawn as its icon and nothing else, and the icon is
+    // declared on the command — a menu entry has no icon of its own.
+    for (const item of menus['view/item/context'].filter((m) => m.group === 'inline')) {
+        const declared = manifest.contributes.commands.find((c) => c.command === item.command);
+        assert.ok(declared && declared.icon, `${item.command} is drawn inline, so it is drawn as an icon`);
+    }
+    // The inline entry is a button on hover; right-click reaches the other list.
+    assert.ok(
+        menus['view/item/context'].some((m) => m.command === 'claudeStatusline.openWorkflowScript' && m.group !== 'inline'),
+        'opening the script must also be a plain context-menu item',
+    );
+});
+
 test('deactivating disposes every item it created', () => {
     const run = activate({ segments: ['a', 'b'] });
     const created = [...vscode.__items];

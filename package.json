@@ -43,7 +43,8 @@
       },
       {
         "command": "claudeStatusline.openWorkflowScript",
-        "title": "Claude: Open the workflow script"
+        "title": "Claude: Open the workflow script",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "claudeStatusline.copyRunId",
@@ -58,8 +59,22 @@
           "group": "inline"
         },
         {
+          "command": "claudeStatusline.openWorkflowScript",
+          "when": "view == claudeStatusline.workflows && viewItem == run"
+        },
+        {
           "command": "claudeStatusline.copyRunId",
           "when": "view == claudeStatusline.workflows && viewItem == run"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeStatusline.openWorkflowScript",
+          "when": "false"
+        },
+        {
+          "command": "claudeStatusline.copyRunId",
+          "when": "false"
         }
       ]
     },
