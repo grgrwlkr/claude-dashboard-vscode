@@ -1576,13 +1576,33 @@ footer { margin-top: 28px; opacity: .5; font-size: 11px; }
 `;
 
 const SCRIPT = `
+// acquireVsCodeApi may be called once per webview and throws on the second try,
+// so the page takes one handle here and everything below shares it. It is
+// declared first because the tab memory reads it on the very next lines — a
+// const declared later is not hoisted, and reaching for it threw before the
+// page had drawn anything.
+const api = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 const sections = document.querySelectorAll('nav.sections button');
 const tabs = document.querySelectorAll('nav.tabs button');
 const panes = document.querySelectorAll('.tab');
 
+// The page is rebuilt on a timer, and a rebuild is a fresh document: without
+// this the view would snap back to the first tab and the top of the page every
+// minute. getState survives the swap; the extension is told too, because it
+// skips the redraw entirely while the settings editor is open.
+const memory = api ? (api.getState() || {}) : {};
+
+function remember(patch) {
+  if (!api) return;
+  Object.assign(memory, patch);
+  api.setState(memory);
+}
+
 function openTab(btn) {
   tabs.forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
   panes.forEach((p) => { p.hidden = p.dataset.tab !== btn.dataset.tab; });
+  remember({ tab: btn.dataset.tab, section: btn.dataset.section });
+  if (api) api.postMessage({ type: 'tab', id: btn.dataset.tab });
 }
 
 // Switching section shows that section's tabs and opens the first of them,
@@ -1601,11 +1621,30 @@ function openSection(id) {
 sections.forEach((btn) => btn.addEventListener('click', () => openSection(btn.dataset.section)));
 tabs.forEach((btn) => btn.addEventListener('click', () => openTab(btn)));
 
+// Restore where the reader was before the last redraw. What to restore is read
+// out first: opening a section opens its first tab, which writes over the very
+// tab being restored — the page came back one tab to the left every minute.
+const wanted = { section: memory.section, tab: memory.tab, scrollY: memory.scrollY };
+if (wanted.section && [...sections].some((b) => b.dataset.section === wanted.section)) {
+  openSection(wanted.section);
+  const tab = [...tabs].find((b) => b.dataset.tab === wanted.tab);
+  if (tab) openTab(tab);
+}
+// Twice, because the page is not tall enough to scroll into until it has been
+// laid out: the first attempt lands on whatever height exists at that frame,
+// the second — after load — on the finished page.
+if (wanted.scrollY) {
+  const restore = () => window.scrollTo(0, wanted.scrollY);
+  requestAnimationFrame(restore);
+  addEventListener('load', () => requestAnimationFrame(restore));
+}
+let scrollTimer = null;
+window.addEventListener('scroll', () => {
+  clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => remember({ scrollY: window.scrollY }), 150);
+});
+
 // --- the settings editor ----------------------------------------------------
-// acquireVsCodeApi may be called once per webview and throws on the second try,
-// which would take the rest of this script — every editor handler below — down
-// with it. One handle, acquired here, shared by everything on the page.
-const api = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 const list = document.getElementById('segs');
 
 if (list && api) {

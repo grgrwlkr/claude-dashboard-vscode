@@ -72,6 +72,14 @@ them as a hover and the dashboard's Now tab renders the same list as panels; a `
 what it means (`alarm`, `safe`, `warn`, `update`, `active`, `muted`) and each side picks its own
 icon or colour. Wording goes there, not into either renderer.
 
+**The dashboard redraws on the slow tick.** `refreshDashboard` rebuilds the open panel from the
+reading the tick just took, silently — `buildIndex({ silent: true })` skips the progress notification,
+which belongs to an open the user asked for. It backs off for a hidden panel, a rebuild already in
+flight, and the Settings tab, whose unsaved fields a redraw would discard; the webview reports the
+open tab so the extension knows. A rebuild is a fresh document, so the page saves its section, tab
+and scroll through `getState`/`setState` and restores them — read the wanted tab out *before*
+restoring the section, or opening the section overwrites it with its own first tab.
+
 **Two ticks, one state object.** `slowTick` (default 60 s) owns everything expensive: the network
 call for limits, the full-transcript pass in `sessionStats`, `costToday` across every project. The
 fast tick (10 s) only re-reads the transcript tail and the session registry. New expensive reads go

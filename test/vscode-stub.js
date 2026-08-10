@@ -68,6 +68,9 @@ const vscode = {
             // The panel records what the extension posts back and hands over the
             // listener, so a test can play the webview's half of the exchange.
             const panel = {
+                // The real panel reports whether the tab is on screen; the timed
+                // refresh reads it to leave a hidden page alone.
+                visible: true,
                 webview: {
                     html: '',
                     posted: [],

@@ -673,6 +673,42 @@ test('the Now tab and the tooltips are cut from the same sections', async () => 
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
+// The page is rebuilt on the same interval as the bar, and a rebuild throws away
+// whatever the document held — which is fine for a table and fatal for a form.
+test('the open dashboard is rebuilt on the tick, except while settings are open', async () => {
+    const run = activate({ segments: ['{weekly}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const first = panel.webview.html;
+
+        // A plain tab: the tick redraws the page in place, same panel.
+        await panel.__receive({ type: 'tab', id: 'now' });
+        await ext.__refreshDashboard(run.context);
+        assert.equal(vscode.__panels.length, 1, 'the refresh reuses the panel');
+        assert.ok(panel.webview.html.length > 0);
+
+        // The settings editor holds fields the user is typing into; a redraw
+        // would discard them, so the refresh does not happen at all.
+        await panel.__receive({ type: 'tab', id: 'settings' });
+        panel.webview.html = 'SETTINGS-OPEN';
+        await ext.__refreshDashboard(run.context);
+        assert.equal(panel.webview.html, 'SETTINGS-OPEN', 'a redraw would have wiped the form');
+
+        // Navigating away lets it resume.
+        await panel.__receive({ type: 'tab', id: 'overview' });
+        await ext.__refreshDashboard(run.context);
+        assert.notEqual(panel.webview.html, 'SETTINGS-OPEN');
+
+        // A panel nobody is looking at is not worth an index pass either.
+        panel.visible = false;
+        panel.webview.html = 'HIDDEN';
+        await ext.__refreshDashboard(run.context);
+        assert.equal(panel.webview.html, 'HIDDEN');
+        assert.ok(first.length > 0);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
 // The settings tab shipped blank: every palette value a dash, every preview
 // "hidden", while the bar two inches below was full of numbers. The page read
 // the state through a property parked on the ExtensionContext, which the stub

@@ -596,10 +596,40 @@ let panel = null;
 // every preview came back blank while the bar beside them was full of numbers.
 let barState = null;
 
+// Which tab the page has open, reported by the webview. A refresh that lands
+// while the settings editor is on screen would throw away half-typed segments,
+// so that one tab is left alone until the user navigates away from it.
+let openTab = '';
+
+// The page is rebuilt on the same tick as the bar — it is the interval the user
+// already set, and a second one would only be another number to keep in sync.
+// Three things hold it back: a panel nobody is looking at, a rebuild already in
+// flight, and the settings editor, whose unsaved fields a redraw would discard.
+let refreshing = false;
+
+// Returns the rebuild, so a caller — the tick ignores it, a test does not — can
+// wait for the page to actually be replaced.
+function refreshDashboard(context) {
+    if (!panel || !panel.visible || refreshing || openTab === 'settings') return Promise.resolve(false);
+    refreshing = true;
+    return showDashboard(context, { silent: true })
+        .then(() => true)
+        .catch(() => false) // a page that fails to rebuild keeps the one on screen
+        .finally(() => { refreshing = false; });
+}
+
+// Same escape hatch the workflow collector uses: without it a test that opens
+// the dashboard reads every transcript on the machine, including those of
+// sessions running right now.
+const indexRoot = () => process.env.CLAUDE_STATUSLINE_PROJECTS || ix.PROJECTS;
+
 // Indexing a gigabyte of transcripts takes seconds on the first run, so it
 // happens inside a progress notification the user can watch — and reuses the
 // stored fingerprints on every run after that.
-async function buildIndex(storageDir, { force = false } = {}) {
+async function buildIndex(storageDir, { force = false, silent = false } = {}) {
+    // A refresh nobody asked for does not get a notification: the page is
+    // already on screen, and a toast every minute is the opposite of ambient.
+    if (silent) return ix.refreshIndex(storageDir, { root: indexRoot() });
     return vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: 'Claude: indexing transcripts',
@@ -611,10 +641,7 @@ async function buildIndex(storageDir, { force = false } = {}) {
             // setImmediate lets the notification paint before the synchronous
             // read begins; without it the first run looks like a frozen window.
             setImmediate(() => resolve(ix.refreshIndex(storageDir, {
-                // Same escape hatch the workflow collector uses: without it a
-                // test that opens the dashboard reads every transcript on the
-                // machine, including those of sessions running right now.
-                root: process.env.CLAUDE_STATUSLINE_PROJECTS || ix.PROJECTS,
+                root: indexRoot(),
                 onProgress: (done, total) => {
                     const p = Math.floor((done / total) * 100);
                     if (p > lastPct) { progress.report({ increment: p - lastPct, message: `${done}/${total}` }); lastPct = p; }
@@ -709,6 +736,8 @@ async function handleMessage(context, msg) {
 
     if (msg.type === 'refresh') { showDashboard(context, { force: false }); return; }
 
+    if (msg.type === 'tab') { openTab = String(msg.id || ''); return; }
+
     if (msg.type === 'preview') {
         const previews = (msg.segments || []).map((template) => ({ text: renderFor(state, template) }));
         panel.webview.postMessage({ type: 'preview', previews });
@@ -753,9 +782,9 @@ async function handleMessage(context, msg) {
     }
 }
 
-async function showDashboard(context, { force = false } = {}) {
+async function showDashboard(context, { force = false, silent = false } = {}) {
     const storageDir = context.globalStorageUri.fsPath;
-    const { index, stats } = await buildIndex(storageDir, { force });
+    const { index, stats } = await buildIndex(storageDir, { force, silent });
     const total = ix.summarize(index);
     const html = dashboard.render(index, total, {
         files: stats.total,
@@ -877,7 +906,12 @@ function activate(context) {
     state.tree = new WorkflowTree(state);
     slowTick(state);
 
-    const slow = setInterval(() => slowTick(state), Math.max(15, cfg.get('refreshInterval')) * 1000);
+    const slow = setInterval(() => {
+        slowTick(state);
+        // The open dashboard follows the same interval: the numbers on it come
+        // from the reading that just happened.
+        refreshDashboard(context);
+    }, Math.max(15, cfg.get('refreshInterval')) * 1000);
     const fast = setInterval(() => fastTick(state), CONTEXT_TICK * 1000);
 
     context.subscriptions.push(
@@ -969,6 +1003,9 @@ module.exports = {
     // The section list behind both the tooltips and the Now tab, exported so a
     // test can hold the two renderings against each other.
     __statusNow: statusNow,
+    // The tick's own redraw, exported so a test can fire it without waiting a
+    // minute for the interval.
+    __refreshDashboard: refreshDashboard,
     // The hover's own outcome table, exported for the one test that holds the
     // three of them — this, OUTCOME_ICONS and the stylesheet's `.o-*` rules —
     // against each other. They are three legitimate representations of one

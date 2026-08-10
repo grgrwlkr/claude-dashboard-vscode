@@ -136,6 +136,13 @@ Those four panels are not a copy of the tooltips: both are rendered from the
 same sections in `status.js`, so the page cannot fall behind the hover, and a
 number squeezed out of a narrow bar is still here in full.
 
+The whole page refreshes on `claudeStatusline.refreshInterval` — the same
+interval the bar uses, so both show one reading of the machine. It redraws in
+place and puts you back where you were: same section, same tab, same scroll
+position. Three things hold it back: a panel in a background tab, a rebuild
+still running, and the **Settings** tab, where a redraw would throw away
+half-typed segments. Press **Reindex** for an immediate rebuild.
+
 **Spend** — where the money went:
 
 | Tab | What it answers |
