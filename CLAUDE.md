@@ -139,8 +139,8 @@ before calling a change done.
 
 **A checking tool is checked against a known-bad input, or it is not a tool (2026-08-11).** The probe
 above replaced one that compared `documentElement.scrollWidth` to `clientWidth` — structurally zero
-on a page whose body carries `overflow-x: hidden`, so it returned "clean" at every width for months
-while content was visibly clipped. What is cut off by `overflow: hidden` does not scroll and does not
+on a page whose body carries `overflow-x: hidden`, so it returned "clean" at every width from the day
+it was written while content was visibly clipped. What is cut off by `overflow: hidden` does not scroll and does not
 widen the document; it disappears, and only geometry sees it. The replacement was not trusted for
 finding two overflows either: it was run against `git archive 79883c5` — the revision before the fix
 — where it reports 92 findings at 910 px and 40 at 800 px, and only then believed on a clean tree.
