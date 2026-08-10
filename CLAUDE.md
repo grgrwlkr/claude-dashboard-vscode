@@ -130,9 +130,21 @@ the hue carries a model's identity from the chart above it.
 **Verify a page change by driving it, not by reading it.** The page is static SVG and markup, so a
 dead script still looks right, a `max-width` on a table cell is silently ignored, and a track painted
 in the surface colour is invisible only on the surface it sits on. Every one of those shipped and was
-caught by a screenshot. The overflow probe walks all 22 tabs and compares `scrollWidth` to
-`clientWidth` at 1500/1000/800/720/620/520 px; run it and screenshot both themes before calling a
-change done.
+caught by a screenshot. `tools/preview.js` renders the page outside the editor — `--demo` renders it
+from `tools/demo-index.js`, which is the only data that may be photographed for a listing — and
+writes an overflow probe beside it: it walks all 22 tabs and compares each element's
+`getBoundingClientRect` against the panel it lives in and against the window, exempting containers
+that actually scroll. Run it at 1500/1280/1000/910/800/700/620/520 px and screenshot both themes
+before calling a change done.
+
+**A checking tool is checked against a known-bad input, or it is not a tool (2026-08-11).** The probe
+above replaced one that compared `documentElement.scrollWidth` to `clientWidth` — structurally zero
+on a page whose body carries `overflow-x: hidden`, so it returned "clean" at every width for months
+while content was visibly clipped. What is cut off by `overflow: hidden` does not scroll and does not
+widen the document; it disappears, and only geometry sees it. The replacement was not trusted for
+finding two overflows either: it was run against `git archive 79883c5` — the revision before the fix
+— where it reports 92 findings at 910 px and 40 at 800 px, and only then believed on a clean tree.
+"It found something" is not evidence that it finds everything.
 
 **No charting library — measured, not assumed (checked 2026-08-10).** The CSP is not the reason: it
 allows inline script, and `asWebviewUri` + `script-src ${cspSource}` is the documented path anyway.
