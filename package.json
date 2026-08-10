@@ -1,24 +1,56 @@
 {
   "name": "claude-statusline",
-  "displayName": "Claude Statusline",
-  "description": "Claude Code limits, session context, spend and a usage dashboard in VS Code",
+  "displayName": "Statusline for Claude Code",
+  "description": "Unofficial. Claude Code limits, session context, spend and a usage dashboard, in the VS Code status bar.",
   "version": "0.19.0",
-  "publisher": "x",
-  "private": true,
+  "publisher": "grgrwlkr",
   "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#171A21",
+    "theme": "dark"
+  },
+  "pricing": "Free",
+  "qna": "marketplace",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grgrwlkr/claude-statusline-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/grgrwlkr/claude-statusline-vscode/issues"
+  },
+  "homepage": "https://github.com/grgrwlkr/claude-statusline-vscode#readme",
   "engines": {
     "vscode": "^1.100.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
   "keywords": [
     "claude",
     "claude code",
     "status bar",
     "usage",
-    "tokens"
+    "tokens",
+    "cost",
+    "spend",
+    "dashboard",
+    "agents",
+    "subagents",
+    "workflow",
+    "limits"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Reads only Claude Code's own state under the home directory; nothing from the workspace is executed or trusted."
+    },
+    "virtualWorkspaces": {
+      "supported": true,
+      "description": "No workspace file is ever read; the workspace path is used only to match Claude sessions of this repository, and in a virtual workspace that match finds nothing."
+    }
+  },
   "activationEvents": [
     "onStartupFinished"
   ],

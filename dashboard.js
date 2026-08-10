@@ -200,7 +200,7 @@ function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12, 
         const v = value(b);
         const w = max > 0 ? (v / max) * 100 : 0;
         const fill = byModel ? `background:${modelColor(key, i)}` : '';
-        return `<tr><th scope="row" title="${esc(key)}">${esc(key)}</th>`
+        return `<tr><th scope="row" title="${esc(key)}"><span>${esc(key)}</span></th>`
             + `<td class="bar-cell"><span class="bar-track">`
             + `<span class="bar-fill" style="width:${w.toFixed(1)}%${fill ? `;${fill}` : ''}"></span>`
             + `</span></td>`
@@ -596,30 +596,38 @@ function agentsTab(total, runs = []) {
     const perRun = quantiles(Object.values(perWorkflow));
     const table = runRows(runs);
 
-    return `<section class="tab" data-tab="agents" hidden>
-        <p class="note">Subagents and workflows write their own transcripts, so this spend is invisible in the terminal statusline — it belongs to no single session there.</p>
-        <div class="tiles">
-          ${tile('Main sessions', fmtCost(sum(main)), `${plural(main.length, 'transcript')} · ${pct(sum(main), totalCost)}`)}
-          ${tile('Subagents', fmtCost(sum(agents)), `${plural(agents.length, 'transcript')} · ${pct(sum(agents), totalCost)}`)}
-          ${tile('Workflow agents', fmtCost(sum(wf)), `${plural(wf.length, 'transcript')} · ${pct(sum(wf), totalCost)}`)}
-          ${perRun ? tile('Agents per workflow', String(perRun.p50), `p90 ${perRun.p90} · max ${perRun.max}`) : ''}
-        </div>
-        ${spread.length ? `<h2>Output tokens one agent writes</h2>
-        <table class="matrix"><thead><tr><th></th><th class="num">agents</th><th class="num">median</th>
+    const spreadTable = `<table class="matrix"><thead><tr><th></th><th class="num">agents</th><th class="num">median</th>
           <th class="num">p90</th><th class="num">max</th></tr></thead><tbody>
           ${spread.map(([label, q]) => `<tr><th scope="row">${esc(label)}</th><td class="num">${q.n}</td>
             <td class="num">${esc(tok(q.p50))}</td><td class="num">${esc(tok(q.p90))}</td>
             <td class="num">${esc(tok(q.max))}</td></tr>`).join('')}
         </tbody></table>
-        <p class="note">Multiply the median by the fleet size for the usual case, and the p90 for the bad one.</p>` : ''}
-        <h2>Workflow runs</h2>
-        ${runs.length ? `<p class="note">Newest first, capped at ${RUN_LIMIT} rows of ${runs.length}. Each run as its own snapshot describes it — the name, how it ended, the phases it was written in. A run still going has written no snapshot yet, so its row is assembled from the journal instead and says what it is doing rather than how it ended. Open one to see its agents: what each was told, what it answered and what it cost. A run's price is the sum over the agents its snapshot lists; money spent in the same directory by transcripts no snapshot names is added beside that figure rather than folded into it.</p>
-        <table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
+        <p class="note">Multiply the median by the fleet size for the usual case, and the p90 for the bad one.</p>`;
+
+    const runsTable = `<table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
           <th>Status</th><th class="opt2">Phases</th><th class="num">Agents</th>
           <th class="num opt2">Duration</th><th class="num">Spend</th></tr></thead>
           <tbody>${table.rows}</tbody></table>
-        ${table.carded < table.shown ? `<p class="note">Agents are drawn only for the ${table.carded} newest runs of the ${table.shown} above. A fan-out of hundreds carries every prompt and every result into the page, so the rest keep their row without them — the tree in the sidebar draws the agents of every run it lists, and it lists the ${wfm.TREE_FINISHED} newest finished runs beside everything still going or abandoned.</p>` : ''}`
-        : '<p class="empty">No workflow runs recorded.</p>'}
+        ${table.carded < table.shown ? `<p class="note">Agents are drawn only for the ${table.carded} newest runs of the ${table.shown} above. A fan-out of hundreds carries every prompt and every result into the page, so the rest keep their row without them — the tree in the sidebar draws the agents of every run it lists, and it lists the ${wfm.TREE_FINISHED} newest finished runs beside everything still going or abandoned.</p>` : ''}`;
+
+    // A share of the total, so the three kinds of transcript rank against each
+    // other rather than only against their own figure.
+    const share = (rows) => (totalCost > 0 ? Math.round((sum(rows) / totalCost) * 100) : null);
+
+    return `<section class="tab" data-tab="agents" hidden>
+        ${tiles(
+        tile('Main sessions', fmtCost(sum(main)), `${plural(main.length, 'transcript')} · ${pct(sum(main), totalCost)}`, share(main), 'cool'),
+        tile('Subagents', fmtCost(sum(agents)), `${plural(agents.length, 'transcript')} · ${pct(sum(agents), totalCost)}`, share(agents), 'cool'),
+        tile('Workflow agents', fmtCost(sum(wf)), `${plural(wf.length, 'transcript')} · ${pct(sum(wf), totalCost)}`, share(wf), 'cool'),
+        perRun ? tile('Agents per workflow', String(perRun.p50), `p90 ${perRun.p90} · max ${perRun.max}`) : '',
+    )}
+        ${spread.length ? panel('Output tokens one agent writes', spreadTable, {
+        note: 'Subagents and workflows write their own transcripts, so this spend is invisible in the terminal statusline — it belongs to no single session there.',
+    }) : ''}
+        ${panel('Workflow runs', runs.length ? runsTable : '<p class="empty">No workflow runs recorded.</p>', {
+        flush: runs.length > 0,
+        note: runs.length ? `Newest first, capped at ${RUN_LIMIT} rows of ${runs.length}. Each run as its own snapshot describes it — the name, how it ended, the phases it was written in. A run still going has written no snapshot yet, so its row is assembled from the journal instead and says what it is doing rather than how it ended. Open one to see its agents: what each was told, what it answered and what it cost. A run's price is the sum over the agents its snapshot lists; money spent in the same directory by transcripts no snapshot names is added beside that figure rather than folded into it.` : '',
+    })}
     </section>`;
 }
 
@@ -639,38 +647,39 @@ function contentTab(total, sys) {
     const words = Object.entries(p.words).slice(0, 40);
     const maxWord = words.length ? words[0][1] : 1;
 
-    return `<section class="tab" data-tab="content" hidden>
-        <p class="note">Computed locally from your own prompts. Only counts and word tallies are stored — never prompt text — and nothing leaves this machine.</p>
-        <div class="tiles">
-          ${tile('Prompts', String(p.count), `across ${plural(total.sessions.length, 'transcript')}`)}
-          ${tile('Longest', tok(p.longest), 'characters')}
-        </div>
-        <div class="two">
-          <div><h2>Prompt length</h2>${barList(lens, { limit: 8, label: (v) => `${v}` })}</div>
-          <div><h2>Where they came from</h2>${barList(sources, { limit: 8, label: (v) => `${v}` })}</div>
-        </div>
-        ${log ? `<h2>Prompts the client logged</h2>
-        <p class="note">From <code>~/.claude/history.jsonl</code>, which keeps every prompt typed on this machine across every project. Only counts are read here — the text stays in the file.</p>
-        <div class="tiles">
-          ${tile('Logged prompts', String(log.count), `${log.pasted} carried a paste`)}
-          ${tile('Active days', String(Object.keys(log.byDay).length), log.first ? `since ${fmtDateTime(log.first)}` : '')}
-        </div>
-        <div class="two">
-          <div><h2>By project</h2>${barList(
-            Object.entries(log.byProject).sort((a, b) => b[1] - a[1]).map(([k, n]) => [k, { cost: n, msgs: n }]),
-            { limit: 10, label: (v) => String(v) },
-        )}</div>
-          <div><h2>Busiest days</h2>${barList(
-            Object.entries(log.byDay).sort((a, b) => b[1] - a[1]).map(([k, n]) => [fmtDay(k), { cost: n, msgs: n }]),
-            { limit: 10, label: (v) => String(v) },
-        )}</div>
-        </div>` : ''}
-        <h2>Words you use</h2>
-        <p class="note">Five letters or more, with anything appearing in most sessions dropped as filler. Pasted code counts too — that is why identifiers show up.</p>
-        <div class="cloud">${words.map(([w, n]) => {
+    const cloud = `<div class="cloud">${words.map(([w, n]) => {
         const size = 0.8 + (n / maxWord) * 1.1;
         return `<span class="word" style="font-size:${size.toFixed(2)}rem" title="${n}">${esc(w)}</span>`;
-    }).join('')}</div>
+    }).join('')}</div>`;
+
+    return `<section class="tab" data-tab="content" hidden>
+        ${tiles(
+        tile('Prompts', String(p.count), `across ${plural(total.sessions.length, 'transcript')}`),
+        tile('Longest', tok(p.longest), 'characters'),
+    )}
+        <div class="pair">
+          ${panel('Prompt length', barList(lens, { limit: 8, label: (v) => `${v}` }), {
+        note: 'Computed locally from your own prompts. Only counts and word tallies are stored — never prompt text — and nothing leaves this machine.',
+    })}
+          ${panel('Where they came from', barList(sources, { limit: 8, label: (v) => `${v}` }))}
+        </div>
+        ${log ? `${tiles(
+        tile('Logged prompts', String(log.count), `${log.pasted} carried a paste`),
+        tile('Active days', String(Object.keys(log.byDay).length), log.first ? `since ${fmtDateTime(log.first)}` : ''),
+    )}
+        <div class="pair">
+          ${panel('Prompts the client logged, by project', barList(
+        Object.entries(log.byProject).sort((a, b) => b[1] - a[1]).map(([k, n]) => [k, { cost: n, msgs: n }]),
+        { limit: 10, label: (v) => String(v) },
+    ), { note: 'From <code>~/.claude/history.jsonl</code>, which keeps every prompt typed on this machine across every project. Only counts are read here — the text stays in the file.' })}
+          ${panel('Busiest days', barList(
+        Object.entries(log.byDay).sort((a, b) => b[1] - a[1]).map(([k, n]) => [fmtDay(k), { cost: n, msgs: n }]),
+        { limit: 10, label: (v) => String(v) },
+    ))}
+        </div>` : ''}
+        ${panel('Words you use', cloud, {
+        note: 'Five letters or more, with anything appearing in most sessions dropped as filler. Pasted code counts too — that is why identifiers show up.',
+    })}
     </section>`;
 }
 
@@ -779,26 +788,26 @@ function toolsTab(total) {
         .map(([name, t]) => [name, { ...t, rate: t.errors / t.calls }])
         .sort((a, b) => b[1].rate - a[1].rate);
 
+    const rate = (n) => (calls > 0 ? Math.round((n / calls) * 100) : null);
     return `<section class="tab" data-tab="tools" hidden>
-        <p class="note">Counted from the tool_use blocks of every reply on this machine. A failed result is blamed on the tool that produced it, matched back through the call id.</p>
-        <div class="tiles">
-          ${tile('Tool calls', String(calls), `${plural(tools.length, 'distinct tool')}`)}
-          ${tile('Failed', String(errors), pct(errors, calls) + ' of calls')}
-          ${tile('Denied', String(denials), 'refused by you or by a rule')}
-          ${tile('Advisor', String(advisor), 'consultations — priced server-side, not here')}
+        ${tiles(
+        tile('Tool calls', String(calls), `${plural(tools.length, 'distinct tool')}`),
+        tile('Failed', String(errors), `${pct(errors, calls)} of calls`, rate(errors), 'hot'),
+        tile('Denied', String(denials), 'refused by you or by a rule', rate(denials), 'warm'),
+        tile('Advisor', String(advisor), 'consultations — priced server-side, not here'),
+    )}
+        <div class="pair">
+          ${panel('Most used', barList(byCalls, { limit: 16, value: (t) => t.calls, label: (v, t) => (t.errors ? `${v} · ${t.errors} failed` : String(v)) }), {
+        note: 'Counted from the tool_use blocks of every reply on this machine. A failed result is blamed on the tool that produced it, matched back through the call id.',
+    })}
+          ${panel('MCP servers', barList(Object.entries(servers).sort((a, b) => b[1].calls - a[1].calls),
+        { limit: 12, value: (s) => s.calls, label: (v, s) => `${v} · ${plural(s.tools, 'tool')}` }), {
+        note: 'A server with no calls at all does not appear here — that is the answer to whether it earns its place in the config.',
+    })}
         </div>
-        <div class="two">
-          <div><h2>Most used</h2>
-            ${barList(byCalls, { limit: 16, value: (t) => t.calls, label: (v, t) => (t.errors ? `${v} · ${t.errors} failed` : String(v)) })}
-          </div>
-          <div><h2>MCP servers</h2>
-            ${barList(Object.entries(servers).sort((a, b) => b[1].calls - a[1].calls),
-        { limit: 12, value: (s) => s.calls, label: (v, s) => `${v} · ${plural(s.tools, 'tool')}` })}
-            <p class="note">A server with no calls at all does not appear here — that is the answer to whether it earns its place in the config.</p>
-            <h2>Failing most often</h2>
-            ${barList(flaky, { limit: 8, value: (t) => t.rate * 100, label: (v, t) => `${v.toFixed(0)}% of ${t.calls}` })}
-          </div>
-        </div>
+        ${panel('Failing most often', barList(flaky, { limit: 8, value: (t) => t.rate * 100, label: (v, t) => `${v.toFixed(0)}% of ${t.calls}` }), {
+        note: 'Only tools called at least twenty times: two failures out of three is worth seeing, two out of nine hundred is noise.',
+    })}
     </section>`;
 }
 
@@ -1234,28 +1243,12 @@ function filesTab(total, sys) {
 
     const projects = (sys && sys.projects) || [];
 
-    return `<section class="tab" data-tab="files" hidden>
-        <p class="note">Every file an edit or a write touched, counted from the patch the tool returned. Line counts are the patch's own, so a rewritten file counts as its whole length.</p>
-        <div class="tiles">
-          ${tile('Files touched', String(files.length), plural(edits, 'edit'))}
-          ${tile('Lines added', tok(added), '')}
-          ${tile('Lines removed', tok(removed), '')}
-        </div>
-        <div class="two">
-          <div><h2>Most often edited</h2>${barList(byEdits.map(([p, f]) => [short(p), f]), {
-        limit: 15, value: (f) => f.edits, label: (v, f) => `${v} · +${tok(f.added)}/-${tok(f.removed)}`,
-    })}</div>
-          <div><h2>Most lines changed</h2>${barList(byChurn.map(([p, f]) => [short(p), f]), {
-        limit: 15, value: (f) => f.added + f.removed, label: (v) => tok(v),
-    })}</div>
-        </div>
-        ${projects.length ? `<h2>What the client itself records per project</h2>
-        <p class="note">Read from <code>~/.claude.json</code>: the last session in each project, as the client measured it — including the frame rate of its own terminal UI.</p>
-        <table><thead><tr><th>Project</th><th class="num">Last spend</th><th class="num">Duration</th>
+    const dearest = projects.reduce((a, x) => Math.max(a, x.lastCost || 0), 0);
+    const perProject = `<table><thead><tr><th>Project</th><th class="num">Last spend</th><th class="num">Duration</th>
           <th class="num">In API</th><th class="num">+/−</th><th class="num opt">Searches</th>
           <th class="num opt">FPS</th><th class="num opt2">Tools allowed</th><th class="opt2">Trusted</th></tr></thead><tbody>
         ${projects.map((p) => `<tr><td title="${esc(p.path)}">${esc(p.name)}</td>
-          <td class="num">${esc(fmtCost(p.lastCost))}</td>
+          ${shareCell(fmtCost(p.lastCost), dearest > 0 ? (p.lastCost || 0) / dearest : 0)}
           <td class="num">${esc(fmtDur(p.lastDuration))}</td>
           <td class="num">${p.lastDuration > 0 && p.apiDuration > 0 ? pct(p.apiDuration, p.lastDuration) : '—'}</td>
           <td class="num">+${tok(p.added)}/−${tok(p.removed)}</td>
@@ -1263,7 +1256,26 @@ function filesTab(total, sys) {
           <td class="num opt">${p.fps ? p.fps.toFixed(0) : '·'}</td>
           <td class="num opt2">${p.allowedTools || '·'}</td>
           <td class="opt2">${p.trusted ? '<span class="ok">yes</span>' : '<span class="dim">no</span>'}</td></tr>`).join('')}
-        </tbody></table>` : ''}
+        </tbody></table>`;
+
+    return `<section class="tab" data-tab="files" hidden>
+        ${tiles(
+        tile('Files touched', String(files.length), plural(edits, 'edit')),
+        tile('Lines added', tok(added), ''),
+        tile('Lines removed', tok(removed), ''),
+    )}
+        <div class="pair">
+          ${panel('Most often edited', barList(byEdits.map(([p, f]) => [short(p), f]), {
+        limit: 15, value: (f) => f.edits, label: (v, f) => `${v} · +${tok(f.added)}/-${tok(f.removed)}`,
+    }), { note: "Every file an edit or a write touched, counted from the patch the tool returned. Line counts are the patch's own, so a rewritten file counts as its whole length." })}
+          ${panel('Most lines changed', barList(byChurn.map(([p, f]) => [short(p), f]), {
+        limit: 15, value: (f) => f.added + f.removed, label: (v) => tok(v),
+    }))}
+        </div>
+        ${projects.length ? panel('What the client itself records per project', perProject, {
+        flush: true,
+        note: 'Read from <code>~/.claude.json</code>: the last session in each project, as the client measured it — including the frame rate of its own terminal UI.',
+    }) : ''}
     </section>`;
 }
 
@@ -1603,13 +1615,18 @@ td.share.wide i { left: 0; right: auto; }
 .bars { width: 100%; border-collapse: collapse; }
 .bars th, .bars td { border: none; padding: 3px 0; vertical-align: middle; }
 .bars th { font: inherit; text-transform: none; letter-spacing: 0; opacity: .85;
-  text-align: left; white-space: nowrap; padding-right: 14px; width: 1%;
-  /* A long key — a file path — otherwise takes the whole row and squeezes the
-     bar out of existence, which is the one thing the bar is there for. */
-  max-width: 42ch; overflow: hidden; text-overflow: ellipsis; }
-.bar-cell { width: 100%; padding-right: 14px !important; }
-.bar-track { display: block; background: var(--vscode-editorWidget-background);
-  border-radius: 3px; height: 14px; overflow: hidden; }
+  text-align: left; white-space: nowrap; padding-right: 14px; width: 1%; }
+/* A long key — a file path, an MCP tool id — otherwise takes the whole row and
+   squeezes the bar out of existence, which is the one thing the bar is for. The
+   clamp is on a span rather than on the cell: a max-width on a table cell is
+   advisory under the default auto layout, and was being ignored. The full text
+   is on the row's title attribute. */
+.bars th span { display: block; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
+.bar-cell { width: 100%; padding-right: 14px !important; min-width: 60px; }
+/* Tinted from the foreground rather than painted with a surface colour: inside
+   a panel the widget background IS the panel, and the track disappeared. */
+.bar-track { display: block; border-radius: 3px; height: 14px; overflow: hidden;
+  background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
 .bar-fill { display: block; height: 100%; border-radius: 3px;
   background: var(--vscode-charts-blue, hsl(200 62% 55%)); }
 .bar-val { opacity: .7; text-align: right; white-space: nowrap;
@@ -1667,6 +1684,7 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 }
 @media (max-width: 900px) {
   .opt2 { display: none; }
+  .bars th span { max-width: 22ch; }
   .tiles { grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); }
   .tile { padding: 9px 11px 10px; }
   .tile-value { font-size: 19px; }
@@ -1682,6 +1700,9 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 .matrix th[scope="row"] { white-space: nowrap; text-transform: none; letter-spacing: 0;
   font-size: inherit; opacity: .85; }
 .matrix td { font-variant-numeric: tabular-nums; }
+/* A five-column summary stretched across a full-width panel puts a metre of
+   whitespace between a label and its number. It is as wide as it needs to be. */
+.panel-body > .matrix { width: auto; min-width: min(100%, 460px); }
 .heat-cell { border-radius: 2px; }
 .grid { stroke: currentColor; opacity: .12; }
 .plan { stroke: currentColor; opacity: .35; stroke-dasharray: 4 4; }
