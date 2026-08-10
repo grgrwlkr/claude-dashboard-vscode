@@ -145,9 +145,9 @@ a context fill turns yellow past 50 % and red past 80 %.
 Reading is lazy: a field no segment mentions is never collected, so a bar
 without `{today}` does not pay for the walk across every project it needs.
 
-## Usage dashboard
+## Dashboard
 
-Click any status-bar item, or run **Claude: Open usage dashboard**. Twenty-two
+Click any status-bar item, or run **Claude: Open dashboard**. Twenty-two
 tabs in five sections: one for the state of Claude right now, three drawn from an
 index of every transcript on the machine, and one that reads the installation
 itself.
@@ -420,7 +420,7 @@ than a failure: every item hides itself when it has nothing true to say. It has
 nothing to say when Claude Code has never run on this machine (no `~/.claude`),
 when no Claude session belongs to *this* window yet — open the Claude Code panel
 and it appears within ten seconds — or when limits are switched off and no cache
-exists. The dashboard works either way: **Claude: Open usage dashboard**.
+exists. The dashboard works either way: **Claude: Open dashboard**.
 
 ## Settings
 
@@ -435,7 +435,7 @@ apply the moment they change — none of them needs a window reload.
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |
 
-Commands: **Claude: Open usage dashboard**, **Claude: Rebuild the usage index**,
+Commands: **Claude: Open dashboard**, **Claude: Rebuild the usage index**,
 **Claude Statusline: Refresh now**, **Claude Statusline: List status-bar
 placeholders**, and — from a row of the workflow view — **Claude: Open the
 workflow script** and **Claude: Copy the workflow run id**.

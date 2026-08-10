@@ -178,7 +178,10 @@ function runs(now) {
     const r = rng(99);
     const agent = (label, phase, state, tokens, cost) => ({
         agentId: `ag_${Math.round(r() * 1e6).toString(16)}`,
-        label, phase, state, model: r() < 0.7 ? MODELS[0] : MODELS[1],
+        // The Now tab draws a row per live agent with its effort beside its
+        // model: leaving the field out here would photograph an empty column and
+        // advertise the feature as broken.
+        label, phase, state, model: r() < 0.7 ? MODELS[0] : MODELS[1], effort: r() < 0.6 ? 'xhigh' : 'medium',
         tokens, cost, toolCalls: 4 + Math.round(r() * 40), durationMs: (30 + r() * 400) * 1000,
         promptPreview: `${label}. Report findings as structured output; include low-severity ones.`,
         resultPreview: state === 'done' ? '{"findings":[{"severity":"medium","file":"src/db/schema.sql"}]}' : '',
@@ -195,8 +198,8 @@ function runs(now) {
             agents: [
                 agent('inventory:tables', 'Inventory', 'done', 1_240_000, 3.9),
                 agent('audit:constraints', 'Audit', 'done', 2_010_000, 6.4),
-                agent('audit:indexes', 'Audit', 'working', 890_000, 2.7),
-                agent('verify:migration-plan', 'Verify', 'working', 410_000, 1.2),
+                agent('audit:indexes', 'Audit', 'progress', 890_000, 2.7),
+                agent('verify:migration-plan', 'Verify', 'progress', 410_000, 1.2),
             ],
             totals: { agents: 6, reported: 0, tokens: 0, reportedTokens: 0, toolCalls: 0, done: 2, cost: 14.2 },
         },
@@ -219,7 +222,7 @@ function runs(now) {
             startedAt: now - 9 * day, endedAt: 0, lastActivity: now - 9 * day + 12 * 60000,
             status: '', durationMs: 0,
             phases: [{ title: 'Plan' }, { title: 'Apply' }],
-            agents: [agent('plan:modules', 'Plan', 'working', 520_000, 1.6)],
+            agents: [agent('plan:modules', 'Plan', 'progress', 520_000, 1.6)],
             totals: { agents: 4, reported: 0, tokens: 0, reportedTokens: 0, toolCalls: 0, done: 1, cost: 1.6, unlisted: 4.1 },
         },
     ];

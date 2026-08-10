@@ -19,7 +19,7 @@ locally; this is the version that leaves one machine.
 - **Tooltips and a Now tab from one source.** Each item's hover and the
   dashboard's first screen are rendered from the same section list, so the two
   cannot disagree.
-- **A usage dashboard** — twenty-two tabs over an index of every transcript on
+- **A dashboard** — twenty-two tabs over an index of every transcript on
   the machine: spend by day, model, project and branch; agents, workflows,
   tools, MCP servers, skills and files; cache efficiency, friction, the weekly
   window over time; and a Setup section that reads the installation itself.
