@@ -159,21 +159,49 @@ for (const [sid, , tabs] of db.SECTIONS) {
     for (const [tab] of tabs) fs.writeFileSync(path.join(dir, `preview-${tab}.html`), wrap({ section: sid, tab }));
 }
 
-// The probe walks every tab and reports how far each one runs past the viewport.
-fs.writeFileSync(path.join(dir, 'overflow-probe.html'), wrap(null, `<script>
+// The probe walks every tab and reports what runs past its own panel or past the
+// window.
+//
+// The version this replaces compared `documentElement.scrollWidth` against
+// `clientWidth` — a difference that is structurally zero on a page whose body
+// carries `overflow-x: hidden`, so it reported "no overflow" on a page that was
+// visibly clipping content. Content cut off by `overflow: hidden` does not
+// scroll and does not widen the document; it simply disappears, which is why
+// nothing but geometry catches it. Every element is measured against the panel
+// it lives in, and the answer is written into the DOM so `--dump-dom` can read
+// it without a console.
+fs.writeFileSync(path.join(dir, 'overflow-probe.html'), wrap(null, `<pre id="probe-result"></pre><script>
 addEventListener('load', () => {
   const sections = [...document.querySelectorAll('nav.sections button')];
-  const tabs = [...document.querySelectorAll('nav.tabs button')];
   const out = [];
   for (const s of sections) {
     s.click();
-    for (const t of tabs.filter((b) => b.dataset.section === s.dataset.section)) {
+    const tabs = [...document.querySelectorAll('nav.tabs button')]
+      .filter((b) => b.dataset.section === s.dataset.section || !b.dataset.section);
+    for (const t of tabs) {
       t.click();
-      const doc = document.documentElement;
-      out.push(t.dataset.tab + ': ' + (doc.scrollWidth - doc.clientWidth));
+      const pane = document.querySelector('section.tab[data-tab="' + t.dataset.tab + '"]');
+      if (!pane || pane.hidden) continue;
+      for (const el of pane.querySelectorAll('*')) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const host = el.parentElement && el.parentElement.closest('.panel, .tab');
+        if (!host) continue;
+        const h = host.getBoundingClientRect();
+        // A scroll container is allowed to hold something wider than itself:
+        // that content is reachable. Everything else is simply lost.
+        const scrolls = getComputedStyle(host).overflowX !== 'visible';
+        const past = Math.max(scrolls ? 0 : r.right - h.right, r.right - innerWidth);
+        if (past > 1) {
+          out.push(t.dataset.tab + ' · ' + Math.round(past) + 'px · ' + el.tagName.toLowerCase()
+            + (el.className ? '.' + String(el.className).split(' ').join('.') : '')
+            + ' · ' + (el.textContent || '').trim().slice(0, 40).replace(/\\s+/g, ' '));
+        }
+      }
     }
   }
-  console.log('RESULT ' + JSON.stringify(out));
+  document.getElementById('probe-result').textContent =
+    'PROBE ' + innerWidth + 'px: ' + (out.length ? out.length + ' findings\\n' + out.join('\\n') : 'clean');
 });
 </script>`));
 
