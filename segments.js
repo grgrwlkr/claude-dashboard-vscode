@@ -226,7 +226,9 @@ const PRESETS = [
     {
         id: 'default-forecast',
         name: 'Default + forecast',
-        about: 'The default bar with the forecast date always on it. `{dry}` warns only when running out comes before the reset; `{dryAt}` names the day either way, so the date is there even when you are not going to reach it.',
+        // Plain text, not markdown: the Settings tab prints `about` through
+        // esc(), so a backtick here is drawn as a backtick.
+        about: 'The default bar with the forecast date always on it. {dry} warns only when running out comes before the reset; {dryAt} names the day either way, so the date is there even when you are not going to reach it.',
         // Built from the default rather than copied, so the four lines below the
         // first one cannot drift away from it.
         segments: ['✻ 7d {weekly}[ {drift}] {weeklyBar}[ dry {dryAt}]', ...DEFAULT_SEGMENTS.slice(1)],
@@ -250,7 +252,7 @@ const PRESETS = [
     {
         id: 'limits',
         name: 'Limits, in full',
-        about: 'Every window at once, and the forecast date whether or not you would reach it — `{dryAt}` names the day even when the reset arrives first.',
+        about: 'Every window at once, and the forecast date whether or not you would reach it — {dryAt} names the day even when the reset arrives first.',
         segments: [
             '✻ 7d {weekly}[ {drift}] {weeklyBar}',
             '[dry {dryAt}][ · resets {resetLeft}]',

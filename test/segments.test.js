@@ -251,3 +251,14 @@ test('zero and negative readings count as nothing to say', () => {
     assert.equal(registry.added.get(quiet), '');
     assert.equal(seg.renderSegment('[~{cost}][ {burn}/h]', quiet, registry).visible, false);
 });
+
+// A preset's prose is printed through esc(), so markdown in it is drawn as
+// markdown source. It looked like nothing until the Settings tab put those
+// descriptions in cards, where a stray backtick is the most visible character
+// on the page.
+test('preset prose is plain text, not markdown', () => {
+    for (const preset of seg.PRESETS) {
+        assert.ok(!/[`*_]/.test(preset.about), `${preset.id}: markdown in its description`);
+        assert.ok(!/[`*_]/.test(preset.name), `${preset.id}: markdown in its name`);
+    }
+});
