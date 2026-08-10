@@ -939,3 +939,108 @@ test('accrue starts over when the path stopped pointing at the file it read', ()
     fs.renameSync(swap, file);
     assert.deepEqual(wf.accrue(file, wf.accrue(file, null)), wf.accrue(file, null));
 }));
+
+// The shape of the panel is decided here and nowhere else: what hangs under
+// what, what a row says, which icon it gets. The provider in extension.js turns
+// a node into a TreeItem and makes no decision of its own, which is what keeps
+// all of this reachable from a test that never loads vscode.
+test('treeNodes groups agents under their phases and sorts live runs first', () => {
+    const runs = [
+        {
+            runId: 'wf_old-1', name: 'old', state: 'finished', status: 'completed', lastActivity: 1000,
+            phases: [{ title: 'A' }], totals: { agents: 1, cost: 2 },
+            agents: [{ agentId: 'x1', label: 'a:one', phase: 'A', model: 'claude-opus-5', state: 'done', tokens: 10, cost: 2 }],
+        },
+        {
+            runId: 'wf_now-1', name: 'now', state: 'running', lastActivity: 2000,
+            phases: [], totals: { agents: 2, done: 1, cost: 0 },
+            agents: [
+                { agentId: 'y1', label: '', phase: '', model: 'claude-opus-5', state: 'done', promptPreview: 'первый', tokens: 0, cost: 0 },
+                { agentId: 'y2', label: '', phase: '', model: 'claude-opus-5', state: 'running', promptPreview: 'второй', tokens: 0, cost: 0 },
+            ],
+        },
+    ];
+    const nodes = wf.treeNodes(runs);
+
+    assert.equal(nodes[0].label, 'now', 'the running one comes first');
+    assert.equal(nodes[0].kind, 'run');
+    assert.equal(nodes[0].children.length, 2, 'no phases means agents hang off the run');
+    assert.equal(nodes[0].children[0].kind, 'agent');
+    assert.equal(nodes[0].children[0].label, 'первый', 'a live agent is labelled by its prompt');
+
+    const old = nodes[1];
+    assert.equal(old.children[0].kind, 'phase');
+    assert.equal(old.children[0].label, 'A');
+    assert.equal(old.children[0].children[0].label, 'a:one');
+});
+
+test('treeNodes marks the three run states apart', () => {
+    const base = { phases: [], agents: [], totals: { agents: 0 }, lastActivity: 1 };
+    const nodes = wf.treeNodes([
+        { ...base, runId: 'wf_a', name: 'a', state: 'running' },
+        { ...base, runId: 'wf_b', name: 'b', state: 'finished', status: 'failed' },
+        { ...base, runId: 'wf_c', name: 'c', state: 'abandoned' },
+    ]);
+    assert.deepEqual(nodes.map((n) => n.icon), ['sync~spin', 'error', 'circle-slash']);
+});
+
+// Two attempts of one workflow keep one run id on purpose — scanRuns refuses to
+// merge their numbers — so the run id cannot be a node id. VS Code keys a row's
+// expanded state on that id, and two rows carrying one id are one row.
+test('treeNodes gives two attempts of one run id their own node ids', () => {
+    const attempt = (session) => ({
+        runId: 'wf_twice-1', slug: '-Users-x-Develop-demo', sessionId: session, name: 'twice',
+        state: 'finished', status: 'completed', lastActivity: 1,
+        phases: [{ title: 'A' }], totals: { agents: 1 },
+        agents: [{ agentId: 'x1', label: 'a:one', phase: 'A', model: '', state: 'done', tokens: 0 }],
+    });
+    const ids = [];
+    const walk = (nodes) => { for (const n of nodes) { ids.push(n.id); walk(n.children); } };
+    walk(wf.treeNodes([attempt('sess-a'), attempt('sess-b')]));
+
+    assert.equal(ids.length, 6, 'two runs, a phase each, an agent each');
+    assert.equal(new Set(ids).size, ids.length, `every node is its own row: ${ids.join(' ')}`);
+});
+
+// A phase list is not a partition: the live one is read off the script and the
+// final one off the snapshot, so a title can move between them, and an agent
+// under a title nobody lists still has to appear somewhere.
+test('treeNodes keeps an agent no phase claims, and draws no empty phase', () => {
+    const [run] = wf.treeNodes([{
+        runId: 'wf_loose-1', name: 'loose', state: 'finished', status: 'completed', lastActivity: 1,
+        phases: [{ title: 'A', detail: 'the first one' }, { title: 'B' }],
+        totals: { agents: 2 },
+        agents: [
+            { agentId: 'p1', label: 'a:in-a', phase: 'A', model: '', state: 'done', tokens: 0 },
+            { agentId: 'p2', label: 'a:nowhere', phase: 'Gone', model: '', state: 'done', tokens: 0 },
+        ],
+    }]);
+
+    assert.deepEqual(run.children.map((n) => n.kind), ['phase', 'agent'], 'B holds nobody, so B is not drawn');
+    assert.equal(run.children[0].description, 'the first one');
+    assert.deepEqual(run.children[0].children.map((n) => n.label), ['a:in-a']);
+    assert.equal(run.children[1].label, 'a:nowhere');
+});
+
+// The client's own agent count and the list underneath disagree — 74 against 13
+// on a killed run here — and a tree showing only the list looks complete without
+// being it. A live run has no count of its own yet, so it says nothing.
+test('treeNodes shows the client count beside the list when the two disagree', () => {
+    const [going, killed] = wf.treeNodes([
+        {
+            runId: 'wf_killed-1', name: 'killed', state: 'finished', status: 'killed', lastActivity: 2,
+            phases: [], totals: { agents: 1, reported: 74 },
+            agents: [{ agentId: 'k1', label: 'a:one', phase: '', model: '', state: 'progress', tokens: 0 }],
+        },
+        {
+            runId: 'wf_going-1', name: 'going', state: 'running', lastActivity: 1,
+            phases: [], totals: { agents: 3, done: 1, reported: 0 }, agents: [],
+        },
+    ]);
+
+    assert.match(killed.description, /1 of 74/);
+    assert.equal(killed.children[0].icon, 'circle-slash',
+        'a working agent of a run that was cut is stopped, not finished and not crashed');
+    assert.match(going.description, /1\/3/, 'a live run counts how far it has got instead');
+    assert.doesNotMatch(going.description, /of 0/, 'and the client has counted nothing for it yet');
+});

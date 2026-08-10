@@ -284,6 +284,51 @@ const COLOUR_BY = {
     workflow: () => -1,
 };
 
+// The tree is a thin skin over treeNodes(): what is grouped under what, what a
+// row says and which icon it carries are decided in workflows.js, where a test
+// can reach them. Nothing here reads a run — it reads the state the two ticks
+// have already filled, so the panel and the bar can never disagree.
+class WorkflowTree {
+    constructor(state) {
+        this.state = state;
+        this.emitter = new vscode.EventEmitter();
+        this.onDidChangeTreeData = this.emitter.event;
+    }
+
+    refresh() { this.emitter.fire(); }
+
+    getChildren(node) {
+        if (node) return node.children;
+        return wfm.treeNodes((this.state.data.workflows && this.state.data.workflows.runs) || []);
+    }
+
+    getTreeItem(node) {
+        // A run in flight opens itself, and so do its phases: the panel is
+        // watched while something is happening, and a row the user has to click
+        // to see the agents is a row that arrives too late. Everything else stays
+        // folded — the history of this machine is 74 runs deep.
+        const collapsed = node.children.length === 0
+            ? vscode.TreeItemCollapsibleState.None
+            : (node.run.state === 'running'
+                ? vscode.TreeItemCollapsibleState.Expanded
+                : vscode.TreeItemCollapsibleState.Collapsed);
+        const item = new vscode.TreeItem(node.label, collapsed);
+        // Stable and unique per node, which is what carries the expanded rows
+        // across the refresh that follows every draw.
+        item.id = node.id;
+        item.description = node.description;
+        if (node.icon) item.iconPath = new vscode.ThemeIcon(node.icon);
+        // What the context menu of Task 9 keys on: run rows get run commands.
+        item.contextValue = node.kind;
+        if (node.kind === 'agent') {
+            item.tooltip = new vscode.MarkdownString(
+                `${node.agent.promptPreview}\n\n${node.agent.resultPreview || ''}`, true,
+            );
+        }
+        return item;
+    }
+}
+
 function render(state) {
     const registry = state.registry;
     state.items.forEach((item, i) => {
@@ -303,6 +348,11 @@ function render(state) {
         item.backgroundColor = background(worst);
         item.show();
     });
+
+    // The panel draws from the same state as the bar, so one draw refreshes
+    // both. A test that fills a state by hand has no tree, and the bar is not
+    // held hostage to one.
+    if (state.tree) state.tree.refresh();
 }
 
 // Fields whose value comes out of the single expensive pass over the whole
@@ -780,6 +830,9 @@ function activate(context) {
     context.claudeState = state;
 
     applyConfig(state);
+    // Built before the first collection so the view has a provider the moment it
+    // is opened; render() refreshes it from there on.
+    state.tree = new WorkflowTree(state);
     slowTick(state);
 
     const slow = setInterval(() => slowTick(state), Math.max(15, cfg.get('refreshInterval')) * 1000);
@@ -795,6 +848,7 @@ function activate(context) {
         // Focus returning to the window is the only sensible "the user is looking
         // again" signal; there is no event channel from the CLI itself.
         vscode.window.onDidChangeWindowState((w) => { if (w.focused) slowTick(state); }),
+        vscode.window.createTreeView('claudeStatusline.workflows', { treeDataProvider: state.tree }),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
         vscode.commands.registerCommand('claudeStatusline.refresh', async () => {

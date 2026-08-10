@@ -4,6 +4,7 @@
 
 const items = [];
 const commands = new Map();
+const views = new Map();
 const listeners = { config: [], window: [] };
 let settings = {};
 
@@ -12,6 +13,23 @@ const disposable = () => ({ dispose() {} });
 const vscode = {
     StatusBarAlignment: { Left: 1, Right: 2 },
     ThemeColor: class { constructor(id) { this.id = id; } },
+    ThemeIcon: class { constructor(id) { this.id = id; } },
+    TreeItem: class {
+        constructor(label, collapsibleState) {
+            this.label = label;
+            this.collapsibleState = collapsibleState;
+        }
+    },
+    TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+    EventEmitter: class {
+        constructor() {
+            this.listeners = [];
+            this.event = (cb) => { this.listeners.push(cb); return disposable(); };
+        }
+
+        fire(value) { for (const cb of this.listeners) cb(value); }
+    },
+    Uri: { file: (fsPath) => ({ fsPath, scheme: 'file' }) },
     MarkdownString: class {
         constructor(value = '', supportThemeIcons = false) {
             this.value = value;
@@ -35,8 +53,11 @@ const vscode = {
             return item;
         },
         onDidChangeWindowState(cb) { listeners.window.push(cb); return disposable(); },
+        createTreeView(id, opts) { views.set(id, opts.treeDataProvider); return disposable(); },
         showQuickPick: async () => undefined,
         showInformationMessage: async () => undefined,
+        showWarningMessage: async () => undefined,
+        showTextDocument: async () => undefined,
         withProgress: async (_opts, task) => task({ report() {} }),
         createWebviewPanel: () => ({ webview: { html: '', onDidReceiveMessage() {} }, onDidDispose() {}, reveal() {} }),
     },
@@ -44,6 +65,7 @@ const vscode = {
         workspaceFolders: undefined,
         getConfiguration: () => ({ get: (key) => settings[key] }),
         onDidChangeConfiguration(cb) { listeners.config.push(cb); return disposable(); },
+        openTextDocument: async (uri) => ({ uri }),
     },
     commands: {
         registerCommand(id, fn) { commands.set(id, fn); return disposable(); },
@@ -55,6 +77,7 @@ const vscode = {
 
 vscode.__items = items;
 vscode.__commands = commands;
+vscode.__views = views;
 vscode.__setSettings = (next) => { settings = next; };
 vscode.__setWorkspace = (folder) => {
     vscode.workspace.workspaceFolders = folder ? [{ uri: { fsPath: folder } }] : undefined;
@@ -65,6 +88,7 @@ vscode.__changeConfiguration = () => {
 vscode.__reset = () => {
     items.length = 0;
     commands.clear();
+    views.clear();
     listeners.config.length = 0;
     listeners.window.length = 0;
     settings = {};

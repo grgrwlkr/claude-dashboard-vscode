@@ -890,7 +890,133 @@ function withCost(runs, { index = null, live = false, carried = new Map() } = {}
     return out;
 }
 
+// Icons are named here and constructed in extension.js, which is the only file
+// that knows what a ThemeIcon is. A run's own word for how it ended is the
+// client's — "completed" is what a clean run writes — so anything else is drawn
+// as a failure rather than guessed into one.
+function runIcon(run) {
+    if (run.state === 'running') return 'sync~spin';
+    if (run.state === 'abandoned') return 'circle-slash';
+    return run.status === 'completed' ? 'check' : 'error';
+}
+
+// Read through outcomeOf and never off the raw word. The client writes `error`
+// and has never once written `failed`, and an agent of a killed run stays
+// recorded as working forever — a table keyed on the state itself would draw
+// both of those with a checkmark.
+const AGENT_ICONS = {
+    running: 'sync~spin', done: 'check', failed: 'error',
+    stopped: 'circle-slash', unknown: 'question',
+};
+
+const agentIcon = (agent, run) => AGENT_ICONS[outcomeOf(agent.state, run.state)];
+
+// How much of a prompt fits on a row before the panel starts eliding it itself.
+const LABEL_CHARS = 60;
+
+// A live agent has no label: it is computed in the runtime and reaches the disk
+// only with the final snapshot. The first line of what it was told stands in for
+// one, the same stand-in the hover uses, and an agent that has not written even
+// that is named by its id rather than by an empty row.
+function agentLabel(agent) {
+    const first = String(agent.promptPreview || '').split('\n')[0].trim();
+    return agent.label || first.slice(0, LABEL_CHARS) || agent.agentId.slice(0, 8);
+}
+
+// Reads the way the bar writes a token count, so one agent does not get two
+// different sizes in the tree and in the hover. The four lines exist twice
+// because the other copy lives in extension.js, and that file cannot be imported
+// here — it is the one module that requires vscode. Most workflow agents land in
+// the millions: what is counted is every cache read they made.
+function tokenLabel(n) {
+    if (n < 1e6) return `${Math.round(n / 1000)}k`;
+    const m = n / 1e6;
+    return Number.isInteger(m) ? `${m}M` : `${m.toFixed(1)}M`;
+}
+
+// A node id has to be unique across the tree and stable between draws: VS Code
+// keys a row's expanded state on it. The run id is not enough — two attempts of
+// one workflow keep one id, and mergeHalves leaves them as two records on
+// purpose — so a node is keyed the way collect() keys a record, by the session
+// holding it.
+const runKey = (run) => `${run.slug || ''}/${run.sessionId || ''}/${run.runId}`;
+
+/**
+ * The run list as a three-level tree: run → phase → agent. Runs with no phases
+ * carry their agents directly, because an empty grouping level is a click that
+ * buys nothing — and no run has phases until either its snapshot or its script
+ * has been read.
+ *
+ * Nothing here touches disk or vscode: a node is a plain object, and the icon is
+ * a name rather than an object, so every decision the panel makes is testable
+ * under plain node.
+ */
+function treeNodes(runs) {
+    const ordered = [...runs].sort((a, b) => {
+        // What is happening now goes on top; everything else is the history of
+        // the machine, newest first. Sorting is stable, so runs that agree here
+        // stay in the order the scan produced.
+        if ((a.state === 'running') !== (b.state === 'running')) return a.state === 'running' ? -1 : 1;
+        return (b.lastActivity || 0) - (a.lastActivity || 0);
+    });
+
+    return ordered.map((run) => {
+        const key = runKey(run);
+        const agentNode = (agent) => ({
+            kind: 'agent',
+            id: `${key}/${agent.agentId}`,
+            label: agentLabel(agent),
+            description: [agent.model, agent.tokens ? tokenLabel(agent.tokens) : '']
+                .filter(Boolean).join(' · '),
+            icon: agentIcon(agent, run),
+            state: agent.state,
+            children: [],
+            run,
+            agent,
+        });
+
+        // Indexed rather than titled: a script is free to write one title twice,
+        // and two phases sharing a row id would collapse into one row.
+        const phases = (run.phases || []).map((phase, i) => ({
+            kind: 'phase',
+            id: `${key}#${i}`,
+            label: phase.title,
+            description: phase.detail || '',
+            icon: '',
+            children: run.agents.filter((a) => a.phase === phase.title).map(agentNode),
+            run,
+        })).filter((p) => p.children.length > 0);
+
+        // Agents the phase list does not account for still have to appear: the
+        // live phases come from the script and the final ones from the snapshot,
+        // so a title can move between them, and losing an agent is worse than an
+        // extra row.
+        const claimed = new Set(phases.flatMap((p) => p.children.map((c) => c.id)));
+        const loose = run.agents.map(agentNode).filter((n) => !claimed.has(n.id));
+
+        return {
+            kind: 'run',
+            id: key,
+            label: run.name || run.runId,
+            description: [
+                run.state === 'running' ? `${run.totals.done || 0}/${run.totals.agents || run.agents.length}` : '',
+                // The client's own agent counter, shown only when it disagrees
+                // with the list underneath. On a killed run it read 74 against 13
+                // entries; hiding that gap would make the tree look complete when
+                // it is not. A run still going has no count of its own yet, which
+                // is why this asks whether the client counted *more*.
+                run.totals.reported > run.agents.length ? `${run.agents.length} of ${run.totals.reported}` : '',
+                run.project,
+            ].filter(Boolean).join(' · '),
+            icon: runIcon(run),
+            state: run.state,
+            children: [...phases, ...loose],
+            run,
+        };
+    });
+}
+
 module.exports = {
     readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived,
-    costIndex, withCost, accrue, PROJECTS, RUN_STALE_MS,
+    costIndex, withCost, accrue, treeNodes, PROJECTS, RUN_STALE_MS,
 };

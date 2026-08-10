@@ -42,6 +42,23 @@
         "title": "Claude Statusline: List status-bar placeholders"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeStatusline",
+          "title": "Claude",
+          "icon": "$(gear)"
+        }
+      ]
+    },
+    "views": {
+      "claudeStatusline": [
+        {
+          "id": "claudeStatusline.workflows",
+          "name": "Workflow runs"
+        }
+      ]
+    },
     "configuration": {
       "title": "Claude Statusline",
       "properties": {
