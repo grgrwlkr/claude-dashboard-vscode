@@ -81,8 +81,21 @@ const MODEL_COLORS = [
     [190, 22, 68], // muted steel
     [20, 40, 38],  // brown
 ];
+// A model's colour follows the model, not its place in whatever list is being
+// drawn. Two panels on one tab sort their rows differently — the stacked chart
+// by the canonical order, the list beside it by cost — and keying on the index
+// meant a hue agreed between them only by coincidence of ordering.
+const modelHues = new Map();
+
+/** Fix the hue of every model once, in the page's one canonical order. */
+function assignModelColors(order) {
+    modelHues.clear();
+    (order || []).forEach((model, i) => modelHues.set(model, i));
+}
+
 function modelColor(model, i) {
-    const [h, s, l] = MODEL_COLORS[i % MODEL_COLORS.length];
+    const slot = modelHues.has(model) ? modelHues.get(model) : i;
+    const [h, s, l] = MODEL_COLORS[slot % MODEL_COLORS.length];
     return `hsl(${h} ${s}% ${l}%)`;
 }
 
@@ -119,8 +132,10 @@ function stackedDays(days, modelOrder, dayModels, { width = 860, height = 190 } 
         }
     });
 
+    // The scale's top, said as what it is. On its own the figure read as a
+    // subtitle of the chart rather than as the height of its tallest column.
     return `<svg class="chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="xMinYMin meet" role="img">`
-        + `<text class="tick" x="0" y="10">${esc(fmtCost(max))}</text>${bars}</svg>`;
+        + `<text class="tick" x="0" y="10">${esc(fmtCost(max))} — dearest day</text>${bars}</svg>`;
 }
 
 /** GitHub-style calendar: one cell per day, columns are weeks. */
@@ -171,16 +186,23 @@ function heatmap(days, { weeks = 27, cell = 12 } = {}) {
  * up on their own: the name column sizes to the longest name, and the numbers
  * share one right edge instead of drifting with the bar next to them.
  */
-function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12 } = {}) {
+/**
+ * A ranked list of one measure. One hue for all of it: the bars already say
+ * which row is bigger, and a hue per row would claim seven categories where
+ * there is one. `byModel` is the exception — there the colour is the model's
+ * identity, carried over from the chart above the list.
+ */
+function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12, byModel = false } = {}) {
     const rows = entries.slice(0, limit);
     if (rows.length === 0) return '<p class="empty">Nothing here yet.</p>';
     const max = Math.max(...rows.map(([, b]) => value(b)));
     return `<table class="bars">${rows.map(([key, b], i) => {
         const v = value(b);
         const w = max > 0 ? (v / max) * 100 : 0;
+        const fill = byModel ? `background:${modelColor(key, i)}` : '';
         return `<tr><th scope="row" title="${esc(key)}">${esc(key)}</th>`
             + `<td class="bar-cell"><span class="bar-track">`
-            + `<span class="bar-fill" style="width:${w.toFixed(1)}%;background:${modelColor(key, i)}"></span>`
+            + `<span class="bar-fill" style="width:${w.toFixed(1)}%${fill ? `;${fill}` : ''}"></span>`
             + `</span></td>`
             + `<td class="bar-val">${esc(label(v, b))}</td></tr>`;
     }).join('')}</table>`;
@@ -315,10 +337,51 @@ function quantiles(values) {
 
 // --- tabs -------------------------------------------------------------------
 
-const card = (label, value, sub) =>
-    `<div class="card"><span class="card-label">${esc(label)}</span>`
-    + `<span class="card-value">${esc(value)}</span>`
-    + `<span class="card-sub">${esc(sub || '')}</span></div>`;
+/**
+ * One headline number, with the meter that gives it a scale where it has one.
+ * `pct` is optional: a spend or a count is not a share of anything and gets no
+ * meter, and its sub line still lands on the same baseline as its neighbours'.
+ */
+const tile = (label, value, sub, pct, tone) => {
+    const width = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null;
+    return `<div class="tile"><span class="tile-label">${esc(label)}</span>`
+        + `<span class="tile-value">${esc(value)}</span>`
+        + (width === null ? ''
+            : `<span class="tile-meter"><i class="t-${tone || meterTone(width)}" style="width:${width}%"></i></span>`)
+        + `<span class="tile-sub">${esc(sub || '')}</span></div>`;
+};
+
+/** A row of them. Wrapping is the grid's business, not the caller's. */
+const tiles = (...items) => `<div class="tiles">${items.filter(Boolean).join('')}</div>`;
+
+/**
+ * A block of the page: a heading, the sentence that explains it, and the thing
+ * itself. Every answer on every tab is one of these, so a tab reads as a set of
+ * answers rather than a scroll of headings.
+ *
+ * `title` is text and is escaped here. **`note` and `body` are markup** — they
+ * carry `<code>`, links and values the caller has already run through `esc()`,
+ * so escaping them again would print the tags.
+ *
+ * `flush` is for a block whose body is a wide table: the panel keeps its
+ * heading and its border and the table runs edge to edge inside it, rather than
+ * losing a column's worth of width to padding on both sides.
+ */
+const panel = (title, body, { note, flush, id } = {}) => `<section class="panel${flush ? ' panel-flush' : ''}"${id ? ` data-panel="${esc(id)}"` : ''}>
+    ${title ? `<h2 class="panel-title">${esc(title)}</h2>` : ''}
+    ${note ? `<p class="panel-note">${note}</p>` : ''}
+    <div class="panel-body">${body}</div>
+</section>`;
+
+/**
+ * A number in a table that is also a share of the column's largest. The bar is
+ * a background, not a column of its own: it costs no width, and a row can be
+ * ranked at a glance without reading a single figure.
+ */
+const shareCell = (text, share, cls = 'num') => {
+    const w = Number.isFinite(share) ? Math.max(0, Math.min(100, share * 100)) : 0;
+    return `<td class="${cls} share"><i style="width:${w.toFixed(1)}%"></i>${esc(text)}</td>`;
+};
 
 const sumOf = (map, field) => Object.values(map).reduce((a, b) => a + (b[field] || 0), 0);
 
@@ -332,31 +395,34 @@ function statCards(total) {
     const cacheRead = sumOf(total.models, 'cacheRead');
     const allIn = Object.values(total.models).reduce((a, b) => a + b.in + b.cacheRead + b.cacheWrite, 0);
 
-    return '<div class="cards">'
-        + card('All time', fmtCost(spend), `${days.length} active days`)
-        + card('Last 30 days', fmtCost(last30), '')
-        + card('Last 7 days', fmtCost(last7), '')
-        + card('Latest day', todayKey ? fmtCost(total.days[todayKey].cost) : '$0', todayKey || '')
-        + card('Requests', String(msgs), plural(total.sessions.length, 'session'))
-        + card('Served from cache', pct(cacheRead, allIn), `${tok(allIn)} input tokens`)
-        + '</div>';
+    // Only the cache share is a share; a spend and a count are not fractions of
+    // anything, and a meter under them would be an invented denominator.
+    return tiles(
+        tile('All time', fmtCost(spend), `${days.length} active days`),
+        tile('Last 30 days', fmtCost(last30), ''),
+        tile('Last 7 days', fmtCost(last7), ''),
+        tile('Latest day', todayKey ? fmtCost(total.days[todayKey].cost) : '$0', todayKey || ''),
+        tile('Requests', String(msgs), plural(total.sessions.length, 'session')),
+        tile('Served from cache', pct(cacheRead, allIn), `${tok(allIn)} input tokens`,
+            allIn > 0 ? Math.round((cacheRead / allIn) * 100) : null, 'cool'),
+    );
 }
 
 function overviewTab(total, dayModels, modelOrder) {
+    const legend = `<div class="legend">${modelOrder.slice(0, 7).map((m, i) =>
+        `<span class="chip"><i style="background:${modelColor(m, i)}"></i>${esc(shortModel(m))}</span>`).join('')}</div>`;
     return `<section class="tab" data-tab="overview" hidden>
         ${statCards(total)}
-        <h2>Daily spend by model</h2>
-        ${stackedDays(total.days, modelOrder, dayModels)}
-        <div class="legend">${modelOrder.slice(0, 7).map((m, i) =>
-        `<span class="chip"><i style="background:${modelColor(m, i)}"></i>${esc(shortModel(m))}</span>`).join('')}</div>
-        <h2>Calendar</h2>
-        ${heatmap(total.days)}
-        <div class="two">
-          <div><h2>Models</h2>${barList(
+        ${panel('Daily spend by model', stackedDays(total.days, modelOrder, dayModels) + legend)}
+        ${panel('Calendar', heatmap(total.days), {
+        note: 'One cell per day, darker for a heavier day. Weeks run down, so the same weekday sits on one row.',
+    })}
+        <div class="pair">
+          ${panel('Models', barList(
         Object.entries(total.models).sort((a, b) => b[1].cost - a[1].cost),
-        { label: (v, b) => `${fmtCost(v)} · ${tok(b.in + b.cacheRead + b.cacheWrite + b.out)}` },
-    )}</div>
-          <div><h2>Hour of day</h2>${hourChart(total.hours)}</div>
+        { byModel: true, label: (v, b) => `${fmtCost(v)} · ${tok(b.in + b.cacheRead + b.cacheWrite + b.out)}` },
+    ))}
+          ${panel('Hour of day', hourChart(total.hours))}
         </div>
     </section>`;
 }
@@ -370,7 +436,11 @@ function sessionLabel(s) {
 }
 
 function sessionsTab(total) {
-    const rows = total.sessions.slice(0, 300).map((s) => `<tr>
+    const shown = total.sessions.slice(0, 300);
+    // The bar behind a spend is that row against the biggest row on screen, not
+    // against the whole index: the point is to rank what is in front of you.
+    const dearest = shown.reduce((a, s) => Math.max(a, s.cost), 0);
+    const rows = shown.map((s) => `<tr>
         <td class="nowrap">${esc(fmtDateTime(s.end))}</td>
         <td>${esc(s.project)}</td>
         <td class="wrap" title="${esc(s.id)}">${esc(sessionLabel(s))}</td>
@@ -381,20 +451,23 @@ function sessionsTab(total) {
         <td class="num opt2">${esc(fmtDur(s.end - s.start))}</td>
         <td class="num">${s.msgs}</td>
         <td class="num opt2">${esc(tok(s.tokens))}</td>
-        <td class="num">${esc(fmtCost(s.cost))}</td></tr>`).join('');
-    return `<section class="tab" data-tab="sessions" hidden>
-        <p class="note">Newest first, capped at 300 rows of ${total.sessions.length}. A row is one transcript: a main session, a subagent, or one agent of a workflow. The name is the session's own title where it has one.</p>
-        <table><thead><tr><th>Last activity</th><th>Project</th><th>Session</th><th class="opt3">Kind</th><th class="opt">Client</th>
+        ${shareCell(fmtCost(s.cost), dearest > 0 ? s.cost / dearest : 0)}</tr>`).join('');
+    const table = `<table><thead><tr><th>Last activity</th><th>Project</th><th>Session</th><th class="opt3">Kind</th><th class="opt">Client</th>
         <th class="opt3">Models</th><th class="opt">Effort</th>
         <th class="num opt2">Duration</th><th class="num">Requests</th><th class="num opt2">Tokens</th><th class="num">Spend</th></tr></thead>
-        <tbody>${rows}</tbody></table></section>`;
+        <tbody>${rows}</tbody></table>`;
+    return `<section class="tab" data-tab="sessions" hidden>
+        ${panel('Every transcript', table, {
+        flush: true,
+        note: `Newest first, capped at 300 rows of ${total.sessions.length}. A row is one transcript: a main session, a subagent, or one agent of a workflow. The name is the session's own title where it has one, and the rule under a spend is that row against the dearest one shown.`,
+    })}
+    </section>`;
 }
 
 function breakdownTab(name, title, entries, note) {
     return `<section class="tab" data-tab="${name}" hidden>
-        ${note ? `<p class="note">${esc(note)}</p>` : ''}
-        <h2>${esc(title)}</h2>
-        ${barList(entries, { limit: 24, label: (v, b) => `${fmtCost(v)} · ${b.msgs} req` })}
+        ${panel(title, barList(entries, { limit: 24, label: (v, b) => `${fmtCost(v)} · ${b.msgs} req` }),
+        { note: note ? esc(note) : '' })}
     </section>`;
 }
 
@@ -525,11 +598,11 @@ function agentsTab(total, runs = []) {
 
     return `<section class="tab" data-tab="agents" hidden>
         <p class="note">Subagents and workflows write their own transcripts, so this spend is invisible in the terminal statusline — it belongs to no single session there.</p>
-        <div class="cards">
-          ${card('Main sessions', fmtCost(sum(main)), `${plural(main.length, 'transcript')} · ${pct(sum(main), totalCost)}`)}
-          ${card('Subagents', fmtCost(sum(agents)), `${plural(agents.length, 'transcript')} · ${pct(sum(agents), totalCost)}`)}
-          ${card('Workflow agents', fmtCost(sum(wf)), `${plural(wf.length, 'transcript')} · ${pct(sum(wf), totalCost)}`)}
-          ${perRun ? card('Agents per workflow', String(perRun.p50), `p90 ${perRun.p90} · max ${perRun.max}`) : ''}
+        <div class="tiles">
+          ${tile('Main sessions', fmtCost(sum(main)), `${plural(main.length, 'transcript')} · ${pct(sum(main), totalCost)}`)}
+          ${tile('Subagents', fmtCost(sum(agents)), `${plural(agents.length, 'transcript')} · ${pct(sum(agents), totalCost)}`)}
+          ${tile('Workflow agents', fmtCost(sum(wf)), `${plural(wf.length, 'transcript')} · ${pct(sum(wf), totalCost)}`)}
+          ${perRun ? tile('Agents per workflow', String(perRun.p50), `p90 ${perRun.p90} · max ${perRun.max}`) : ''}
         </div>
         ${spread.length ? `<h2>Output tokens one agent writes</h2>
         <table class="matrix"><thead><tr><th></th><th class="num">agents</th><th class="num">median</th>
@@ -568,9 +641,9 @@ function contentTab(total, sys) {
 
     return `<section class="tab" data-tab="content" hidden>
         <p class="note">Computed locally from your own prompts. Only counts and word tallies are stored — never prompt text — and nothing leaves this machine.</p>
-        <div class="cards">
-          <div class="card"><span class="card-label">Prompts</span><span class="card-value">${p.count}</span><span class="card-sub">across ${plural(total.sessions.length, 'transcript')}</span></div>
-          <div class="card"><span class="card-label">Longest</span><span class="card-value">${tok(p.longest)}</span><span class="card-sub">characters</span></div>
+        <div class="tiles">
+          ${tile('Prompts', String(p.count), `across ${plural(total.sessions.length, 'transcript')}`)}
+          ${tile('Longest', tok(p.longest), 'characters')}
         </div>
         <div class="two">
           <div><h2>Prompt length</h2>${barList(lens, { limit: 8, label: (v) => `${v}` })}</div>
@@ -578,9 +651,9 @@ function contentTab(total, sys) {
         </div>
         ${log ? `<h2>Prompts the client logged</h2>
         <p class="note">From <code>~/.claude/history.jsonl</code>, which keeps every prompt typed on this machine across every project. Only counts are read here — the text stays in the file.</p>
-        <div class="cards">
-          ${card('Logged prompts', String(log.count), `${log.pasted} carried a paste`)}
-          ${card('Active days', String(Object.keys(log.byDay).length), log.first ? `since ${fmtDateTime(log.first)}` : '')}
+        <div class="tiles">
+          ${tile('Logged prompts', String(log.count), `${log.pasted} carried a paste`)}
+          ${tile('Active days', String(Object.keys(log.byDay).length), log.first ? `since ${fmtDateTime(log.first)}` : '')}
         </div>
         <div class="two">
           <div><h2>By project</h2>${barList(
@@ -708,11 +781,11 @@ function toolsTab(total) {
 
     return `<section class="tab" data-tab="tools" hidden>
         <p class="note">Counted from the tool_use blocks of every reply on this machine. A failed result is blamed on the tool that produced it, matched back through the call id.</p>
-        <div class="cards">
-          ${card('Tool calls', String(calls), `${plural(tools.length, 'distinct tool')}`)}
-          ${card('Failed', String(errors), pct(errors, calls) + ' of calls')}
-          ${card('Denied', String(denials), 'refused by you or by a rule')}
-          ${card('Advisor', String(advisor), 'consultations — priced server-side, not here')}
+        <div class="tiles">
+          ${tile('Tool calls', String(calls), `${plural(tools.length, 'distinct tool')}`)}
+          ${tile('Failed', String(errors), pct(errors, calls) + ' of calls')}
+          ${tile('Denied', String(denials), 'refused by you or by a rule')}
+          ${tile('Advisor', String(advisor), 'consultations — priced server-side, not here')}
         </div>
         <div class="two">
           <div><h2>Most used</h2>
@@ -764,11 +837,11 @@ function cacheTab(total) {
 
     return `<section class="tab" data-tab="cache" hidden>
         <p class="note">A cached token is read at a tenth of the input rate; putting it there costs 1.25x at the five-minute TTL and 2x at the hourly one. Which TTL a request used is recorded per reply, so both sides are exact.</p>
-        <div class="cards">
-          ${card('Served from cache', pct(read, allIn), `${tok(read)} of ${tok(allIn)} input tokens`)}
-          ${card('Saved by reads', `~${fmtCost(saved)}`, 'against sending them fresh')}
-          ${card('Read per token written', leverage.toFixed(1) + '×', leverage < 1 ? 'rebuilt more than reused' : 'each write paid off')}
-          ${card('Hourly TTL', pct(w1h, write), `${tok(w1h)} at 2× · ${tok(w5m)} at 1.25×`)}
+        <div class="tiles">
+          ${tile('Served from cache', pct(read, allIn), `${tok(read)} of ${tok(allIn)} input tokens`)}
+          ${tile('Saved by reads', `~${fmtCost(saved)}`, 'against sending them fresh')}
+          ${tile('Read per token written', leverage.toFixed(1) + '×', leverage < 1 ? 'rebuilt more than reused' : 'each write paid off')}
+          ${tile('Hourly TTL', pct(w1h, write), `${tok(w1h)} at 2× · ${tok(w5m)} at 1.25×`)}
         </div>
         <h2>Tokens billed at the full rate, by day</h2>
         ${stackedTokens(total.days, BILLED_PARTS, { height: 150 })}
@@ -778,7 +851,7 @@ function cacheTab(total) {
         <p class="note">The same days on their own scale — reads run an order of magnitude above everything above, which is the point of them.</p>
         ${stackedTokens(total.days, READ_PARTS, { height: 110 })}
         <h2>Cache hit rate by model</h2>
-        ${barList(byModel, { limit: 10, value: (b) => b.hit * 100, label: (v, b) => `${v.toFixed(0)}% · ${tok(b.cacheRead)} read` })}
+        ${barList(byModel, { limit: 10, byModel: true, value: (b) => b.hit * 100, label: (v, b) => `${v.toFixed(0)}% · ${tok(b.cacheRead)} read` })}
     </section>`;
 }
 
@@ -797,11 +870,11 @@ function frictionTab(total) {
 
     return `<section class="tab" data-tab="friction" hidden>
         <p class="note">What the spend ran into. None of it is priced separately — a rejected call still cost the tokens that proposed it, and those are already counted as spend.</p>
-        <div class="cards">
-          ${card('Failed tool calls', String(f.toolErrors || 0), '')}
-          ${card('Denied', String(Object.values(f.denials || {}).reduce((a, n) => a + n, 0)), 'refused before running')}
-          ${card('Compactions', String(compactions), `${tok(f.droppedTokens || 0)} of context dropped`)}
-          ${card('Cut off', String(f.shutdowns || 0), 'by the client going away')}
+        <div class="tiles">
+          ${tile('Failed tool calls', String(f.toolErrors || 0), '')}
+          ${tile('Denied', String(Object.values(f.denials || {}).reduce((a, n) => a + n, 0)), 'refused before running')}
+          ${tile('Compactions', String(compactions), `${tok(f.droppedTokens || 0)} of context dropped`)}
+          ${tile('Cut off', String(f.shutdowns || 0), 'by the client going away')}
         </div>
         <div class="two">
           <div><h2>Why a call was refused</h2>${barList(denials, { limit: 8, label: (v) => String(v) })}</div>
@@ -847,10 +920,10 @@ function limitsTab(history, nowMs = Date.now()) {
     }));
     const last = rows[rows.length - 1];
 
-    const cards = last ? '<div class="cards">'
-        + card('Weekly window', `${last.weekly}%`, `resets ${fmtDateTime(last.reset * 1000)}`)
-        + (typeof last.session === 'number' ? card('Session window', `${last.session}%`, 'the rolling 5 hours') : '')
-        + card('Readings kept', String(rows.length), `since ${fmtDateTime(rows[0].at)}`)
+    const cards = last ? '<div class="tiles">'
+        + tile('Weekly window', `${last.weekly}%`, `resets ${fmtDateTime(last.reset * 1000)}`)
+        + (typeof last.session === 'number' ? tile('Session window', `${last.session}%`, 'the rolling 5 hours') : '')
+        + tile('Readings kept', String(rows.length), `since ${fmtDateTime(rows[0].at)}`)
         + '</div>' : '';
 
     const models = last && last.models ? Object.entries(last.models).sort((a, b) => b[1] - a[1]) : [];
@@ -942,11 +1015,11 @@ function healthTab(total, sys) {
 
     return `<section class="tab" data-tab="health" hidden>
         <p class="note">What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call's arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.</p>
-        <div class="cards">
-          ${card('Client', v.current || '—', v.waiting ? `${v.latest} unpacked and waiting` : `${plural((v.installed || []).length, 'version')} on disk`)}
-          ${card('Plugins', String(pluginRows.filter((p) => p.enabled).length), `${idle.length} enabled but idle`)}
-          ${card('MCP servers', String(mcpRows.length), `${mcpRows.filter((m) => !m.used).length} never called`)}
-          ${card('Hooks', String((sys.hooks || []).length), plural((sys.permissions || []).length, 'permission rule'))}
+        <div class="tiles">
+          ${tile('Client', v.current || '—', v.waiting ? `${v.latest} unpacked and waiting` : `${plural((v.installed || []).length, 'version')} on disk`)}
+          ${tile('Plugins', String(pluginRows.filter((p) => p.enabled).length), `${idle.length} enabled but idle`)}
+          ${tile('MCP servers', String(mcpRows.length), `${mcpRows.filter((m) => !m.used).length} never called`)}
+          ${tile('Hooks', String((sys.hooks || []).length), plural((sys.permissions || []).length, 'permission rule'))}
         </div>
         <div class="two">
           <div><h2>Settings in force</h2>${settingsList(sys.settings || {})}
@@ -1001,10 +1074,10 @@ function jobsTab(sys) {
 
     return `<section class="tab" data-tab="jobs" hidden>
         <p class="note">Background agents keep their own state, their own transcript and a working directory that nothing cleans up. A job still holding a session is also the reason <code>/resume</code> on that session refuses to open it.</p>
-        <div class="cards">
-          ${card('Jobs', String(rows.length), `${running.length} still working`)}
-          ${card('Tokens', tok(tokens), 'across every job')}
-          ${card('Scratch on disk', bytes(scratch), 'in jobs/*/tmp')}
+        <div class="tiles">
+          ${tile('Jobs', String(rows.length), `${running.length} still working`)}
+          ${tile('Tokens', tok(tokens), 'across every job')}
+          ${tile('Scratch on disk', bytes(scratch), 'in jobs/*/tmp')}
         </div>
         <table><thead><tr><th>Last change</th><th>Job</th><th>State</th><th class="opt">Project</th>
           <th class="opt2">Session</th><th class="num">Tokens</th><th class="num">On disk</th><th class="opt">Client</th></tr></thead><tbody>
@@ -1028,10 +1101,10 @@ function liveTab(sys) {
 
     return `<section class="tab" data-tab="live" hidden>
         <p class="note">Read at the moment the dashboard was opened: the session registry, the IDE windows attached to it, and the daemon's own workers. A registry entry whose process is gone is shown as stale rather than hidden — it is what a crashed session leaves.</p>
-        <div class="cards">
-          ${card('Live sessions', String(aliveSessions.length), stale ? `${plural(stale, 'stale entry', 'stale entries')}` : 'registry is clean')}
-          ${card('Editors attached', String(l.ide.filter((i) => i.alive).length), plural(l.ide.length, 'lock file'))}
-          ${card('Daemon workers', String(l.daemon.workers.filter((w) => w.alive).length), l.daemon.alive ? `supervisor ${l.daemon.supervisorPid}` : 'supervisor not running')}
+        <div class="tiles">
+          ${tile('Live sessions', String(aliveSessions.length), stale ? `${plural(stale, 'stale entry', 'stale entries')}` : 'registry is clean')}
+          ${tile('Editors attached', String(l.ide.filter((i) => i.alive).length), plural(l.ide.length, 'lock file'))}
+          ${tile('Daemon workers', String(l.daemon.workers.filter((w) => w.alive).length), l.daemon.alive ? `supervisor ${l.daemon.supervisorPid}` : 'supervisor not running')}
         </div>
         <h2>Sessions</h2>
         ${l.sessions.length ? `<table><thead><tr><th class="opt2">Started</th><th>Session</th><th class="opt">Project</th>
@@ -1067,9 +1140,9 @@ function diskTab(sys) {
     const kindLabel = { keep: 'keep', regenerable: 'regenerates', mixed: '' };
     return `<section class="tab" data-tab="disk" hidden>
         <p class="note">Everything under <code>~/.claude</code>. Nothing here is deleted by this extension and there is no button that would — the numbers are the point, the decision is yours.</p>
-        <div class="cards">
-          ${card('Total', bytes(d.total), '~/.claude')}
-          ${d.hogs.length ? card('Leftovers', bytes(d.hogs.reduce((a, h) => a + h.bytes, 0)), `${plural(d.hogs.length, 'place')}, safe to remove`) : ''}
+        <div class="tiles">
+          ${tile('Total', bytes(d.total), '~/.claude')}
+          ${d.hogs.length ? tile('Leftovers', bytes(d.hogs.reduce((a, h) => a + h.bytes, 0)), `${plural(d.hogs.length, 'place')}, safe to remove`) : ''}
         </div>
         <h2>By directory</h2>
         ${barList(d.dirs.map((x) => [x.name, x]), {
@@ -1096,10 +1169,10 @@ function contextTab(total, sys) {
 
     return `<section class="tab" data-tab="context" hidden>
         <p class="note">Files that are loaded into the prompt of every session in scope. Sizes are exact; tokens are the size over four characters, which is close enough to compare paragraphs against each other.</p>
-        <div class="cards">
-          ${card('Global instructions', `~${tok(perRequest)}`, 'tokens in every request')}
-          ${card('Across all requests', `~${fmtCost(lifetime)}`, `${plural(msgs, 'request')} at Opus input rates`)}
-          ${card('Files', String(c.files.length), 'CLAUDE.md, rules, project memory')}
+        <div class="tiles">
+          ${tile('Global instructions', `~${tok(perRequest)}`, 'tokens in every request')}
+          ${tile('Across all requests', `~${fmtCost(lifetime)}`, `${plural(msgs, 'request')} at Opus input rates`)}
+          ${tile('Files', String(c.files.length), 'CLAUDE.md, rules, project memory')}
         </div>
         <h2>What is loaded</h2>
         ${barList(c.files.map((f) => [f.path, f]), {
@@ -1118,9 +1191,9 @@ function tasksTab(sys) {
     }
     return `<section class="tab" data-tab="tasks" hidden>
         <p class="note">Todo lists left behind by sessions, newest first. An unfinished item here is work that was planned and never closed — the session may be long gone.</p>
-        <div class="cards">
-          ${card('Lists', String(rows.length), `${plural(open.length, 'list')} with something open`)}
-          ${card('Open items', String(open.reduce((a, t) => a + t.open.length, 0)), 'across every session')}
+        <div class="tiles">
+          ${tile('Lists', String(rows.length), `${plural(open.length, 'list')} with something open`)}
+          ${tile('Open items', String(open.reduce((a, t) => a + t.open.length, 0)), 'across every session')}
         </div>
         <table><thead><tr><th class="nowrap">Last touched</th><th>Project</th><th class="opt">Session</th>
           <th class="num">Done</th><th>Still open</th></tr></thead><tbody>
@@ -1137,9 +1210,9 @@ function changelogTab(sys) {
     const v = (sys && sys.versions) || {};
     return `<section class="tab" data-tab="changelog" hidden>
         <p class="note">The client's own changelog, which it already keeps in <code>~/.claude/cache</code>. Only releases newer than the one running are shown.</p>
-        <div class="cards">
-          ${card('Running', v.current || '—', v.waiting ? `${v.latest} is unpacked and waiting` : 'up to date')}
-          ${card('Releases ahead', String(releases.length), releases.length ? 'not yet running' : 'nothing new')}
+        <div class="tiles">
+          ${tile('Running', v.current || '—', v.waiting ? `${v.latest} is unpacked and waiting` : 'up to date')}
+          ${tile('Releases ahead', String(releases.length), releases.length ? 'not yet running' : 'nothing new')}
         </div>
         ${releases.length ? releases.map((r) => `<h2>${esc(r.version)}</h2>
           <ul class="log">${r.entries.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`).join('')
@@ -1163,10 +1236,10 @@ function filesTab(total, sys) {
 
     return `<section class="tab" data-tab="files" hidden>
         <p class="note">Every file an edit or a write touched, counted from the patch the tool returned. Line counts are the patch's own, so a rewritten file counts as its whole length.</p>
-        <div class="cards">
-          ${card('Files touched', String(files.length), plural(edits, 'edit'))}
-          ${card('Lines added', tok(added), '')}
-          ${card('Lines removed', tok(removed), '')}
+        <div class="tiles">
+          ${tile('Files touched', String(files.length), plural(edits, 'edit'))}
+          ${tile('Lines added', tok(added), '')}
+          ${tile('Lines removed', tok(removed), '')}
         </div>
         <div class="two">
           <div><h2>Most often edited</h2>${barList(byEdits.map(([p, f]) => [short(p), f]), {
@@ -1241,17 +1314,6 @@ function paceTrack(w) {
     </div>`;
 }
 
-/** One headline number with the meter that gives it a scale. */
-function meterTile({ label, value, sub, pct, tone, wide }) {
-    const width = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null;
-    return `<div class="tile${wide ? ' tile-wide' : ''}">
-        <span class="tile-label">${esc(label)}</span>
-        <span class="tile-value">${esc(value)}</span>
-        ${width !== null ? `<span class="tile-meter"><i class="t-${tone || meterTone(width)}" style="width:${width}%"></i></span>` : ''}
-        <span class="tile-sub">${esc(sub || '')}</span>
-    </div>`;
-}
-
 // A tone is meaning, not colour: status.js says what a note means and each
 // renderer picks how to show it. The tooltip reaches for a codicon; here it is
 // a word and a stripe down the side.
@@ -1316,40 +1378,29 @@ function nowTab(sections, workflows, metrics) {
     // will the week hold, will this hour hold, will the context hold, what is it
     // costing. Each number carries its own meter rather than a shared axis —
     // they measure different things and share only a scale of 0 to 100%.
-    const tiles = [];
+    const head = [];
     if (m.weekly) {
-        tiles.push(meterTile({
-            label: 'weekly window', value: `${m.weekly.pct}%`, pct: m.weekly.pct,
-            sub: m.weekly.plan !== null ? `${m.weekly.plan}% of the week gone` : '',
-        }));
+        head.push(tile('weekly window', `${m.weekly.pct}%`,
+            m.weekly.plan !== null ? `${m.weekly.plan}% of the week gone` : '', m.weekly.pct));
     }
     if (m.session5h) {
-        tiles.push(meterTile({
-            label: '5-hour window', value: `${m.session5h.pct}%`, pct: m.session5h.pct,
-            sub: `resets in ${fmtLeft(m.session5h.resetIn, 0)}`,
-        }));
+        head.push(tile('5-hour window', `${m.session5h.pct}%`,
+            `resets in ${fmtLeft(m.session5h.resetIn, 0)}`, m.session5h.pct));
     }
     if (m.context) {
-        tiles.push(meterTile({
-            label: 'context', value: `${m.context.estimated ? '~' : ''}${m.context.pct}%`, pct: m.context.pct,
-            sub: `${tok(m.context.tokens)} of ${tok(m.context.window)}`,
-        }));
+        head.push(tile('context', `${m.context.estimated ? '~' : ''}${m.context.pct}%`,
+            `${tok(m.context.tokens)} of ${tok(m.context.window)}`, m.context.pct));
     }
     if (m.spend) {
-        tiles.push(meterTile({
-            label: 'this session', value: `~${fmtCost(m.spend.cost)}`,
-            sub: m.spend.burn > 0 ? `~${fmtCost(m.spend.burn)} an hour` : '',
-        }));
+        head.push(tile('this session', `~${fmtCost(m.spend.cost)}`,
+            m.spend.burn > 0 ? `~${fmtCost(m.spend.burn)} an hour` : ''));
     }
 
     return `<section class="tab" data-tab="now">
-        ${tiles.length ? `<div class="tiles">${tiles.join('')}</div>` : ''}
+        ${head.length ? tiles(...head) : ''}
         ${paceTrack(m.weekly)}
-        <div class="now-grid">
-          ${rows.map((section) => `<section class="now-panel" data-panel="${esc(section.id)}">
-            <h2 class="now-title">${esc(section.title)}</h2>
-            ${statusBlocks(section.blocks)}
-          </section>`).join('')}
+        <div class="cols">
+          ${rows.map((section) => panel(section.title, statusBlocks(section.blocks), { id: section.id })).join('')}
         </div>
         ${active.length ? `<h2>Running right now</h2>
         <p class="note">One line per workflow still going. The full picture — phases, agents, what each was told and what it answered — is under Work → Agents &amp; workflows.</p>
@@ -1479,12 +1530,59 @@ nav.tabs { border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 1
 nav.tabs.empty { min-height: 0; margin-bottom: 14px; }
 nav.tabs button { border-bottom: 2px solid transparent; }
 nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--vscode-focusBorder); }
-.cards { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
-.card { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border);
-  border-radius: 6px; padding: 10px 14px; min-width: 132px; }
-.card-label { display: block; opacity: .6; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-.card-value { display: block; font-size: 20px; font-weight: 600; margin: 2px 0; }
-.card-sub { display: block; opacity: .55; font-size: 11px; }
+/* A block of the page: heading, the sentence under it, and the answer. The
+   panel is what makes a tab read as a set of answers instead of a scroll; a
+   flush one is for a wide table, which keeps its full width inside the border
+   rather than paying for padding twice. */
+.panel { background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-panel-border); border-radius: 6px;
+  padding: 13px 15px 15px; margin: 0 0 14px; }
+.panel-title { font-size: 13px; font-weight: 600; margin: 0 0 2px; opacity: .85; }
+.panel-note { opacity: .6; margin: 4px 0 10px; max-width: 78ch; line-height: 1.5; font-size: 12px; }
+.panel-title + .panel-body, .panel-note + .panel-body { margin-top: 9px; }
+.panel-body > :first-child { margin-top: 0; }
+.panel-body > :last-child { margin-bottom: 0; }
+.panel-flush { padding-left: 0; padding-right: 0; }
+.panel-flush > .panel-title, .panel-flush > .panel-note { padding: 0 15px; }
+.panel-flush > .panel-body { overflow-x: auto; }
+.panel-flush th:first-child, .panel-flush td:first-child { padding-left: 15px; }
+.panel-flush th:last-child, .panel-flush td:last-child { padding-right: 15px; }
+/* Two panels side by side where the page is wide enough for it. */
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px; margin-bottom: 14px; }
+.pair > .panel { margin: 0; }
+
+/* A share drawn under the number rather than beside it: it costs no column, and
+   a rule under the figure cannot fight the figure. A block behind the text was
+   tried first and read as a selection highlight rather than as a magnitude. */
+td.share { position: relative; }
+td.share i { position: absolute; right: 0; bottom: 2px; height: 2px; border-radius: 1px;
+  background: var(--vscode-charts-blue, #3794ff); opacity: .55; }
+td.share.wide i { left: 0; right: auto; }
+
+/* The headline row of any tab. Numbers are set in the editor's own monospace at
+   a size the rest of the page never uses, so the answers read before any label
+   does; labels drop to a small-caps treatment and get out of the way. One strip
+   with hairline separators rather than a row of separate boxes: the tiles of a
+   tab answer one question together.
+
+   A tile deliberately has no min-width of zero. A grid item allowed to shrink
+   below its content clips the number instead of wrapping the row, and a clipped
+   number is a wrong number. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));
+  gap: 1px; background: var(--vscode-panel-border); border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px; overflow: hidden; margin-bottom: 16px; }
+.tile { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px 13px;
+  background: var(--vscode-editor-background); }
+.tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; opacity: .5; }
+.tile-value { font-family: var(--vscode-editor-font-family); font-size: 24px; line-height: 1.05;
+  font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.tile-meter { display: block; height: 3px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
+.tile-meter i { display: block; height: 100%; border-radius: 2px; }
+/* Pushed to the bottom so a tile with no meter keeps its sub on the same
+   baseline as the tiles beside it. */
+.tile-sub { font-size: 11px; opacity: .55; min-height: 14px; margin-top: auto; }
 .chart { width: 100%; height: auto; overflow: visible; }
 .chart.heat { max-width: 420px; }
 .tick { fill: currentColor; opacity: .5; font-size: 9px; }
@@ -1512,7 +1610,8 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .bar-cell { width: 100%; padding-right: 14px !important; }
 .bar-track { display: block; background: var(--vscode-editorWidget-background);
   border-radius: 3px; height: 14px; overflow: hidden; }
-.bar-fill { display: block; height: 100%; border-radius: 3px; }
+.bar-fill { display: block; height: 100%; border-radius: 3px;
+  background: var(--vscode-charts-blue, hsl(200 62% 55%)); }
 .bar-val { opacity: .7; text-align: right; white-space: nowrap;
   font-variant-numeric: tabular-nums; width: 1%; }
 .hours { display: flex; align-items: flex-end; gap: 3px; height: 92px; }
@@ -1568,9 +1667,9 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 }
 @media (max-width: 900px) {
   .opt2 { display: none; }
-  .cards { gap: 6px; }
-  .card { min-width: 104px; padding: 8px 10px; }
-  .card-value { font-size: 17px; }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); }
+  .tile { padding: 9px 11px 10px; }
+  .tile-value { font-size: 19px; }
 }
 /* Narrower than this the panel is a sidebar, not a page: what is left is the
    name of the thing and the number being asked about. */
@@ -1612,22 +1711,6 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .preset-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
 .chip-seg { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8;
   background: var(--vscode-list-hoverBackground); border-radius: 3px; padding: 1px 5px; }
-/* The headline row. Numbers are set in the editor's own monospace at a size the
-   rest of the page never uses, so the four answers read before any label does;
-   labels drop to a small caps-like treatment and get out of the way. */
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
-  gap: 1px; background: var(--vscode-panel-border); border: 1px solid var(--vscode-panel-border);
-  border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
-.tile { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px 13px;
-  background: var(--vscode-editor-background); min-width: 0; }
-.tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; opacity: .5; }
-.tile-value { font-family: var(--vscode-editor-font-family); font-size: 25px; line-height: 1.05;
-  font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-.tile-meter { display: block; height: 3px; border-radius: 2px; overflow: hidden;
-  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
-.tile-meter i { display: block; height: 100%; border-radius: 2px; }
-.tile-sub { font-size: 11px; opacity: .55; min-height: 14px; margin-top: auto; }
-
 /* Spend, plan and forecast are three different jobs, so they get three roles
    from the theme's own chart ramp rather than three invented hues. */
 .t-cool { background: var(--vscode-charts-blue, hsl(200 62% 55%)); }
@@ -1663,12 +1746,11 @@ ul.log li { margin: 2px 0; opacity: .85; }
   font-size: 11px; opacity: .5; }
 .track-feet span:last-child { text-align: right; }
 
-/* Columns rather than a grid: the four panels are of wildly different heights,
-   and a grid leaves the short one's row half empty. Multicol packs them. */
-.now-grid { columns: 3 300px; column-gap: 14px; margin-bottom: 8px; }
-.now-panel { break-inside: avoid; margin: 0 0 14px; padding: 13px 15px 14px; border-radius: 6px;
-  background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); }
-.now-title { font-size: 13.5px; font-weight: 600; margin: 0 0 11px; opacity: .8; }
+/* Columns rather than a grid: panels of wildly different heights leave a grid
+   row half empty, and multicol packs them. A panel may not be split across a
+   column break — half a table at the foot of one column is unreadable. */
+.cols { columns: 3 300px; column-gap: 14px; margin-bottom: 8px; }
+.cols > .panel { break-inside: avoid; }
 .now-sub { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; opacity: .45;
   margin: 14px 0 4px; font-weight: 600; padding-top: 9px;
   border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
@@ -2052,6 +2134,9 @@ function navHtml() {
 function render(index, total, meta) {
     const modelOrder = Object.entries(total.models)
         .sort((a, b) => b[1].cost - a[1].cost).map(([m]) => m);
+    // Every panel on the page draws a model in this colour from here on, however
+    // its own rows happen to be sorted.
+    assignModelColors(modelOrder);
     const dayModels = dayModelMatrix(index);
 
     const projects = Object.entries(total.projects).sort((a, b) => b[1].cost - a[1].cost);
@@ -2096,7 +2181,8 @@ module.exports = {
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, SECTIONS, CACHE_PARTS,
     agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
-    limitsTab, weekLabel, nowTab, paceTrack, meterTile, meterTone,
+    limitsTab, weekLabel, nowTab, paceTrack, statusBlocks, meterTone,
+    tile, tiles, panel, shareCell, assignModelColors,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

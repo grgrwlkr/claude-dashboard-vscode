@@ -637,7 +637,9 @@ test('a run record with none of its optional halves still draws a row', () => {
 
 test('every pair of model colours stays perceptually distinct', () => {
     const rows = Array.from({ length: 9 }, (_, i) => [`m${i}`, bucket(9 - i)]);
-    const html = db.barList(rows, { limit: 9 });
+    // Only a list keyed by a model is drawn in model colours; a list of one
+    // measure is one hue, so it would offer no pairs to compare.
+    const html = db.barList(rows, { limit: 9, byModel: true });
     const colors = [...html.matchAll(/hsl\((\d+) (\d+)% (\d+)%\)/g)]
         .map((m) => labOf(Number(m[1]), Number(m[2]), Number(m[3])));
     assert.equal(colors.length, 9);
@@ -651,4 +653,28 @@ test('every pair of model colours stays perceptually distinct', () => {
         }
     }
     assert.ok(worst >= 25, `colours ${pair} are too close: deltaE ${worst.toFixed(1)}`);
+});
+
+// The stacked chart sorts by the canonical order and the list beside it by
+// cost. Keyed on the row index, a hue agreed between the two only when those
+// orders happened to match — which they do today, and would stop doing the day
+// either sort changed.
+test('a model keeps its colour whichever list it is drawn in', () => {
+    const total = ix.summarize(demoIndex());
+    const order = Object.entries(total.models)
+        .sort((a, b) => b[1].cost - a[1].cost).map(([m]) => m);
+    db.assignModelColors(order);
+
+    const reversed = [...order].reverse();
+    const forward = db.barList(order.map((m) => [m, total.models[m]]), { byModel: true });
+    const backward = db.barList(reversed.map((m) => [m, total.models[m]]), { byModel: true });
+
+    const hueOf = (html, model) => {
+        const row = html.split('<tr>').find((r) => r.includes(`title="${model}"`));
+        return (row.match(/hsl\([^)]+\)/) || [])[0];
+    };
+    for (const model of order) {
+        assert.equal(hueOf(backward, model), hueOf(forward, model),
+            `${model} changed colour when the list was sorted the other way`);
+    }
 });
