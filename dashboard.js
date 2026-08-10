@@ -1034,34 +1034,22 @@ function healthTab(total, sys) {
     const yes = '<span class="ok">used</span>';
     const no = '<span class="idle">idle</span>';
 
-    return `<section class="tab" data-tab="health" hidden>
-        <p class="note">What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call's arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.</p>
-        <div class="tiles">
-          ${tile('Client', v.current || '—', v.waiting ? `${v.latest} unpacked and waiting` : `${plural((v.installed || []).length, 'version')} on disk`)}
-          ${tile('Plugins', String(pluginRows.filter((p) => p.enabled).length), `${idle.length} enabled but idle`)}
-          ${tile('MCP servers', String(mcpRows.length), `${mcpRows.filter((m) => !m.used).length} never called`)}
-          ${tile('Hooks', String((sys.hooks || []).length), plural((sys.permissions || []).length, 'permission rule'))}
-        </div>
-        <div class="two">
-          <div><h2>Settings in force</h2>${settingsList(sys.settings || {})}
-            ${Object.keys((sys.settings || {}).env || {}).length ? `<h2>Environment</h2>
-              <table class="kv"><tbody>${Object.entries(sys.settings.env).map(([k, val]) =>
-        `<tr><th scope="row">${esc(k)}</th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : ''}
-          </div>
-          <div><h2>MCP servers</h2>
-            <table><thead><tr><th>Server</th><th>Scope</th><th class="opt2">Via</th><th>Used</th></tr></thead><tbody>
+    const settingsBody = settingsList(sys.settings || {})
+        + (Object.keys((sys.settings || {}).env || {}).length
+            ? `<h3 class="now-sub">Environment</h3><table class="kv"><tbody>${Object.entries(sys.settings.env).map(([k, val]) =>
+        `<tr><th scope="row">${esc(k)}</th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : '');
+
+    const mcpBody = `<table><thead><tr><th>Server</th><th>Scope</th><th class="opt2">Via</th><th>Used</th></tr></thead><tbody>
             ${mcpRows.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.scope)}${m.project ? ` <span class="dim">${esc(m.project)}</span>` : ''}</td>
               <td class="dim opt2">${esc(m.command || m.transport)}</td><td>${m.used ? yes : no}</td></tr>`).join('')}
             </tbody></table>
-            <h2>Hooks</h2>
+            <h3 class="now-sub">Hooks</h3>
             ${(sys.hooks || []).length ? `<table><thead><tr><th>Event</th><th class="opt2">Matcher</th><th>Runs</th></tr></thead><tbody>
               ${sys.hooks.map((h) => `<tr><td>${esc(h.event)}</td><td class="mono opt2">${esc(h.matcher)}</td>
                 <td class="mono wrap" title="${esc(h.command)}">${esc(h.command)}</td></tr>`).join('')}
-            </tbody></table>` : '<p class="empty">No hooks configured.</p>'}
-          </div>
-        </div>
-        <h2>Plugins</h2>
-        <table><thead><tr><th>Plugin</th><th class="opt">Marketplace</th><th class="opt2">Version</th>
+            </tbody></table>` : '<p class="empty">No hooks configured.</p>'}`;
+
+    const pluginTable = `<table><thead><tr><th>Plugin</th><th class="opt">Marketplace</th><th class="opt2">Version</th>
           <th class="num">Skills</th><th class="num">Agents</th><th class="num">Commands</th>
           <th class="num">Hooks</th><th class="opt2">MCP</th><th class="num opt">Copies</th><th>State</th></tr></thead><tbody>
         ${pluginRows.map((p) => {
@@ -1074,13 +1062,35 @@ function healthTab(total, sys) {
               <td class="num opt">${p.copies > 1 ? p.copies : '·'}</td>
               <td>${p.missing ? '<span class="idle">missing</span>' : !p.enabled ? '<span class="dim">off</span>' : p.used ? yes : no}</td></tr>`;
     }).join('')}
-        </tbody></table>
-        ${(sys.permissions || []).length ? `<h2>Permission rules</h2>
-        <table><thead><tr><th>Mode</th><th>Rule</th><th class="opt">From</th></tr></thead><tbody>
-          ${sys.permissions.map((p) => `<tr><td>${esc(p.mode)}</td><td class="mono">${esc(p.rule)}</td>
+        </tbody></table>`;
+
+    const permTable = `<table><thead><tr><th>Mode</th><th>Rule</th><th class="opt">From</th></tr></thead><tbody>
+          ${(sys.permissions || []).map((p) => `<tr><td>${esc(p.mode)}</td><td class="mono">${esc(p.rule)}</td>
             <td class="dim opt">${esc(p.from)}</td></tr>`).join('')}
-        </tbody></table>
-        <p class="note">A call refused by one of these is counted on the Friction tab as <code>permission-rule</code>.</p>` : ''}
+        </tbody></table>`;
+
+    const enabled = pluginRows.filter((p) => p.enabled).length;
+    return `<section class="tab" data-tab="health" hidden>
+        ${tiles(
+        tile('Client', v.current || '—', v.waiting ? `${v.latest} unpacked and waiting` : `${plural((v.installed || []).length, 'version')} on disk`),
+        tile('Plugins', String(enabled), `${idle.length} enabled but idle`,
+            enabled > 0 ? Math.round((idle.length / enabled) * 100) : null, 'warm'),
+        tile('MCP servers', String(mcpRows.length), `${mcpRows.filter((m) => !m.used).length} never called`,
+            mcpRows.length > 0 ? Math.round((mcpRows.filter((m) => !m.used).length / mcpRows.length) * 100) : null, 'warm'),
+        tile('Hooks', String((sys.hooks || []).length), plural((sys.permissions || []).length, 'permission rule')),
+    )}
+        <div class="pair">
+          ${panel('Settings in force', settingsBody)}
+          ${panel('MCP servers', mcpBody)}
+        </div>
+        ${panel('Plugins', pluginTable, {
+        flush: true,
+        note: 'What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call\'s arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.',
+    })}
+        ${(sys.permissions || []).length ? panel('Permission rules', permTable, {
+        flush: true,
+        note: 'A call refused by one of these is counted on the Friction tab as <code>permission-rule</code>.',
+    }) : ''}
     </section>`;
 }
 
@@ -1094,13 +1104,13 @@ function jobsTab(sys) {
     const scratch = rows.reduce((a, j) => a + (j.tmpBytes || 0), 0);
 
     return `<section class="tab" data-tab="jobs" hidden>
-        <p class="note">Background agents keep their own state, their own transcript and a working directory that nothing cleans up. A job still holding a session is also the reason <code>/resume</code> on that session refuses to open it.</p>
-        <div class="tiles">
-          ${tile('Jobs', String(rows.length), `${running.length} still working`)}
-          ${tile('Tokens', tok(tokens), 'across every job')}
-          ${tile('Scratch on disk', bytes(scratch), 'in jobs/*/tmp')}
-        </div>
-        <table><thead><tr><th>Last change</th><th>Job</th><th>State</th><th class="opt">Project</th>
+        ${tiles(
+        tile('Jobs', String(rows.length), `${running.length} still working`,
+            rows.length > 0 ? Math.round((running.length / rows.length) * 100) : null, 'cool'),
+        tile('Tokens', tok(tokens), 'across every job'),
+        tile('Scratch on disk', bytes(scratch), 'in jobs/*/tmp'),
+    )}
+        ${panel('Every job', `<table><thead><tr><th>Last change</th><th>Job</th><th>State</th><th class="opt">Project</th>
           <th class="opt2">Session</th><th class="num">Tokens</th><th class="num">On disk</th><th class="opt">Client</th></tr></thead><tbody>
         ${rows.map((j) => `<tr>
           <td class="nowrap">${esc(fmtDateTime(j.at))}</td>
@@ -1111,7 +1121,10 @@ function jobsTab(sys) {
           <td class="num">${j.tokens ? esc(tok(j.tokens)) : '·'}</td>
           <td class="num">${esc(bytes(j.bytes))}${j.tmpBytes > 50e6 ? ' <span class="idle">scratch</span>' : ''}</td>
           <td class="dim opt">${esc(j.cliVersion || '—')}</td></tr>`).join('')}
-        </tbody></table>
+        </tbody></table>`, {
+        flush: true,
+        note: 'Background agents keep their own state, their own transcript and a working directory that nothing cleans up. A job still holding a session is also the reason <code>/resume</code> on that session refuses to open it.',
+    })}
     </section>`;
 }
 
@@ -1120,15 +1133,7 @@ function liveTab(sys) {
     const aliveSessions = l.sessions.filter((s) => s.alive);
     const stale = l.sessions.length - aliveSessions.length;
 
-    return `<section class="tab" data-tab="live" hidden>
-        <p class="note">Read at the moment the dashboard was opened: the session registry, the IDE windows attached to it, and the daemon's own workers. A registry entry whose process is gone is shown as stale rather than hidden — it is what a crashed session leaves.</p>
-        <div class="tiles">
-          ${tile('Live sessions', String(aliveSessions.length), stale ? `${plural(stale, 'stale entry', 'stale entries')}` : 'registry is clean')}
-          ${tile('Editors attached', String(l.ide.filter((i) => i.alive).length), plural(l.ide.length, 'lock file'))}
-          ${tile('Daemon workers', String(l.daemon.workers.filter((w) => w.alive).length), l.daemon.alive ? `supervisor ${l.daemon.supervisorPid}` : 'supervisor not running')}
-        </div>
-        <h2>Sessions</h2>
-        ${l.sessions.length ? `<table><thead><tr><th class="opt2">Started</th><th>Session</th><th class="opt">Project</th>
+    const sessionTable = l.sessions.length ? `<table><thead><tr><th class="opt2">Started</th><th>Session</th><th class="opt">Project</th>
           <th>Entrypoint</th><th>Status</th><th class="num opt2">PID</th><th class="opt">Client</th></tr></thead><tbody>
           ${l.sessions.map((s) => `<tr class="${s.alive ? '' : 'off'}">
             <td class="nowrap opt2">${esc(fmtDateTime(s.startedAt))}</td>
@@ -1137,20 +1142,31 @@ function liveTab(sys) {
             <td>${esc(s.entrypoint || '—')}</td>
             <td>${s.alive ? `<span class="ok">${esc(s.status || 'idle')}</span>` : '<span class="idle">stale</span>'}</td>
             <td class="num mono opt2">${s.pid}</td><td class="dim opt">${esc(s.version || '')}</td></tr>`).join('')}
-        </tbody></table>` : '<p class="empty">No sessions in the registry.</p>'}
-        <div class="two">
-          <div><h2>Editors</h2>
-            ${l.ide.length ? `<table><thead><tr><th>Editor</th><th class="num">PID</th><th>Folders</th></tr></thead><tbody>
+        </tbody></table>` : '<p class="empty">No sessions in the registry.</p>';
+
+    const editors = l.ide.length ? `<table><thead><tr><th>Editor</th><th class="num">PID</th><th>Folders</th></tr></thead><tbody>
               ${l.ide.map((i) => `<tr class="${i.alive ? '' : 'off'}"><td>${esc(i.name || '—')}</td>
                 <td class="num mono">${i.pid}</td><td class="dim">${esc(i.folders.join(', '))}</td></tr>`).join('')}
-            </tbody></table>` : '<p class="empty">No editor attached.</p>'}
-          </div>
-          <div><h2>Daemon workers</h2>
-            ${l.daemon.workers.length ? `<table><thead><tr><th>Worker</th><th>Project</th><th class="num">PID</th></tr></thead><tbody>
+            </tbody></table>` : '<p class="empty">No editor attached.</p>';
+
+    const workers = l.daemon.workers.length ? `<table><thead><tr><th>Worker</th><th>Project</th><th class="num">PID</th></tr></thead><tbody>
               ${l.daemon.workers.map((w) => `<tr class="${w.alive ? '' : 'off'}"><td class="mono">${esc(w.short)}</td>
                 <td class="dim">${esc(w.cwd)}</td><td class="num mono">${w.pid}</td></tr>`).join('')}
-            </tbody></table>` : '<p class="empty">The daemon is not running.</p>'}
-          </div>
+            </tbody></table>` : '<p class="empty">The daemon is not running.</p>';
+
+    return `<section class="tab" data-tab="live" hidden>
+        ${tiles(
+        tile('Live sessions', String(aliveSessions.length), stale ? `${plural(stale, 'stale entry', 'stale entries')}` : 'registry is clean'),
+        tile('Editors attached', String(l.ide.filter((i) => i.alive).length), plural(l.ide.length, 'lock file')),
+        tile('Daemon workers', String(l.daemon.workers.filter((w) => w.alive).length), l.daemon.alive ? `supervisor ${l.daemon.supervisorPid}` : 'supervisor not running'),
+    )}
+        ${panel('Sessions', sessionTable, {
+        flush: l.sessions.length > 0,
+        note: "Read at the moment the dashboard was opened: the session registry, the IDE windows attached to it, and the daemon's own workers. A registry entry whose process is gone is shown as stale rather than hidden — it is what a crashed session leaves.",
+    })}
+        <div class="pair">
+          ${panel('Editors', editors)}
+          ${panel('Daemon workers', workers)}
         </div>
     </section>`;
 }
@@ -1159,23 +1175,26 @@ function diskTab(sys) {
     const d = sys && sys.disk;
     if (!d) return '<section class="tab" data-tab="disk" hidden><p class="empty">Disk usage has not been measured yet — press Reindex.</p></section>';
     const kindLabel = { keep: 'keep', regenerable: 'regenerates', mixed: '' };
-    return `<section class="tab" data-tab="disk" hidden>
-        <p class="note">Everything under <code>~/.claude</code>. Nothing here is deleted by this extension and there is no button that would — the numbers are the point, the decision is yours.</p>
-        <div class="tiles">
-          ${tile('Total', bytes(d.total), '~/.claude')}
-          ${d.hogs.length ? tile('Leftovers', bytes(d.hogs.reduce((a, h) => a + h.bytes, 0)), `${plural(d.hogs.length, 'place')}, safe to remove`) : ''}
-        </div>
-        <h2>By directory</h2>
-        ${barList(d.dirs.map((x) => [x.name, x]), {
-        limit: 20, value: (x) => x.bytes,
-        label: (v, x) => `${bytes(v)}${kindLabel[x.kind] ? ` · ${kindLabel[x.kind]}` : ''}`,
-    })}
-        ${d.hogs.length ? `<h2>Named leftovers</h2>
-        <table><thead><tr><th>Path</th><th>What it is</th><th class="num">Size</th></tr></thead><tbody>
+    const junk = d.hogs.reduce((a, h) => a + h.bytes, 0);
+    const hogTable = `<table><thead><tr><th>Path</th><th>What it is</th><th class="num">Size</th></tr></thead><tbody>
           ${d.hogs.map((h) => `<tr><td class="mono">${esc(h.path)}</td><td class="dim">${esc(h.note)}</td>
             <td class="num">${esc(bytes(h.bytes))}</td></tr>`).join('')}
-        </tbody></table>
-        <p class="note">A job's <code>tmp</code> is the working directory of a background agent that has since finished; a <code>temp_subdir_*</code> clone is what an interrupted marketplace update left behind.</p>` : ''}
+        </tbody></table>`;
+
+    return `<section class="tab" data-tab="disk" hidden>
+        ${tiles(
+        tile('Total', bytes(d.total), '~/.claude'),
+        d.hogs.length ? tile('Leftovers', bytes(junk), `${plural(d.hogs.length, 'place')}, safe to remove`,
+            d.total > 0 ? Math.round((junk / d.total) * 100) : null, 'warm') : '',
+    )}
+        ${panel('By directory', barList(d.dirs.map((x) => [x.name, x]), {
+        limit: 20, value: (x) => x.bytes,
+        label: (v, x) => `${bytes(v)}${kindLabel[x.kind] ? ` · ${kindLabel[x.kind]}` : ''}`,
+    }), { note: 'Everything under <code>~/.claude</code>. Nothing here is deleted by this extension and there is no button that would — the numbers are the point, the decision is yours.' })}
+        ${d.hogs.length ? panel('Named leftovers', hogTable, {
+        flush: true,
+        note: "A job's <code>tmp</code> is the working directory of a background agent that has since finished; a <code>temp_subdir_*</code> clone is what an interrupted marketplace update left behind.",
+    }) : ''}
     </section>`;
 }
 
@@ -1189,18 +1208,17 @@ function contextTab(total, sys) {
     const lifetime = (perRequest * msgs) / 1e6 * 5;
 
     return `<section class="tab" data-tab="context" hidden>
-        <p class="note">Files that are loaded into the prompt of every session in scope. Sizes are exact; tokens are the size over four characters, which is close enough to compare paragraphs against each other.</p>
-        <div class="tiles">
-          ${tile('Global instructions', `~${tok(perRequest)}`, 'tokens in every request')}
-          ${tile('Across all requests', `~${fmtCost(lifetime)}`, `${plural(msgs, 'request')} at Opus input rates`)}
-          ${tile('Files', String(c.files.length), 'CLAUDE.md, rules, project memory')}
-        </div>
-        <h2>What is loaded</h2>
-        ${barList(c.files.map((f) => [f.path, f]), {
+        ${tiles(
+        tile('Global instructions', `~${tok(perRequest)}`, 'tokens in every request'),
+        tile('Across all requests', `~${fmtCost(lifetime)}`, `${plural(msgs, 'request')} at Opus input rates`),
+        tile('Files', String(c.files.length), 'CLAUDE.md, rules, project memory'),
+    )}
+        ${panel('What is loaded', barList(c.files.map((f) => [f.path, f]), {
         limit: 20, value: (f) => f.tokens,
         label: (v, f) => `~${tok(v)} · ${bytes(f.bytes)} · ${f.scope}`,
+    }) + '<p class="note">Cached, this is read at a tenth of the input rate — the figure above is the uncached case, which is what a fresh session pays.</p>', {
+        note: 'Files that are loaded into the prompt of every session in scope. Sizes are exact; tokens are the size over four characters, which is close enough to compare paragraphs against each other.',
     })}
-        <p class="note">Cached, this is read at a tenth of the input rate — the figure above is the uncached case, which is what a fresh session pays.</p>
     </section>`;
 }
 
@@ -1210,19 +1228,24 @@ function tasksTab(sys) {
     if (rows.length === 0) {
         return '<section class="tab" data-tab="tasks" hidden><p class="empty">No task lists recorded.</p></section>';
     }
-    return `<section class="tab" data-tab="tasks" hidden>
-        <p class="note">Todo lists left behind by sessions, newest first. An unfinished item here is work that was planned and never closed — the session may be long gone.</p>
-        <div class="tiles">
-          ${tile('Lists', String(rows.length), `${plural(open.length, 'list')} with something open`)}
-          ${tile('Open items', String(open.reduce((a, t) => a + t.open.length, 0)), 'across every session')}
-        </div>
-        <table><thead><tr><th class="nowrap">Last touched</th><th>Project</th><th class="opt">Session</th>
+    const table = `<table><thead><tr><th class="nowrap">Last touched</th><th>Project</th><th class="opt">Session</th>
           <th class="num">Done</th><th>Still open</th></tr></thead><tbody>
         ${rows.map((t) => `<tr><td class="nowrap">${esc(fmtDateTime(t.at))}</td>
           <td>${esc(t.project || '—')}</td><td class="mono opt">${esc(t.session.slice(0, 8))}</td>
           <td class="num">${t.done}/${t.total}</td>
           <td>${t.open.length ? esc(t.open.join(' · ')) : '<span class="dim">nothing</span>'}</td></tr>`).join('')}
-        </tbody></table>
+        </tbody></table>`;
+
+    return `<section class="tab" data-tab="tasks" hidden>
+        ${tiles(
+        tile('Lists', String(rows.length), `${plural(open.length, 'list')} with something open`,
+            rows.length > 0 ? Math.round((open.length / rows.length) * 100) : null, 'warm'),
+        tile('Open items', String(open.reduce((a, t) => a + t.open.length, 0)), 'across every session'),
+    )}
+        ${panel('Every list', table, {
+        flush: true,
+        note: 'Todo lists left behind by sessions, newest first. An unfinished item here is work that was planned and never closed — the session may be long gone.',
+    })}
     </section>`;
 }
 
@@ -1230,14 +1253,17 @@ function changelogTab(sys) {
     const releases = (sys && sys.changelog) || [];
     const v = (sys && sys.versions) || {};
     return `<section class="tab" data-tab="changelog" hidden>
-        <p class="note">The client's own changelog, which it already keeps in <code>~/.claude/cache</code>. Only releases newer than the one running are shown.</p>
-        <div class="tiles">
-          ${tile('Running', v.current || '—', v.waiting ? `${v.latest} is unpacked and waiting` : 'up to date')}
-          ${tile('Releases ahead', String(releases.length), releases.length ? 'not yet running' : 'nothing new')}
-        </div>
-        ${releases.length ? releases.map((r) => `<h2>${esc(r.version)}</h2>
-          <ul class="log">${r.entries.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`).join('')
-        : '<p class="empty">Nothing newer than the version already running.</p>'}
+        ${tiles(
+        tile('Running', v.current || '—', v.waiting ? `${v.latest} is unpacked and waiting` : 'up to date'),
+        tile('Releases ahead', String(releases.length), releases.length ? 'not yet running' : 'nothing new'),
+    )}
+        ${releases.length
+        // A release is a block of the page like any other, so each gets its own
+        // panel rather than a heading in one long scroll.
+        ? releases.map((r, i) => panel(r.version,
+            `<ul class="log">${r.entries.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`,
+            { note: i === 0 ? "The client's own changelog, which it already keeps in <code>~/.claude/cache</code>. Only releases newer than the one running are shown." : '' })).join('')
+        : panel('', '<p class="empty">Nothing newer than the version already running.</p>')}
     </section>`;
 }
 
@@ -1426,15 +1452,16 @@ function nowTab(sections, workflows, metrics) {
         <div class="cols">
           ${rows.map((section) => panel(section.title, statusBlocks(section.blocks), { id: section.id })).join('')}
         </div>
-        ${active.length ? `<h2>Running right now</h2>
-        <p class="note">One line per workflow still going. The full picture — phases, agents, what each was told and what it answered — is under Work → Agents &amp; workflows.</p>
-        <table><thead><tr><th>Run</th><th>Project</th><th class="num">Agents</th><th class="num">Elapsed</th><th class="num">Spend</th></tr></thead><tbody>
+        ${active.length ? panel('Running right now', `<table><thead><tr><th>Run</th><th>Project</th><th class="num">Agents</th><th class="num">Elapsed</th><th class="num">Spend</th></tr></thead><tbody>
         ${active.map((r) => `<tr><td class="wrap">${esc(r.name || r.runId)}</td>
           <td class="dim">${esc(r.project || '')}</td>
           <td class="num">${esc(String((r.totals && r.totals.done) ?? ''))}${r.agents ? `/${r.agents.length}` : ''}</td>
           <td class="num">${esc(r.elapsed || '')}</td>
           <td class="num">${esc(r.cost > 0 ? fmtCost(r.cost) : '')}</td></tr>`).join('')}
-        </tbody></table>` : ''}
+        </tbody></table>`, {
+        flush: true,
+        note: 'One line per workflow still going. The full picture — phases, agents, what each was told and what it answered — is under Work → Agents &amp; workflows.',
+    }) : ''}
     </section>`;
 }
 
@@ -1463,39 +1490,39 @@ function settingsTab(config) {
         <div class="seg-preview" data-preview="${i}">…</div>
       </li>`;
 
-    return `<section class="tab" data-tab="settings" hidden>
-        <p class="note">These are the extension's own settings — the same keys as in <code>settings.json</code>, written straight from here. The status bar updates as soon as you save; nothing needs a reload.</p>
-
-        <h2>Start from one of these</h2>
-        <p class="note">Each is a whole bar, not a fragment: picking one fills the editor below, where you can change it before saving. Nothing is written until you press Save.</p>
-        <div class="presets">
+    const presets = `<div class="presets">
           ${(cfg.presets || []).map((p) => `<button class="preset" data-preset="${esc(p.id)}">
             <span class="preset-name">${esc(p.name)}</span>
             <span class="preset-about">${esc(p.about)}</span>
             <span class="preset-preview" data-preset-preview="${esc(p.id)}">${p.segments.map((t) => `<span class="chip-seg">${esc(t)}</span>`).join('')}</span>
           </button>`).join('')}
-        </div>
+        </div>`;
 
-        <h2>Status bar</h2>
-        <p class="note">One line per status-bar item, left to right. Text outside <code>{…}</code> is yours; <code>[square brackets]</code> mark a group that disappears whole when a placeholder inside it has nothing to say. A segment with nothing to show hides itself.</p>
-        <ol class="segs" id="segs">${segments.map(row).join('')}</ol>
+    const editor = `<ol class="segs" id="segs">${segments.map(row).join('')}</ol>
         <div class="btns">
           <button class="btn" id="add">Add segment</button>
-        </div>
+        </div>`;
 
-        <h2>Placeholders</h2>
-        <p class="note">Click one to insert it into the segment you last edited. The value beside each name is what it says on this machine right now.</p>
-        <div class="palette">
+    const paletteHtml = `<div class="palette">
           ${Object.entries(byTopic).map(([topic, list]) => `<div class="pal-group">
             <h3>${esc(topic)}</h3>
             ${list.map((f) => `<button class="chip-btn" data-insert="{${esc(f.name)}}" title="${esc(f.doc)}">
               <code>{${esc(f.name)}}</code><span class="pal-val">${f.value ? esc(f.value) : '—'}</span>
             </button>`).join('')}
           </div>`).join('')}
-        </div>
+        </div>`;
 
-        <h2>Behaviour</h2>
-        <table class="kv form">
+    return `<section class="tab" data-tab="settings" hidden>
+        ${panel('Start from one of these', presets, {
+        note: "These are the extension's own settings — the same keys as in <code>settings.json</code>, written straight from here. Each preset below is a whole bar, not a fragment: picking one fills the editor, where you can change it before saving. Nothing is written until you press Save, and nothing needs a reload.",
+    })}
+        ${panel('Status bar', editor, {
+        note: 'One line per status-bar item, left to right. Text outside <code>{…}</code> is yours; <code>[square brackets]</code> mark a group that disappears whole when a placeholder inside it has nothing to say. A segment with nothing to show hides itself.',
+    })}
+        ${panel('Placeholders', paletteHtml, {
+        note: 'Click one to insert it into the segment you last edited. The value beside each name is what it says on this machine right now.',
+    })}
+        ${panel('Behaviour', `<table class="kv form">
           <tbody>
             <tr><th scope="row"><label for="alignment">Side of the bar</label></th>
               <td><select id="alignment">
@@ -1521,7 +1548,7 @@ function settingsTab(config) {
         <div class="btns">
           <button class="btn primary" id="save">Save</button>
           <span class="saved" id="saved" hidden>Saved</span>
-        </div>
+        </div>`)}
     </section>`;
 }
 
@@ -1725,6 +1752,10 @@ code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity
   font-weight: 500; opacity: .75; white-space: nowrap; width: 1%; padding-right: 14px; }
 .kv td { font-variant-numeric: tabular-nums; }
 .kv td:last-child { text-align: right; white-space: nowrap; }
+/* The settings form reuses .kv for its layout, but its last column is a
+   sentence, not a figure — kept on one line it was what pushed the tab past a
+   narrow window. */
+.kv.form td:last-child { text-align: left; white-space: normal; }
 .ok { color: hsl(145 45% 55%); font-size: 11px; }
 .idle { color: hsl(35 72% 58%); font-size: 11px; }
 tr.off { opacity: .45; }
