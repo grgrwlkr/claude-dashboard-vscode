@@ -746,6 +746,10 @@ async function showDashboard(context, { force = false } = {}) {
         history: hist.readHistory(storageDir),
         system: systemSnapshot(context.claudeState, index, { force }),
         config: configView(context.claudeState),
+        // Read from the state the ticks fill rather than scanned here: the panel
+        // and the tree then show one reading of the machine, and opening the
+        // dashboard does not pay for a second walk of every project directory.
+        workflows: (context.claudeState && context.claudeState.workflows) || [],
     });
 
     if (!panel) {

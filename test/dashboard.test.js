@@ -370,6 +370,106 @@ function labOf(h, s, l) {
     return [116 * f(Y) - 16, 500 * (f(X / 0.95047) - f(Y)), 200 * (f(Y) - f(Z / 1.08883))];
 }
 
+function demoAgent(over = {}) {
+    return {
+        agentId: 'a1', label: 'review:bugs', phase: 'Review', model: 'claude-opus-5',
+        state: 'done', tokens: 300000, reportedTokens: 120000, cost: 3, toolCalls: 12,
+        durationMs: 90000, promptPreview: 'найди баги', resultPreview: '{"findings":[]}',
+        lastToolName: 'Grep', agentType: '', lastActivity: 1,
+        ...over,
+    };
+}
+
+function demoRun(over = {}) {
+    return {
+        runId: 'wf_demo-1', name: 'review-changes', state: 'finished', status: 'completed',
+        project: 'demo', lastActivity: Date.parse('2026-08-09T10:00:00Z'), durationMs: 181000,
+        phases: [{ title: 'Review', detail: '' }, { title: 'Verify', detail: '' }],
+        totals: { agents: 1, reported: 0, cost: 3.5, tokens: 400000, unlisted: 0, done: 1 },
+        agents: [demoAgent()],
+        ...over,
+    };
+}
+
+test('the workflow table names the run, its status and its phases', () => {
+    const runs = [demoRun()];
+    const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0, workflows: runs });
+
+    assert.match(html, /review-changes/);
+    assert.match(html, /completed/);
+    assert.match(html, /Review/);
+    assert.match(html, /review:bugs/);
+    assert.match(html, /найди баги/);
+});
+
+test('workflow text from another program is escaped', () => {
+    const runs = [demoRun({
+        runId: 'wf_evil-1', name: '<img src=x onerror=alert(1)>', phases: [],
+        agents: [demoAgent({
+            label: '<script>bad()</script>', phase: '', promptPreview: '<b>x</b>',
+            resultPreview: '<i>y</i>', lastToolName: '<u>t</u>',
+        })],
+    })];
+    const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0, workflows: runs });
+
+    assert.doesNotMatch(html, /<script>bad\(\)<\/script>/);
+    assert.doesNotMatch(html, /<img src=x onerror/);
+    assert.match(html, /&lt;script&gt;/);
+});
+
+test('the tab still renders with no workflow data at all', () => {
+    const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0 });
+    assert.match(html, /data-tab="agents"/);
+});
+
+// A list of 13 rows under a heading of 74 says the run finished everything it
+// started. The client's own counter is the only place that gap is recorded.
+test('the run row shows the client count when it disagrees with the list', () => {
+    const total = ix.summarize(demoIndex());
+    const html = db.agentsTab(total, [demoRun({
+        status: 'killed',
+        totals: { agents: 1, reported: 74, cost: 1, tokens: 0, unlisted: 0, done: 1 },
+    })]);
+    assert.match(html, /1 of 74/);
+});
+
+// A run's price is the sum over the agents it lists, and its directory can hold
+// transcripts no snapshot names — on one run here that is $88.45 beside $107.65.
+test('money no snapshot accounts for is shown beside the price of the run', () => {
+    const total = ix.summarize(demoIndex());
+    const html = db.agentsTab(total, [demoRun({
+        totals: { agents: 1, reported: 0, cost: 107.65, tokens: 0, unlisted: 88.45, done: 1 },
+    })]);
+    assert.match(html, /\$107\.65/);
+    assert.match(html, /\$88\.45/);
+});
+
+// Read through outcomeOf and never off the raw word: the client writes `error`
+// and never `failed`, and an agent of a killed run stays recorded as working.
+test('an agent the run was cut from under is drawn neither done nor running', () => {
+    const total = ix.summarize(demoIndex());
+    const html = db.agentsTab(total, [demoRun({
+        status: 'killed',
+        agents: [
+            demoAgent({ agentId: 'a1', state: 'progress' }),
+            demoAgent({ agentId: 'a2', state: 'error' }),
+            demoAgent({ agentId: 'a3', state: 'done' }),
+        ],
+    })]);
+    assert.match(html, /o-stopped/);
+    assert.match(html, /o-failed/);
+    assert.match(html, /o-done/);
+    assert.doesNotMatch(html, /o-running/);
+});
+
+test('a run record with none of its optional halves still draws a row', () => {
+    const total = ix.summarize(demoIndex());
+    const html = db.agentsTab(total, [{ runId: 'wf_bare-1', state: 'abandoned', project: 'demo' }]);
+    assert.match(html, /wf_bare-1/);
+    assert.match(html, /no snapshot/);
+    assert.ok(!/undefined|NaN/.test(html));
+});
+
 test('every pair of model colours stays perceptually distinct', () => {
     const rows = Array.from({ length: 9 }, (_, i) => [`m${i}`, bucket(9 - i)]);
     const html = db.barList(rows, { limit: 9 });

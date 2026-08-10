@@ -11,6 +11,7 @@
 const { fmtCost } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
+const wfm = require('./workflows');
 
 const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -382,28 +383,103 @@ function breakdownTab(name, title, entries, note) {
     </section>`;
 }
 
-function agentsTab(total) {
+// The run's own word for how it ended, or none at all: a snapshot that carried
+// no status gets no verdict invented for it. The colour follows the reading the
+// tree's icons already use — "completed" is what a clean run writes, so every
+// other word is drawn as a failure rather than trusted.
+const RUN_WORD = { running: 'running', abandoned: 'no snapshot' };
+
+function runStatus(run) {
+    if (run.state !== 'finished') {
+        return { word: RUN_WORD[run.state] || '', cls: run.state === 'running' ? 'running' : 'stopped' };
+    }
+    return { word: run.status || '', cls: run.status === 'completed' ? 'done' : 'failed' };
+}
+
+/**
+ * One agent as a row that opens. The state is read through `outcomeOf` and never
+ * off the raw word: the client writes `error` and has never written `failed`,
+ * and an agent of a run that was killed stays recorded as working forever — both
+ * would otherwise be drawn as finished work.
+ *
+ * The previews are prose from another program's file, capped at 400 characters
+ * by workflows.js, so they go through `esc()` like every other borrowed string.
+ */
+function agentCard(agent, run) {
+    const outcome = wfm.outcomeOf(agent.state, run.state);
+    const facts = [
+        agent.model ? shortModel(agent.model) : '',
+        agent.tokens ? `~${tok(agent.tokens)}` : '',
+        agent.cost ? `~${fmtCost(agent.cost)}` : '',
+        agent.toolCalls ? `${agent.toolCalls} tool call${agent.toolCalls === 1 ? '' : 's'}` : '',
+        agent.durationMs ? fmtDur(agent.durationMs) : '',
+        agent.lastToolName ? `last: ${agent.lastToolName}` : '',
+    ].filter(Boolean).join(' · ');
+
+    return `<details class="agent"><summary><span class="kind o-${outcome}">${esc(outcome)}</span>
+        ${esc(agent.label || agent.agentId)} <span class="dim">${esc(facts)}</span></summary>
+        ${agent.promptPreview ? `<p class="prompt">${esc(agent.promptPreview)}</p>` : ''}
+        ${agent.resultPreview ? `<pre class="result">${esc(agent.resultPreview)}</pre>` : ''}
+      </details>`;
+}
+
+// How many agents the row stands for. The client's own counter is shown only
+// where it exceeds the list underneath — on one killed run here it read 74
+// against 13 usable entries, and 13 rows under a heading of 74 would say the run
+// finished everything it started. A run still going has no count of its own yet,
+// so it says how many of its agents have settled instead.
+function agentCount(run) {
+    const totals = run.totals || {};
+    const listed = (run.agents || []).length;
+    if (totals.reported > listed) return `${listed} of ${totals.reported}`;
+    if (run.state === 'running') return `${totals.done || 0}/${totals.agents || listed}`;
+    return String(totals.agents || listed);
+}
+
+// A hundred runs is already more history than a table is read for, and each row
+// carries its agents underneath it.
+const RUN_LIMIT = 100;
+
+function runRows(runs) {
+    return [...runs].sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
+        .slice(0, RUN_LIMIT).map((run) => {
+            const totals = run.totals || {};
+            const agents = run.agents || [];
+            const status = runStatus(run);
+            const phases = (run.phases || []).map((p) => p.title).join(' → ');
+            // An agent list of its own row rather than of a cell: the agents are
+            // the answer to "what did this run actually do", and folding a
+            // hundred of them into the last column would leave the table
+            // unreadable for the ninety-nine runs nobody is looking at.
+            const detail = agents.length ? `<tr class="detail"><td colspan="8">
+            <details class="agents"><summary>${agents.length} agent${agents.length === 1 ? '' : 's'}</summary>
+              ${agents.map((agent) => agentCard(agent, run)).join('')}
+            </details></td></tr>` : '';
+
+            return `<tr><td class="nowrap">${esc(fmtDateTime(run.lastActivity))}</td>
+            <td class="opt">${esc(run.project)}</td>
+            <td class="wrap" title="${esc(run.runId)}">${esc(run.name || run.runId)}</td>
+            <td>${status.word ? `<span class="kind o-${status.cls}">${esc(status.word)}</span>` : '<span class="dim">—</span>'}</td>
+            <td class="opt2">${esc(phases)}</td>
+            <td class="num">${esc(agentCount(run))}</td>
+            <td class="num opt2">${run.durationMs ? esc(fmtDur(run.durationMs)) : '—'}</td>
+            <td class="num">${totals.cost ? esc(`~${fmtCost(totals.cost)}`) : '—'}${totals.unlisted
+                ? ` <span class="dim" title="Spent in this run's directory by transcripts no snapshot lists">+~${esc(fmtCost(totals.unlisted))}</span>`
+                : ''}</td></tr>${detail}`;
+        }).join('');
+}
+
+function agentsTab(total, runs = []) {
     const agents = total.sessions.filter((s) => s.kind === 'agent');
     const wf = total.sessions.filter((s) => s.kind === 'workflow');
     const main = total.sessions.filter((s) => s.kind === 'main');
     const sum = (rows) => rows.reduce((a, r) => a + r.cost, 0);
 
-    // Group workflow agents by their workflow id: one workflow run is the unit
-    // worth looking at, not each of its agents.
-    const byWorkflow = {};
-    for (const row of wf) {
-        const w = byWorkflow[row.workflowId] || (byWorkflow[row.workflowId] = {
-            cost: 0, msgs: 0, agents: 0, end: 0, project: row.project,
-        });
-        w.cost += row.cost;
-        w.msgs += row.msgs;
-        w.agents++;
-        w.end = Math.max(w.end, row.end);
-    }
-    const wfRows = Object.entries(byWorkflow).sort((a, b) => b[1].end - a[1].end).slice(0, 100)
-        .map(([id, w]) => `<tr><td class="nowrap">${esc(fmtDateTime(w.end))}</td><td class="opt">${esc(w.project)}</td>
-            <td class="mono">${esc(id)}</td><td class="num">${w.agents}</td>
-            <td class="num opt2">${w.msgs}</td><td class="num">${esc(fmtCost(w.cost))}</td></tr>`).join('');
+    // How many agents each run dispatched, counted by workflow id off the
+    // transcripts rather than off the snapshots: a fan-out figure is about what
+    // was actually written, and this answers for runs whose snapshot is gone.
+    const perWorkflow = {};
+    for (const row of wf) perWorkflow[row.workflowId] = (perWorkflow[row.workflowId] || 0) + 1;
 
     const totalCost = sum(main) + sum(agents) + sum(wf);
 
@@ -415,7 +491,7 @@ function agentsTab(total) {
         ['subagent', quantiles(agents.map((s) => s.out))],
         ['workflow agent', quantiles(wf.map((s) => s.out))],
     ].filter(([, q]) => q);
-    const perRun = quantiles(Object.values(byWorkflow).map((w) => w.agents));
+    const perRun = quantiles(Object.values(perWorkflow));
 
     return `<section class="tab" data-tab="agents" hidden>
         <p class="note">Subagents and workflows write their own transcripts, so this spend is invisible in the terminal statusline — it belongs to no single session there.</p>
@@ -434,9 +510,11 @@ function agentsTab(total) {
         </tbody></table>
         <p class="note">Multiply the median by the fleet size for the usual case, and the p90 for the bad one.</p>` : ''}
         <h2>Workflow runs</h2>
-        ${wfRows ? `<table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
-          <th class="num">Agents</th><th class="num opt2">Requests</th><th class="num">Spend</th></tr></thead>
-          <tbody>${wfRows}</tbody></table>` : '<p class="empty">No workflow runs recorded.</p>'}
+        ${runs.length ? `<p class="note">Newest first, capped at ${RUN_LIMIT} rows of ${runs.length}. Each run as its own snapshot describes it — the name, how it ended, the phases it was written in. A run still going has written no snapshot yet, so its row comes from the journal and carries no verdict. Open one to see its agents: what each was told, what it answered and what it cost. A run's price is the sum over the agents its snapshot lists; money spent in the same directory by transcripts no snapshot names is added beside that figure rather than folded into it.</p>
+        <table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
+          <th>Status</th><th class="opt2">Phases</th><th class="num">Agents</th>
+          <th class="num opt2">Duration</th><th class="num">Spend</th></tr></thead>
+          <tbody>${runRows(runs)}</tbody></table>` : '<p class="empty">No workflow runs recorded.</p>'}
     </section>`;
 }
 
@@ -1243,6 +1321,27 @@ tbody tr:hover { background: var(--vscode-list-hoverBackground); }
 .mono { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .75; }
 .kind { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--vscode-editorWidget-background); opacity: .85; }
 .k-workflow { color: hsl(265 60% 65%); } .k-agent { color: hsl(200 60% 60%); } .k-main { color: hsl(145 45% 55%); }
+/* How an agent ended, in the five words outcomeOf answers with. A stopped agent
+   takes the colour of an idle thing rather than of a failure: nothing crashed
+   there, the run was cut from outside and the agent never got to finish. */
+.o-done { color: hsl(145 45% 55%); }
+.o-running { color: hsl(200 60% 60%); }
+.o-failed { color: hsl(0 60% 62%); }
+.o-stopped { color: hsl(35 72% 58%); }
+.o-unknown { opacity: .55; }
+/* The agents of a run, opened from the row above them. <details> rather than a
+   handler in SCRIPT: this is the one part of the page that would otherwise need
+   its own script, and a table of two thousand agents that stops opening when the
+   script does is worse than one the browser opens by itself. */
+tr.detail td { padding-top: 0; }
+.agents > summary { cursor: pointer; opacity: .6; font-size: 11px; padding: 2px 0; }
+.agent { margin-left: 14px; }
+.agent > summary { cursor: pointer; padding: 2px 0; }
+.prompt { margin: 4px 0 4px 16px; opacity: .8; max-width: 100ch; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.result { margin: 4px 0 10px 16px; padding: 6px 8px; border-radius: 4px; max-width: 100ch;
+  background: var(--vscode-editorWidget-background); font-family: var(--vscode-editor-font-family);
+  font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cloud { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; max-width: 90ch; line-height: 1.7; }
 .word { opacity: .8; }
 .dim { opacity: .45; }
@@ -1585,7 +1684,7 @@ ${overviewTab(total, dayModels, modelOrder)}
 ${sessionsTab(total)}
 ${breakdownTab('projects', 'Spend by project', projects, 'Grouped by the repository a session ran in.')}
 ${breakdownTab('branches', 'Spend by git branch', branches, 'The branch recorded on each request, so long-lived branches accumulate across sessions.')}
-${agentsTab(total)}
+${agentsTab(total, meta.workflows || [])}
 ${toolsTab(total)}
 ${filesTab(total, meta.system)}
 ${breakdownTab('skills', 'Spend by skill', skills, 'Requests made while a skill was driving, attributed by the attributionSkill field the transcript records.')}
@@ -1610,7 +1709,7 @@ module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, SECTIONS, CACHE_PARTS,
-    healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
+    agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
     limitsTab, weekLabel,
     shortModel, tok, bytes, fmtDur, esc,
 };
