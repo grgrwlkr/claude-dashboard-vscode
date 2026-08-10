@@ -180,14 +180,8 @@ function contextOf(record) {
         effort: record.effort || '',
         advisor: record.advisorModel || '',
         branch: record.gitBranch || '',
-        thinking: hasThinking(record),
         at: Date.parse(record.timestamp) || 0,
     };
-}
-
-function hasThinking(record) {
-    const content = record.message.content;
-    return Array.isArray(content) && content.some((b) => b && b.type === 'thinking');
 }
 
 // Everything that needs the whole transcript is computed in a single pass: cost,
@@ -391,13 +385,25 @@ function settingsOf(workspace) {
         path.join(HOME, '.claude', 'settings.local.json'),
         path.join(HOME, '.claude', 'settings.json'),
     ];
-    const out = { outputStyle: '', advisor: '', model: '' };
+    const out = { outputStyle: '', advisor: '', model: '', thinking: true, thinkingSummaries: true };
+    // `||` cannot resolve the two booleans: false is a real answer there, and
+    // the first file that states one wins, exactly as the client resolves them.
+    let seenThinking = false;
+    let seenSummaries = false;
     for (const file of files) {
         const cfg = readJson(file);
         if (!cfg) continue;
         if (!out.outputStyle && cfg.outputStyle) out.outputStyle = cfg.outputStyle;
         if (!out.advisor && cfg.advisorModel) out.advisor = cfg.advisorModel;
         if (!out.model && cfg.model) out.model = cfg.model;
+        if (!seenThinking && cfg.alwaysThinkingEnabled !== undefined && cfg.alwaysThinkingEnabled !== null) {
+            out.thinking = cfg.alwaysThinkingEnabled !== false;
+            seenThinking = true;
+        }
+        if (!seenSummaries && cfg.showThinkingSummaries !== undefined && cfg.showThinkingSummaries !== null) {
+            out.thinkingSummaries = cfg.showThinkingSummaries !== false;
+            seenSummaries = true;
+        }
     }
     return out;
 }

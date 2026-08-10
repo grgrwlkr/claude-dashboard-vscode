@@ -2,7 +2,7 @@
   "name": "claude-statusline",
   "displayName": "Claude Statusline",
   "description": "Claude Code limits, session context, spend and a usage dashboard in VS Code",
-  "version": "0.10.1",
+  "version": "0.15.1",
   "publisher": "x",
   "private": true,
   "license": "MIT",
@@ -104,7 +104,7 @@
             "type": "string"
           },
           "default": [
-            "✻ 7d {weekly} {weeklyBar}[ dry {dry}]",
+            "✻ 7d {weekly}[ {drift}] {weeklyBar}[ dry {dry}]",
             "▤ {ctx} {ctxTokens}/{ctxWindow}",
             "[~{cost}][ {burn}/h]",
             "[⧉ {peers}][ ▸ {todo}]",

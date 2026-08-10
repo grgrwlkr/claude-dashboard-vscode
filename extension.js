@@ -66,7 +66,7 @@ function limitsTooltip(lim, pc, now, stale) {
         // Pace as its own section: spend against plan is a comparison, and a
         // comparison squeezed into a row label is the thing that was hard to read.
         const diff = lim.weekly.pct - pc.plan;
-        const verdict = diff > 0 ? `${diff} pp ahead of plan` : diff < 0 ? `${-diff} pp under plan` : 'exactly on plan';
+        const verdict = diff > 0 ? `${diff}% ahead of plan` : diff < 0 ? `${-diff}% under plan` : 'exactly on plan';
         md.appendMarkdown(`\n**Pace** — ${lim.weekly.pct}% spent, ${pc.plan}% of the window elapsed: ${verdict}\n`);
 
         // The forecast is stated even when it lands past the reset. "You will not
@@ -103,7 +103,14 @@ function contextTooltip(state) {
     const advisor = ctx.advisor || settings.advisor;
     const model = [];
     if (ctx.effort) model.push(['effort', ctx.effort]);
-    model.push(['thinking', ctx.thinking ? 'on' : 'off']);
+    // The setting, not the last reply. Reading it off the last record said
+    // "off" for every answer that happened to be a tool call — which is most of
+    // them in agentic work, while the model was thinking the whole time.
+    // Summaries being hidden is worth saying: with them off the reasoning still
+    // happens and simply never appears, in this tooltip or anywhere else.
+    model.push(['thinking', settings.thinking
+        ? (settings.thinkingSummaries ? 'on' : 'on · summaries hidden')
+        : 'off']);
     if (advisor) model.push(['advisor', short(advisor)]);
     if (settings.outputStyle) model.push(['output style', settings.outputStyle]);
     md.appendMarkdown(table(model));
@@ -114,7 +121,7 @@ function contextTooltip(state) {
     if (ctx.cachePct >= 0) fill.push(['from cache', `${ctx.cachePct}%`]);
     if (state.compactPct > 0) {
         const left = state.compactPct - ctx.pct;
-        fill.push(['auto-compact', left > 0 ? `at ${state.compactPct}% — ${left} pp away` : `at ${state.compactPct}% — due`]);
+        fill.push(['auto-compact', left > 0 ? `at ${state.compactPct}% — ${left}% away` : `at ${state.compactPct}% — due`]);
     }
     md.appendMarkdown(`\n**Context**\n\n${table(fill)}`);
 
@@ -409,7 +416,7 @@ function render(state) {
 // Fields whose value comes out of the single expensive pass over the whole
 // transcript, and the context fields that come from its tail.
 const MONEY_FIELDS = ['cost', 'burn', 'requests', 'duration', 'apiShare', 'added', 'removed'];
-const CONTEXT_FIELDS = ['ctx', 'ctxTokens', 'ctxWindow', 'ctxCache', 'model', 'effort', 'thinking', 'branch', 'compact'];
+const CONTEXT_FIELDS = ['ctx', 'ctxTokens', 'ctxWindow', 'ctxCache', 'model', 'effort', 'branch', 'compact'];
 
 // Everything cheap enough for the ten-second tick: the transcript tail, and the
 // two registry reads behind peers and the task list.
@@ -648,6 +655,13 @@ function refreshSession(state) {
 // stacking copies of a page that costs a full index read to build.
 let panel = null;
 
+// The live state of the bar, kept here rather than parked on the ExtensionContext
+// the commands are handed. The dashboard and the settings tab read every number
+// through this: hanging it off an object the editor owns worked in tests and
+// silently produced an empty page in the editor itself, where the palette and
+// every preview came back blank while the bar beside them was full of numbers.
+let barState = null;
+
 // Indexing a gigabyte of transcripts takes seconds on the first run, so it
 // happens inside a progress notification the user can watch — and reuses the
 // stored fingerprints on every run after that.
@@ -663,6 +677,10 @@ async function buildIndex(storageDir, { force = false } = {}) {
             // setImmediate lets the notification paint before the synchronous
             // read begins; without it the first run looks like a frozen window.
             setImmediate(() => resolve(ix.refreshIndex(storageDir, {
+                // Same escape hatch the workflow collector uses: without it a
+                // test that opens the dashboard reads every transcript on the
+                // machine, including those of sessions running right now.
+                root: process.env.CLAUDE_STATUSLINE_PROJECTS || ix.PROJECTS,
                 onProgress: (done, total) => {
                     const p = Math.floor((done / total) * 100);
                     if (p > lastPct) { progress.report({ increment: p - lastPct, message: `${done}/${total}` }); lastPct = p; }
@@ -712,7 +730,7 @@ function systemSnapshot(state, index, { force = false } = {}) {
 /**
  * What the settings tab needs: the values in force, and every placeholder with
  * what it says right now. The palette is only useful with live values next to
- * it — a name means little until you see that `{drift}` currently reads "-7pp".
+ * it — a name means little until you see that `{drift}` currently reads "-7%".
  */
 function configView(state) {
     const cfg = vscode.workspace.getConfiguration('claudeStatusline');
@@ -726,6 +744,7 @@ function configView(state) {
     return {
         segments: (state && state.segments) || cfg.get('segments') || seg.DEFAULT_SEGMENTS,
         defaults: seg.DEFAULT_SEGMENTS,
+        presets: seg.PRESETS,
         alignment: cfg.get('alignment'),
         priority: cfg.get('priority'),
         refreshInterval: cfg.get('refreshInterval'),
@@ -737,26 +756,50 @@ function configView(state) {
 // four keys are ever written, and only into the scope the form asked for.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval'];
 
+// One template against the data the bar is holding at this moment, rendered by
+// the same code that draws the bar — so a preview cannot disagree with what
+// appears after saving. A hidden segment comes back empty, which is what tells
+// the editor to say so.
+function renderFor(state, template) {
+    const out = seg.renderSegment(
+        String(template),
+        state ? state.data : {},
+        state ? state.registry : seg.fields({}),
+    );
+    return out.visible ? out.text : '';
+}
+
 async function handleMessage(context, msg) {
-    const state = context.claudeState;
+    const state = barState;
     if (!msg || !panel) return;
 
     if (msg.type === 'refresh') { showDashboard(context, { force: false }); return; }
 
     if (msg.type === 'preview') {
-        // Rendered by the same code that draws the bar, against the data the
-        // bar is holding at this moment — so the preview cannot disagree with
-        // what appears after saving.
-        const previews = (msg.segments || []).map((template) => {
-            const out = seg.renderSegment(String(template), state ? state.data : {}, state ? state.registry : seg.fields({}));
-            return { text: out.visible ? out.text : '' };
-        });
+        const previews = (msg.segments || []).map((template) => ({ text: renderFor(state, template) }));
         panel.webview.postMessage({ type: 'preview', previews });
         return;
     }
 
     if (msg.type === 'defaults') {
         panel.webview.postMessage({ type: 'defaults', segments: seg.DEFAULT_SEGMENTS });
+        return;
+    }
+
+    if (msg.type === 'preset') {
+        const preset = seg.PRESETS.find((p) => p.id === msg.id);
+        // Delivered as `defaults`, because that is exactly what it is to the
+        // editor: replace what is in the fields with this list.
+        if (preset) panel.webview.postMessage({ type: 'defaults', segments: preset.segments });
+        return;
+    }
+
+    if (msg.type === 'presetPreviews') {
+        const previews = {};
+        for (const preset of seg.PRESETS) {
+            previews[preset.id] = preset.segments.map((template) => renderFor(state, template));
+        }
+        panel.webview.postMessage({ type: 'presetPreviews', previews });
         return;
     }
 
@@ -784,12 +827,12 @@ async function showDashboard(context, { force = false } = {}) {
         files: stats.total,
         lastRun: Date.now(),
         history: hist.readHistory(storageDir),
-        system: systemSnapshot(context.claudeState, index, { force }),
-        config: configView(context.claudeState),
+        system: systemSnapshot(barState, index, { force }),
+        config: configView(barState),
         // Read from the state the ticks fill rather than scanned here: the panel
         // and the tree then show one reading of the machine, and opening the
         // dashboard does not pay for a second walk of every project directory.
-        workflows: (context.claudeState && context.claudeState.workflows) || [],
+        workflows: (barState && barState.workflows) || [],
     });
 
     if (!panel) {
@@ -886,9 +929,9 @@ function activate(context) {
         // Everything the templates read, refilled by the two collectors.
         data: { now: 0, scoped: [], bar: '', machine: null },
     };
-    // The dashboard is opened from a command, which is handed the extension
-    // context rather than this state; parking it here keeps the workspace
-    // available there without a second module-level variable.
+    barState = state;
+    // Kept on the context too, purely so a test can reach the state it just
+    // activated; nothing in the extension reads it from there.
     context.claudeState = state;
 
     applyConfig(state);

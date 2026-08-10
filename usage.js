@@ -138,13 +138,20 @@ const sameDay = (a, b) => a.getFullYear() === b.getFullYear()
     && a.getMonth() === b.getMonth()
     && a.getDate() === b.getDate();
 
+// Every date carries its weekday. A limit that resets on "13.08" says nothing
+// about whether that is tomorrow or the far side of a weekend; "Thu 13.08"
+// answers it without arithmetic. Today keeps only its clock time — the weekday
+// of today is not news.
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayLabel = (d) => `${WEEKDAYS[d.getDay()]} ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}`;
+
 // Hours, not HH:MM. percent arrives as an integer and the forecast scales with
 // (100-p)/p, so a single unit of rounding moves the answer by hours. The tilde
 // says exactly that.
 function fmtDry(ts, nowMs = Date.now()) {
     const d = new Date(ts * 1000);
     const hour = `~${pad2(d.getHours())}h`;
-    return sameDay(d, new Date(nowMs)) ? hour : `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${hour}`;
+    return sameDay(d, new Date(nowMs)) ? hour : `${dayLabel(d)} ${hour}`;
 }
 
 function fmtLeft(ts, now) {
@@ -162,16 +169,14 @@ function fmtAbs(ts, nowMs = Date.now()) {
     if (!ts) return '—';
     const d = new Date(ts * 1000);
     const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-    return sameDay(d, new Date(nowMs)) ? hm : `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${hm}`;
+    return sameDay(d, new Date(nowMs)) ? hm : `${dayLabel(d)} ${hm}`;
 }
 
-// Weekday plus date and hour. A forecast four days out is unreadable as a bare
-// number — "Sat 15.08" answers "when is that" without arithmetic.
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// The forecast reads as a sentence, so its date takes a comma before the hour.
 function fmtWhen(ts) {
     if (!ts) return '—';
     const d = new Date(ts * 1000);
-    return `${WEEKDAYS[d.getDay()]} ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}, ~${pad2(d.getHours())}h`;
+    return `${dayLabel(d)}, ~${pad2(d.getHours())}h`;
 }
 
 // Fact and plan in one bar: cells beyond the plan are spend ahead of schedule.
@@ -198,5 +203,5 @@ function barText(weekly, pc, nowMs = Date.now()) {
 module.exports = {
     CACHE, STAMP, WEEK, STAMP_TTL, CACHE_TTL, BAR_WIDTH,
     mtime, parseToken, readToken, refreshUsage, touchStamp, stampExpired, readCache,
-    isoToTs, limitsOf, pace, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText,
+    isoToTs, limitsOf, pace, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText, dayLabel, WEEKDAYS,
 };

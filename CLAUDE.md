@@ -21,6 +21,14 @@ by `node --test`. Bump `version` in `package.json` on every rebuild: a same-vers
 the old code live in the extension host. Reloading the window is the user's action, never yours —
 other Claude sessions may be alive in it.
 
+**A version bump is a commit.** Raising `version` in `package.json` — by any amount, for any reason —
+means committing the working tree in the same step, with that version in the message trailer
+(`chore(release): 0.15.1` or the feature commit that carried it). The installed `.vsix` is built from
+the working tree, so a bumped-but-uncommitted tree means the editor is running code that exists
+nowhere in git: nothing can be reverted to it, diffed against it, or explained by it. Installing
+without committing is how a dozen versions ended up as one uncommitted pile. Package, install, commit
+— in that order, without waiting to be asked.
+
 ## Architecture
 
 `extension.js` is the **only** module allowed to `require('vscode')`. `usage.js`, `session.js`,

@@ -26,6 +26,13 @@ const tok = (n) => {
 
 const pct = (part, whole) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : '—');
 
+/**
+ * A count with the noun that fits it. Both forms are spelled out rather than
+ * appending an "s", because half the nouns counted here do not take one:
+ * copies, entries, places. One job read as "1 jobs" until this existed.
+ */
+const plural = (n, one, many = `${one}s`) => `${n} ${Math.abs(n) === 1 ? one : many}`;
+
 function fmtDur(ms) {
     if (!(ms > 0)) return '—';
     const m = Math.round(ms / 60000);
@@ -36,11 +43,15 @@ function fmtDur(ms) {
 
 const fmtDay = (key) => key.slice(5).replace('-', '.');
 
+// Weekdays come from usage.js so the tooltips and these tables name a day the
+// same way; nothing else of that module is used here.
+const { WEEKDAYS } = require('./usage');
+
 function fmtDateTime(ms) {
     if (!ms) return '—';
     const d = new Date(ms);
     const p = (n) => String(n).padStart(2, '0');
-    return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${WEEKDAYS[d.getDay()]} ${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // Short model label: "claude-opus-5" → "opus 5". Full ids are noise in a table.
@@ -120,9 +131,13 @@ function heatmap(days, { weeks = 27, cell = 12 } = {}) {
     const max = Math.max(...keys.map((k) => days[k].cost));
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    // Start on the Sunday that begins the first visible week.
+    // Start on the Sunday that begins the first visible week, counting whole
+    // weeks back from the one today sits in — so the last column is the current
+    // week and today always has a cell. Counting back a fixed number of days
+    // instead ended the grid on the most recent Sunday, which silently dropped
+    // Monday through Saturday of the week in progress.
     const start = new Date(today);
-    start.setDate(start.getDate() - (weeks * 7 - 1) - today.getDay());
+    start.setDate(start.getDate() - today.getDay() - (weeks - 1) * 7);
 
     let cells = '';
     let months = '';
@@ -322,7 +337,7 @@ function statCards(total) {
         + card('Last 30 days', fmtCost(last30), '')
         + card('Last 7 days', fmtCost(last7), '')
         + card('Latest day', todayKey ? fmtCost(total.days[todayKey].cost) : '$0', todayKey || '')
-        + card('Requests', String(msgs), `${total.sessions.length} sessions`)
+        + card('Requests', String(msgs), plural(total.sessions.length, 'session'))
         + card('Served from cache', pct(cacheRead, allIn), `${tok(allIn)} input tokens`)
         + '</div>';
 }
@@ -511,9 +526,9 @@ function agentsTab(total, runs = []) {
     return `<section class="tab" data-tab="agents" hidden>
         <p class="note">Subagents and workflows write their own transcripts, so this spend is invisible in the terminal statusline — it belongs to no single session there.</p>
         <div class="cards">
-          ${card('Main sessions', fmtCost(sum(main)), `${main.length} transcripts · ${pct(sum(main), totalCost)}`)}
-          ${card('Subagents', fmtCost(sum(agents)), `${agents.length} transcripts · ${pct(sum(agents), totalCost)}`)}
-          ${card('Workflow agents', fmtCost(sum(wf)), `${wf.length} transcripts · ${pct(sum(wf), totalCost)}`)}
+          ${card('Main sessions', fmtCost(sum(main)), `${plural(main.length, 'transcript')} · ${pct(sum(main), totalCost)}`)}
+          ${card('Subagents', fmtCost(sum(agents)), `${plural(agents.length, 'transcript')} · ${pct(sum(agents), totalCost)}`)}
+          ${card('Workflow agents', fmtCost(sum(wf)), `${plural(wf.length, 'transcript')} · ${pct(sum(wf), totalCost)}`)}
           ${perRun ? card('Agents per workflow', String(perRun.p50), `p90 ${perRun.p90} · max ${perRun.max}`) : ''}
         </div>
         ${spread.length ? `<h2>Output tokens one agent writes</h2>
@@ -554,7 +569,7 @@ function contentTab(total, sys) {
     return `<section class="tab" data-tab="content" hidden>
         <p class="note">Computed locally from your own prompts. Only counts and word tallies are stored — never prompt text — and nothing leaves this machine.</p>
         <div class="cards">
-          <div class="card"><span class="card-label">Prompts</span><span class="card-value">${p.count}</span><span class="card-sub">across ${total.sessions.length} transcripts</span></div>
+          <div class="card"><span class="card-label">Prompts</span><span class="card-value">${p.count}</span><span class="card-sub">across ${plural(total.sessions.length, 'transcript')}</span></div>
           <div class="card"><span class="card-label">Longest</span><span class="card-value">${tok(p.longest)}</span><span class="card-sub">characters</span></div>
         </div>
         <div class="two">
@@ -694,7 +709,7 @@ function toolsTab(total) {
     return `<section class="tab" data-tab="tools" hidden>
         <p class="note">Counted from the tool_use blocks of every reply on this machine. A failed result is blamed on the tool that produced it, matched back through the call id.</p>
         <div class="cards">
-          ${card('Tool calls', String(calls), `${tools.length} distinct tools`)}
+          ${card('Tool calls', String(calls), `${plural(tools.length, 'distinct tool')}`)}
           ${card('Failed', String(errors), pct(errors, calls) + ' of calls')}
           ${card('Denied', String(denials), 'refused by you or by a rule')}
           ${card('Advisor', String(advisor), 'consultations — priced server-side, not here')}
@@ -705,7 +720,7 @@ function toolsTab(total) {
           </div>
           <div><h2>MCP servers</h2>
             ${barList(Object.entries(servers).sort((a, b) => b[1].calls - a[1].calls),
-        { limit: 12, value: (s) => s.calls, label: (v, s) => `${v} · ${s.tools} tools` })}
+        { limit: 12, value: (s) => s.calls, label: (v, s) => `${v} · ${plural(s.tools, 'tool')}` })}
             <p class="note">A server with no calls at all does not appear here — that is the answer to whether it earns its place in the config.</p>
             <h2>Failing most often</h2>
             ${barList(flaky, { limit: 8, value: (t) => t.rate * 100, label: (v, t) => `${v.toFixed(0)}% of ${t.calls}` })}
@@ -928,10 +943,10 @@ function healthTab(total, sys) {
     return `<section class="tab" data-tab="health" hidden>
         <p class="note">What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call's arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.</p>
         <div class="cards">
-          ${card('Client', v.current || '—', v.waiting ? `${v.latest} unpacked and waiting` : `${(v.installed || []).length} versions on disk`)}
+          ${card('Client', v.current || '—', v.waiting ? `${v.latest} unpacked and waiting` : `${plural((v.installed || []).length, 'version')} on disk`)}
           ${card('Plugins', String(pluginRows.filter((p) => p.enabled).length), `${idle.length} enabled but idle`)}
           ${card('MCP servers', String(mcpRows.length), `${mcpRows.filter((m) => !m.used).length} never called`)}
-          ${card('Hooks', String((sys.hooks || []).length), `${(sys.permissions || []).length} permission rules`)}
+          ${card('Hooks', String((sys.hooks || []).length), plural((sys.permissions || []).length, 'permission rule'))}
         </div>
         <div class="two">
           <div><h2>Settings in force</h2>${settingsList(sys.settings || {})}
@@ -1014,8 +1029,8 @@ function liveTab(sys) {
     return `<section class="tab" data-tab="live" hidden>
         <p class="note">Read at the moment the dashboard was opened: the session registry, the IDE windows attached to it, and the daemon's own workers. A registry entry whose process is gone is shown as stale rather than hidden — it is what a crashed session leaves.</p>
         <div class="cards">
-          ${card('Live sessions', String(aliveSessions.length), stale ? `${stale} stale entries` : 'registry is clean')}
-          ${card('Editors attached', String(l.ide.filter((i) => i.alive).length), `${l.ide.length} lock files`)}
+          ${card('Live sessions', String(aliveSessions.length), stale ? `${plural(stale, 'stale entry', 'stale entries')}` : 'registry is clean')}
+          ${card('Editors attached', String(l.ide.filter((i) => i.alive).length), plural(l.ide.length, 'lock file'))}
           ${card('Daemon workers', String(l.daemon.workers.filter((w) => w.alive).length), l.daemon.alive ? `supervisor ${l.daemon.supervisorPid}` : 'supervisor not running')}
         </div>
         <h2>Sessions</h2>
@@ -1054,7 +1069,7 @@ function diskTab(sys) {
         <p class="note">Everything under <code>~/.claude</code>. Nothing here is deleted by this extension and there is no button that would — the numbers are the point, the decision is yours.</p>
         <div class="cards">
           ${card('Total', bytes(d.total), '~/.claude')}
-          ${d.hogs.length ? card('Leftovers', bytes(d.hogs.reduce((a, h) => a + h.bytes, 0)), `${d.hogs.length} places, safe to remove`) : ''}
+          ${d.hogs.length ? card('Leftovers', bytes(d.hogs.reduce((a, h) => a + h.bytes, 0)), `${plural(d.hogs.length, 'place')}, safe to remove`) : ''}
         </div>
         <h2>By directory</h2>
         ${barList(d.dirs.map((x) => [x.name, x]), {
@@ -1083,7 +1098,7 @@ function contextTab(total, sys) {
         <p class="note">Files that are loaded into the prompt of every session in scope. Sizes are exact; tokens are the size over four characters, which is close enough to compare paragraphs against each other.</p>
         <div class="cards">
           ${card('Global instructions', `~${tok(perRequest)}`, 'tokens in every request')}
-          ${card('Across all requests', `~${fmtCost(lifetime)}`, `${msgs} requests at Opus input rates`)}
+          ${card('Across all requests', `~${fmtCost(lifetime)}`, `${plural(msgs, 'request')} at Opus input rates`)}
           ${card('Files', String(c.files.length), 'CLAUDE.md, rules, project memory')}
         </div>
         <h2>What is loaded</h2>
@@ -1104,7 +1119,7 @@ function tasksTab(sys) {
     return `<section class="tab" data-tab="tasks" hidden>
         <p class="note">Todo lists left behind by sessions, newest first. An unfinished item here is work that was planned and never closed — the session may be long gone.</p>
         <div class="cards">
-          ${card('Lists', String(rows.length), `${open.length} with something open`)}
+          ${card('Lists', String(rows.length), `${plural(open.length, 'list')} with something open`)}
           ${card('Open items', String(open.reduce((a, t) => a + t.open.length, 0)), 'across every session')}
         </div>
         <table><thead><tr><th class="nowrap">Last touched</th><th>Project</th><th class="opt">Session</th>
@@ -1149,7 +1164,7 @@ function filesTab(total, sys) {
     return `<section class="tab" data-tab="files" hidden>
         <p class="note">Every file an edit or a write touched, counted from the patch the tool returned. Line counts are the patch's own, so a rewritten file counts as its whole length.</p>
         <div class="cards">
-          ${card('Files touched', String(files.length), `${edits} edits`)}
+          ${card('Files touched', String(files.length), plural(edits, 'edit'))}
           ${card('Lines added', tok(added), '')}
           ${card('Lines removed', tok(removed), '')}
         </div>
@@ -1207,12 +1222,21 @@ function settingsTab(config) {
     return `<section class="tab" data-tab="settings" hidden>
         <p class="note">These are the extension's own settings — the same keys as in <code>settings.json</code>, written straight from here. The status bar updates as soon as you save; nothing needs a reload.</p>
 
+        <h2>Start from one of these</h2>
+        <p class="note">Each is a whole bar, not a fragment: picking one fills the editor below, where you can change it before saving. Nothing is written until you press Save.</p>
+        <div class="presets">
+          ${(cfg.presets || []).map((p) => `<button class="preset" data-preset="${esc(p.id)}">
+            <span class="preset-name">${esc(p.name)}</span>
+            <span class="preset-about">${esc(p.about)}</span>
+            <span class="preset-preview" data-preset-preview="${esc(p.id)}">${p.segments.map((t) => `<span class="chip-seg">${esc(t)}</span>`).join('')}</span>
+          </button>`).join('')}
+        </div>
+
         <h2>Status bar</h2>
         <p class="note">One line per status-bar item, left to right. Text outside <code>{…}</code> is yours; <code>[square brackets]</code> mark a group that disappears whole when a placeholder inside it has nothing to say. A segment with nothing to show hides itself.</p>
         <ol class="segs" id="segs">${segments.map(row).join('')}</ol>
         <div class="btns">
           <button class="btn" id="add">Add segment</button>
-          <button class="btn" id="restore">Restore defaults</button>
         </div>
 
         <h2>Placeholders</h2>
@@ -1407,6 +1431,17 @@ tr.off { opacity: .45; }
 .j-stopped { color: hsl(35 72% 58%); }
 ul.log { margin: 4px 0 14px; padding-left: 20px; line-height: 1.6; max-width: 90ch; }
 ul.log li { margin: 2px 0; opacity: .85; }
+.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px; margin-bottom: 6px; max-width: 130ch; }
+.preset { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
+  font: inherit; color: inherit; cursor: pointer; padding: 8px 10px; border-radius: 5px;
+  background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); }
+.preset:hover { border-color: var(--vscode-focusBorder); }
+.preset-name { font-weight: 600; }
+.preset-about { opacity: .6; font-size: 11.5px; line-height: 1.4; }
+.preset-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.chip-seg { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8;
+  background: var(--vscode-list-hoverBackground); border-radius: 3px; padding: 1px 5px; }
 .segs { list-style: none; margin: 0 0 10px; padding: 0; max-width: 110ch; }
 .seg { margin-bottom: 8px; }
 .seg-head { display: flex; align-items: center; gap: 6px; }
@@ -1476,6 +1511,9 @@ sections.forEach((btn) => btn.addEventListener('click', () => openSection(btn.da
 tabs.forEach((btn) => btn.addEventListener('click', () => openTab(btn)));
 
 // --- the settings editor ----------------------------------------------------
+// acquireVsCodeApi may be called once per webview and throws on the second try,
+// which would take the rest of this script — every editor handler below — down
+// with it. One handle, acquired here, shared by everything on the page.
 const api = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 const list = document.getElementById('segs');
 
@@ -1548,7 +1586,16 @@ if (list && api) {
   };
 
   document.getElementById('add').addEventListener('click', () => addSegment(''));
-  document.getElementById('restore').addEventListener('click', () => api.postMessage({ type: 'defaults' }));
+
+  // A preset fills the editor and nothing more: the save is still the user's,
+  // so trying one on costs nothing.
+  document.querySelectorAll('[data-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => api.postMessage({ type: 'preset', id: btn.dataset.preset }));
+  });
+  // What each preset would say right now, rendered by the extension — the
+  // template alone does not tell you whether a line has anything to show on
+  // this machine today.
+  api.postMessage({ type: 'presetPreviews' });
 
   // Inserting at the caret rather than appending: a placeholder usually belongs
   // between two pieces of text that are already written.
@@ -1591,6 +1638,19 @@ if (list && api) {
       while (list.firstChild) list.removeChild(list.firstChild);
       for (const t of msg.segments) addSegment(t);
     }
+    if (msg.type === 'presetPreviews') {
+      for (const [id, texts] of Object.entries(msg.previews)) {
+        const box = document.querySelector(\`[data-preset-preview="\${id}"]\`);
+        if (!box) continue;
+        while (box.firstChild) box.removeChild(box.firstChild);
+        const shown = texts.filter((t) => t);
+        if (shown.length === 0) {
+          box.appendChild(el('span', 'chip-seg empty-preview', 'nothing to show right now'));
+          continue;
+        }
+        for (const text of shown) box.appendChild(el('span', 'chip-seg', text));
+      }
+    }
     if (msg.type === 'saved') {
       const badge = document.getElementById('saved');
       badge.hidden = false;
@@ -1601,12 +1661,11 @@ if (list && api) {
   askPreview();
 }
 const refresh = document.getElementById('refresh');
-if (refresh) {
-  const vscode = acquireVsCodeApi();
+if (refresh && api) {
   refresh.addEventListener('click', () => {
     refresh.disabled = true;
     refresh.textContent = 'Reindexing…';
-    vscode.postMessage({ type: 'refresh' });
+    api.postMessage({ type: 'refresh' });
   });
 }
 `;
@@ -1694,7 +1753,7 @@ function render(index, total, meta) {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>Claude usage</title><style>${STYLE}</style></head><body>
 <h1>Claude usage</h1>
-<p class="sub">${meta.files} transcripts indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
+<p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
  · <button id="refresh" class="link">Reindex</button></p>
 ${navHtml()}
 ${overviewTab(total, dayModels, modelOrder)}
@@ -1728,7 +1787,7 @@ module.exports = {
     sessionLabel, navHtml, SECTIONS, CACHE_PARTS,
     agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
     limitsTab, weekLabel,
-    shortModel, tok, bytes, fmtDur, esc,
+    shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the
     // vocabulary gains and the CSS does not draws as unstyled text here, and

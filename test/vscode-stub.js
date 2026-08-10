@@ -5,6 +5,9 @@
 const fs = require('node:fs');
 
 const items = [];
+const panels = [];
+const errors = [];
+const updates = [];
 const commands = new Map();
 const views = new Map();
 const listeners = { config: [], window: [] };
@@ -61,11 +64,34 @@ const vscode = {
         showWarningMessage: async () => undefined,
         showTextDocument: async () => undefined,
         withProgress: async (_opts, task) => task({ report() {} }),
-        createWebviewPanel: () => ({ webview: { html: '', onDidReceiveMessage() {} }, onDidDispose() {}, reveal() {} }),
+        createWebviewPanel() {
+            // The panel records what the extension posts back and hands over the
+            // listener, so a test can play the webview's half of the exchange.
+            const panel = {
+                webview: {
+                    html: '',
+                    posted: [],
+                    onDidReceiveMessage(cb) { panel.__receive = cb; },
+                    postMessage(msg) { panel.webview.posted.push(msg); return Promise.resolve(true); },
+                },
+                onDidDispose(cb) { panel.__dispose = cb; },
+                reveal() {},
+                dispose() { if (panel.__dispose) panel.__dispose(); },
+            };
+            panels.push(panel);
+            return panel;
+        },
+        showErrorMessage: async (message) => { errors.push(message); },
     },
+    ConfigurationTarget: { Global: 1, Workspace: 2 },
     workspace: {
         workspaceFolders: undefined,
-        getConfiguration: () => ({ get: (key) => settings[key] }),
+        getConfiguration: () => ({
+            get: (key) => settings[key],
+            // Writes are recorded rather than applied: what matters in a test is
+            // which key went into which scope, not that a file changed.
+            update: async (key, value, target) => { updates.push({ key, value, target }); settings[key] = value; },
+        }),
         onDidChangeConfiguration(cb) { listeners.config.push(cb); return disposable(); },
         // The real one rejects on a file that is not there, and a caller that
         // does not expect it ends the command in an unhandled rejection. A stub
@@ -84,6 +110,9 @@ const vscode = {
 // --- helpers for the tests --------------------------------------------------
 
 vscode.__items = items;
+vscode.__panels = panels;
+vscode.__errors = errors;
+vscode.__updates = updates;
 vscode.__commands = commands;
 vscode.__views = views;
 vscode.__setSettings = (next) => { settings = next; };
@@ -95,6 +124,9 @@ vscode.__changeConfiguration = () => {
 };
 vscode.__reset = () => {
     items.length = 0;
+    panels.length = 0;
+    errors.length = 0;
+    updates.length = 0;
     commands.clear();
     views.clear();
     listeners.config.length = 0;

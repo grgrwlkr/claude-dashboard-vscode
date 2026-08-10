@@ -42,11 +42,11 @@ function fields(helpers = {}) {
         plan: { topic: 'limits', doc: 'share of the weekly window already elapsed', get: (d) => pct(d.pace?.plan) },
         drift: {
             topic: 'limits',
-            doc: 'distance from an even pace, in percentage points (+ is ahead of plan)',
+            doc: 'distance from an even pace (+ is ahead of plan, − is behind it)',
             get: (d) => {
                 if (!d.weekly || !d.pace) return '';
                 const diff = d.weekly.pct - d.pace.plan;
-                return diff === 0 ? '0pp' : `${diff > 0 ? '+' : ''}${diff}pp`;
+                return diff === 0 ? '0%' : `${diff > 0 ? '+' : ''}${diff}%`;
             },
         },
         dry: { topic: 'limits', doc: 'when the weekly window runs out at this pace, blank if that is after the reset', get: (d) => (d.pace?.dry ? fmtDry(d.pace.dry) : '') },
@@ -76,7 +76,10 @@ function fields(helpers = {}) {
         model: { topic: 'context', doc: 'model of the last reply, e.g. opus 5', get: (d) => (d.ctx?.model ? shortModel(d.ctx.model) : '') },
         effort: { topic: 'context', doc: 'reasoning effort of the last reply', get: (d) => d.ctx?.effort || '' },
         advisor: { topic: 'context', doc: 'advisor model, when one is configured', get: (d) => (d.settings?.advisor ? shortModel(d.settings.advisor) : '') },
-        thinking: { topic: 'context', doc: 'the word "thinking" when the last reply carried a thinking block', get: (d) => (d.ctx?.thinking ? 'thinking' : '') },
+        // The setting rather than the last reply: a reply that is a tool call
+        // carries no thinking block even when the model is thinking on every
+        // turn, so reading it off the transcript reported "off" almost always.
+        thinking: { topic: 'context', doc: 'the word "thinking" while the client is set to think on every turn', get: (d) => (d.settings?.thinking ? 'thinking' : '') },
         outputStyle: { topic: 'context', doc: 'output style in force', get: (d) => d.settings?.outputStyle || '' },
         branch: { topic: 'context', doc: 'git branch recorded on the last request', get: (d) => d.ctx?.branch || '' },
         version: { topic: 'context', doc: 'client version of this session', get: (d) => d.version?.current || '' },
@@ -189,7 +192,11 @@ function renderSegment(template, data, registry) {
 
 /** The default bar: what the extension showed before any of this was settable. */
 const DEFAULT_SEGMENTS = [
-    '✻ 7d {weekly} {weeklyBar}[ dry {dry}]',
+    // drift is in the default because it is the one number that says whether the
+    // week is going well: 50% spent is fine on day five and alarming on day one.
+    // The forecast stays conditional — `{dry}` is silent when running out would
+    // happen after the reset, which is to say never.
+    '✻ 7d {weekly}[ {drift}] {weeklyBar}[ dry {dry}]',
     '▤ {ctx} {ctxTokens}/{ctxWindow}',
     '[~{cost}][ {burn}/h]',
     '[⧉ {peers}][ ▸ {todo}]',
@@ -200,6 +207,115 @@ const DEFAULT_SEGMENTS = [
 // Placeholders alone, groups ignored: this scans for names wherever they sit,
 // including inside an optional group, which TOKEN_RE swallows as one token.
 const NAME_RE = /\{([a-zA-Z0-9]+)(?::([^}]*))?\}/g;
+
+/**
+ * Ready-made bars, offered in the settings tab so nobody has to assemble one
+ * from an empty field to find out what the placeholders do. Each is a complete
+ * answer to a different question — "am I going to run out", "what is this
+ * costing", "what is running on this machine" — rather than a variation in
+ * punctuation. Picking one fills the editor; it is saved only when the user
+ * says so.
+ */
+const PRESETS = [
+    {
+        id: 'default',
+        name: 'Default',
+        about: 'What the extension ships with: limits, context, spend, work, workflows.',
+        segments: DEFAULT_SEGMENTS,
+    },
+    {
+        id: 'minimal',
+        name: 'Minimal',
+        about: 'One item, three numbers. Everything else lives in the tooltip.',
+        segments: ['✻{weekly} ▤{ctx} ~{cost}'],
+    },
+    {
+        id: 'pace',
+        name: 'Pace watcher',
+        about: 'Built around the weekly window: how far ahead of an even burn you are, and when it runs out.',
+        segments: [
+            '✻ 7d {weekly} {weeklyBar}[ {drift}]',
+            '[dry {dry}][ · resets {resetLeft}]',
+            '[5h {session5h}]',
+        ],
+    },
+    {
+        id: 'limits',
+        name: 'Limits, in full',
+        about: 'Every window at once, and the forecast date whether or not you would reach it — `{dryAt}` names the day even when the reset arrives first.',
+        segments: [
+            '✻ 7d {weekly}[ {drift}] {weeklyBar}',
+            '[dry {dryAt}][ · resets {resetLeft}]',
+            '[5h {session5h}][ · {session5hLeft} left]',
+            '[{scoped}]',
+        ],
+    },
+    {
+        id: 'money',
+        name: 'Spend',
+        about: 'This session against the whole day, with the work behind the number.',
+        segments: [
+            '[~{cost}][ {burn}/h]',
+            '[today ~{today}]',
+            '[{requests} req][ · {apiShare} waiting]',
+        ],
+    },
+    {
+        id: 'session',
+        name: 'Session',
+        about: 'What this window is running: model, effort, how full the context is and when it compacts.',
+        segments: [
+            '[{model}][ {effort}][ · {thinking}]',
+            '▤ {ctx} {ctxTokens}/{ctxWindow}[ · compact {compact}]',
+            '[cache {ctxCache}][ · {branch}]',
+        ],
+    },
+    {
+        id: 'machine',
+        name: 'Whole machine',
+        about: 'Not this window but every session on the machine, and what they left unfinished.',
+        segments: [
+            '[$(server) {sessions} live][ · {jobs} running]',
+            '[$(checklist) {openTasks} open]',
+            '[today ~{today}]',
+        ],
+    },
+    {
+        id: 'workflows',
+        name: 'Workflows',
+        about: 'For a machine that runs fan-outs: the live run, its agents, and what it has cost so far.',
+        segments: [
+            '[$(gear) {wfName}][ {wfAgents}][ {wfElapsed}]',
+            '[~{wfCost}][ · ×{wfRuns}]',
+            '✻ 7d {weekly}',
+        ],
+    },
+    {
+        id: 'works',
+        name: 'The works',
+        about: 'Every number this extension has, in ten items: both limit windows and the forecast, the context and the model driving it, the spend, the work behind it, the machine, and any running workflow. Wide — VS Code drops the rightmost items when the bar runs out of room.',
+        segments: [
+            '✻ 7d {weekly}[ {drift}] {weeklyBar}[ · dry {dryAt}]',
+            '[5h {session5h}][ · {session5hLeft} left][ · resets {resetLeft}]',
+            '[{scoped}]',
+            '▤ {ctx} {ctxTokens}/{ctxWindow}[ · cache {ctxCache}][ · compact {compact}]',
+            '[{model}][ {effort}][ · {thinking}][ · advisor {advisor}]',
+            '[~{cost}][ {burn}/h][ · today ~{today}]',
+            '[{requests} req][ · {duration}][ · {apiShare} waiting][ · {added}/{removed}]',
+            '[⧉ {peers}][ ▸ {todo}]',
+            '[$(server) {sessions}][ · {jobs} running][ · {openTasks} open]',
+            '[$(gear) {wfName}][ {wfAgents}][ {wfElapsed}][ · ~{wfCost}][ · ×{wfRuns}]',
+        ],
+    },
+    {
+        id: 'dense',
+        name: 'Everything, one line',
+        about: 'One item carrying every headline number. Long, but nothing is hidden.',
+        segments: [
+            '✻{weekly}[ {drift}] ▤{ctx}[ ~{cost}][ ⧉{peers}][ ▸{todo}][ $(gear){wfAgents}]',
+        ],
+    },
+];
 
 /** Field names a set of templates actually uses — the extension skips
  *  collecting what nothing asks for. */
@@ -213,4 +329,4 @@ function usedFields(templates, registry) {
     return used;
 }
 
-module.exports = { TOPICS, DEFAULT_SEGMENTS, fields, renderSegment, usedFields, TOKEN_RE, NAME_RE };
+module.exports = { TOPICS, DEFAULT_SEGMENTS, PRESETS, fields, renderSegment, usedFields, TOKEN_RE, NAME_RE };

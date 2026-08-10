@@ -438,10 +438,18 @@ function disk(root = ROOT, known = null) {
         }
     }
     if (temps > 0) {
-        hogs.push({ path: 'plugins/cache/temp_subdir_*', bytes: tempBytes, note: `${temps} abandoned marketplace clones` });
+        hogs.push({
+            path: 'plugins/cache/temp_subdir_*',
+            bytes: tempBytes,
+            note: `${temps} abandoned marketplace ${temps === 1 ? 'clone' : 'clones'}`,
+        });
     }
     if (stale > 0) {
-        hogs.push({ path: 'plugins/cache/*/*/<old versions>', bytes: staleBytes, note: `${stale} superseded plugin copies` });
+        hogs.push({
+            path: 'plugins/cache/*/*/<old versions>',
+            bytes: staleBytes,
+            note: `${stale} superseded plugin ${stale === 1 ? 'copy' : 'copies'}`,
+        });
     }
     hogs.sort((a, b) => b.bytes - a.bytes);
     return { total, dirs, hogs };

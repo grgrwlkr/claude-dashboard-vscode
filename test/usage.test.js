@@ -85,16 +85,17 @@ test('pace returns null without a reset time', () => {
     assert.equal(u.pace(null, NOW), null);
 });
 
-test('fmtDry: no date when today, date otherwise, always an hour with a tilde', () => {
+test('fmtDry: no date when today, weekday and date otherwise, always an hour with a tilde', () => {
     const today = Math.floor(new Date(2026, 7, 8, 21, 40).getTime() / 1000);
     const later = Math.floor(new Date(2026, 7, 12, 9, 5).getTime() / 1000);
     assert.equal(u.fmtDry(today, NOW_MS), '~21h');
-    assert.equal(u.fmtDry(later, NOW_MS), '12.08 ~09h');
+    // "12.08" alone does not say whether that is tomorrow or past the weekend.
+    assert.equal(u.fmtDry(later, NOW_MS), 'Wed 12.08 ~09h');
 });
 
 test('fmtDry floors, the way date +%H does in statusline.sh', () => {
     const almost = Math.floor(new Date(2026, 7, 12, 11, 58).getTime() / 1000);
-    assert.equal(u.fmtDry(almost, NOW_MS), '12.08 ~11h');
+    assert.equal(u.fmtDry(almost, NOW_MS), 'Wed 12.08 ~11h');
 });
 
 test('fmtLeft: days, hours, minutes, and the past', () => {
@@ -119,7 +120,7 @@ test('barText assembles the whole bar string', () => {
     const elapsed = Math.round(0.19 * WEEK);
     const weekly = { pct: 23, reset: NOW + WEEK - elapsed };
     const text = u.barText(weekly, u.pace(weekly, NOW), NOW_MS);
-    assert.match(text, /^✻ 7d 23% [▓▒·░]{6} dry \d{2}\.\d{2} ~\d{2}h$/);
+    assert.match(text, /^✻ 7d 23% [▓▒·░]{6} dry [A-Z][a-z]{2} \d{2}\.\d{2} ~\d{2}h$/);
 });
 
 test('barText carries neither bar nor dry without a pace', () => {

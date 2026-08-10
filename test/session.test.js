@@ -48,11 +48,30 @@ test('contextOf survives a missing record', () => {
     assert.equal(s.contextOf(null), null);
 });
 
-test('thinking is detected from a content block, not from a flag', () => {
-    const withThinking = rec();
-    withThinking.message.content = [{ type: 'thinking', thinking: '...' }, { type: 'text', text: 'ok' }];
-    assert.equal(s.contextOf(withThinking).thinking, true);
-    assert.equal(s.contextOf(rec()).thinking, false);
+test('thinking is read from the setting, never from the last reply', () => {
+    // A reply that is a tool call carries no thinking block even while the model
+    // is thinking on every turn, so the transcript cannot answer this — and
+    // reading it there reported "off" for almost every agentic answer.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-set-'));
+    const claude = path.join(dir, '.claude');
+    fs.mkdirSync(claude, { recursive: true });
+    try {
+        // Nothing configured: thinking is on, the way the client ships.
+        assert.equal(s.settingsOf(dir).thinking, true);
+
+        fs.writeFileSync(path.join(claude, 'settings.json'),
+            JSON.stringify({ alwaysThinkingEnabled: false, showThinkingSummaries: false }));
+        const off = s.settingsOf(dir);
+        assert.equal(off.thinking, false, 'false is an answer, not a missing value');
+        assert.equal(off.thinkingSummaries, false);
+
+        // The nearer file wins, including when it says true over a global false.
+        fs.writeFileSync(path.join(claude, 'settings.local.json'),
+            JSON.stringify({ alwaysThinkingEnabled: true }));
+        const local = s.settingsOf(dir);
+        assert.equal(local.thinking, true);
+        assert.equal(local.thinkingSummaries, false, 'the key it does not state is left to the file below');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('windowFor: a million on current models, 200k on Haiku, suffix forces it', () => {

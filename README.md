@@ -47,7 +47,7 @@ One string is one status-bar item, left to right:
 
 ```jsonc
 "claudeStatusline.segments": [
-  "✻ 7d {weekly} {weeklyBar}[ dry {dry}]",
+  "✻ 7d {weekly}[ {drift}] {weeklyBar}[ dry {dry}]",
   "▤ {ctx} {ctxTokens}/{ctxWindow}",
   "[~{cost}][ {burn}/h]",
   "[⧉ {peers}][ ▸ {todo}]",
@@ -65,8 +65,29 @@ above: every part of it is optional, so it stays invisible until a workflow
 starts. A segment of pure text always shows. A backslash escapes `{`, `}`, `[`
 and `]`.
 
-Run **Claude Statusline: List status-bar placeholders** to see every name
-alongside the value it has on this machine right now, and copy one.
+There are two ways to write one without editing JSON by hand. **Setup →
+Settings** in the dashboard is an editor: a field per segment, a preview under
+each one rendered by the extension itself, buttons to reorder and remove, and a
+palette of every placeholder with the value it has this minute — clicking one
+inserts it at the caret. Saving writes the same settings keys, into your own
+settings or the workspace's, and the bar redraws immediately.
+
+It opens with ten ready-made bars, each shown with what it would say on this
+machine right now — **Default**, **Minimal** (one item, three numbers), **Pace
+watcher** (how far ahead of an even burn you are and when the window runs out),
+**Limits, in full** (every window plus the forecast date whether or not you
+would reach it), **Spend**, **Session** (model, effort, context, compaction),
+**Whole machine** (every session, not this one), **Workflows**, **The works**
+(every number there is, in ten items), and **Everything, one line**. Picking one
+fills the editor; nothing is written until you press Save.
+
+Two placeholders answer "when do I run out", and the difference matters:
+`{dry}` is silent when the forecast lands after the reset — running out then
+never happens — while `{dryAt}` names the date either way. The default bar
+carries `{dry}`; the **Limits, in full** preset carries `{dryAt}`.
+
+Outside the dashboard, **Claude Statusline: List status-bar placeholders** shows
+the same list in a quick pick and copies whichever you choose.
 
 | Group | Placeholders |
 | --- | --- |
@@ -135,6 +156,7 @@ one that reads the installation itself.
 
 | Tab | What it answers |
 | --- | --- |
+| Settings | the extension's own settings, edited here rather than in `settings.json`: eight ready-made bars to start from, the segment editor with a live preview of each line, the placeholder palette with current values, and where to save |
 | Health | settings as they resolve, MCP servers, plugins and what each ships — each marked used or idle by whether anything of it appears in the transcripts — hooks, permission rules |
 | Background jobs | every background agent: state, tokens burned, the session it holds, and the scratch directory it never cleaned up |
 | Live now | sessions whose process is alive, editors attached, daemon workers — and registry entries left by sessions that crashed |
@@ -298,14 +320,20 @@ code in the extension host until you do.
 
 ## Settings
 
+All four are editable from **Setup → Settings** in the dashboard, and all four
+apply the moment they change — none of them needs a window reload.
+
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `claudeStatusline.segments` | four templates | One status-bar item per string; see [Configuring the bar](#configuring-the-bar) |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
-| `claudeStatusline.alignment` | `right` | Which side of the status bar (needs a reload) |
-| `claudeStatusline.priority` | `100` | Position within that side (needs a reload) |
+| `claudeStatusline.alignment` | `right` | Which side of the status bar |
+| `claudeStatusline.priority` | `100` | Position within that side |
 
 Commands: **Claude: Open usage dashboard**, **Claude: Rebuild the usage index**,
-**Claude Statusline: Refresh now**.
+**Claude Statusline: Refresh now**, **Claude Statusline: List status-bar
+placeholders**, and — from a row of the workflow view — **Claude: Open the
+workflow script** and **Claude: Copy the workflow run id**.
 
 ## Tests
 

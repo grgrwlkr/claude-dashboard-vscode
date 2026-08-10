@@ -338,6 +338,55 @@ test('the Setup panels degrade to a message when there is no snapshot', () => {
     assert.match(db.contextTab(total, null), /Context/i);
 });
 
+// acquireVsCodeApi throws on the second call, and the throw kills the rest of
+// the script — which is how the Reindex button and the whole settings editor
+// ended up in one page, each holding its own handle, one of them dead.
+test('the webview acquires the VS Code API exactly once', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: demoSystem(), config: { presets: [], palette: [] } });
+    assert.equal((html.match(/acquireVsCodeApi\(\)/g) || []).length, 1);
+});
+
+// Every date in the tables names its weekday, the same way the tooltips do:
+// "13.08" alone does not say whether that is tomorrow or the far side of a
+// weekend, and these tables are read to answer exactly that.
+test('a date in a table carries its weekday', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: demoSystem(), config: { presets: [], palette: [] } });
+    const dates = html.match(/[A-Z][a-z]{2} \d{2}\.\d{2} \d{2}:\d{2}/g) || [];
+    assert.ok(dates.length > 0, 'no dated row rendered at all');
+    // No bare date may survive next to them.
+    const bare = html.match(/(?<![A-Za-z] )\b\d{2}\.\d{2} \d{2}:\d{2}/g) || [];
+    assert.deepEqual(bare, [], 'a date without its weekday is left in the page');
+});
+
+// "1 jobs" shipped, and the same shape was waiting in fifteen other captions.
+test('a count of one takes the singular, everywhere the page counts something', () => {
+    assert.equal(db.plural(1, 'session'), '1 session');
+    assert.equal(db.plural(2, 'session'), '2 sessions');
+    assert.equal(db.plural(0, 'session'), '0 sessions');
+    // Half these nouns do not take an "s": the second form is spelled out.
+    assert.equal(db.plural(1, 'stale entry', 'stale entries'), '1 stale entry');
+    assert.equal(db.plural(4, 'stale entry', 'stale entries'), '4 stale entries');
+
+    // Rendered with one of everything, the page must contain no "1 <plural>".
+    const one = demoSystem({
+        versions: { current: '2.1.226', latest: '', waiting: false, installed: [{ version: '2.1.226' }] },
+        live: {
+            sessions: [{ id: 'a', pid: 1, alive: false, cwd: '~/r', entrypoint: 'cli', status: '', name: '', version: '', startedAt: Date.now() }],
+            ide: [{ pid: 2, alive: true, name: 'Code', transport: 'ws', folders: ['~/r'] }],
+            daemon: { supervisorPid: 3, alive: true, workers: [] },
+        },
+        disk: { total: 1e9, dirs: [{ name: 'projects', bytes: 1e9, kind: 'keep' }], hogs: [{ path: 'x', bytes: 1, note: 'y' }] },
+        tasks: [{ session: 's', project: 'p', at: Date.now(), total: 1, done: 0, open: ['one'] }],
+    });
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: one, config: { presets: [], palette: [] } });
+
+    const wrong = html.match(/\b1 (sessions|transcripts|tools|versions|places|edits|lists|requests|lock files|permission rules|stale entries)\b/g);
+    assert.deepEqual(wrong, null, `a lone item counted in the plural: ${wrong}`);
+});
+
 test('bytes reads in the unit a human would pick', () => {
     assert.equal(db.bytes(0), '0');
     assert.equal(db.bytes(900), '900 B');

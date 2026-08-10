@@ -35,11 +35,12 @@ const data = {
     machine: { jobs: 1, sessions: 9, openTasks: 25 },
 };
 
-test('the default segments reproduce the bar the extension always had', () => {
+test('the default segments draw the limits, the context, the spend and the work', () => {
     const [limits, ctx, money, work] = seg.DEFAULT_SEGMENTS.map((t) => seg.renderSegment(t, data, registry));
     // The forecast is formatted in local time, so the expectation is built the
-    // same way rather than pinned to the author's timezone.
-    assert.equal(limits.text, `✻ 7d 33% ▒▒░░░░ dry ${u.fmtDry(data.pace.dry, NOW * 1000)}`);
+    // same way rather than pinned to the author's timezone. drift rides along
+    // with the percentage: 33% spent against 40% elapsed is 7% under plan.
+    assert.equal(limits.text, `✻ 7d 33% -7% ▒▒░░░░ dry ${u.fmtDry(data.pace.dry, NOW * 1000)}`);
     assert.equal(ctx.text, '▤ 29% 294k/1.0M');
     assert.equal(money.text, '~$114.29 $5.18/h');
     assert.equal(work.text, '⧉ 2 ▸ 3/6');
@@ -50,7 +51,7 @@ test('an optional group disappears whole when its field has nothing to say', () 
     // of the segment must survive.
     const early = { ...data, pace: { plan: 3, dry: null, dryAt: null } };
     const r = seg.renderSegment(seg.DEFAULT_SEGMENTS[0], early, registry);
-    assert.equal(r.text, '✻ 7d 33% ▒▒░░░░');
+    assert.equal(r.text, '✻ 7d 33% +30% ▒▒░░░░');
     assert.equal(r.visible, true);
 });
 
@@ -89,10 +90,22 @@ test('scoped takes every per-model window, or one by name', () => {
 });
 
 test('drift says which side of the plan the pace is on', () => {
-    assert.equal(registry.drift.get(data), '-7pp');
-    assert.equal(registry.drift.get({ ...data, weekly: { pct: 55 }, pace: { plan: 40 } }), '+15pp');
-    assert.equal(registry.drift.get({ ...data, weekly: { pct: 40 }, pace: { plan: 40 } }), '0pp');
+    assert.equal(registry.drift.get(data), '-7%');
+    assert.equal(registry.drift.get({ ...data, weekly: { pct: 55 }, pace: { plan: 40 } }), '+15%');
+    assert.equal(registry.drift.get({ ...data, weekly: { pct: 40 }, pace: { plan: 40 } }), '0%');
     assert.equal(registry.drift.get({}), '');
+});
+
+// The bar said "thinking" only when the last reply happened to carry a thinking
+// block. Most agentic replies are tool calls and carry none, so the word was
+// missing while the model was thinking on every turn.
+test('thinking follows the setting, not whatever the last reply looked like', () => {
+    const thinkingOn = { ...data, settings: { thinking: true } };
+    const thinkingOff = { ...data, settings: { thinking: false } };
+    assert.equal(registry.thinking.get(thinkingOn), 'thinking');
+    assert.equal(registry.thinking.get(thinkingOff), '');
+    // A transcript that carried a thinking block does not turn it on by itself.
+    assert.equal(registry.thinking.get({ ctx: { thinking: true }, settings: { thinking: false } }), '');
 });
 
 test('every field survives an empty data object', () => {
@@ -107,6 +120,51 @@ test('every field declares a known topic and a doc line', () => {
     for (const [name, field] of Object.entries(registry)) {
         assert.ok(seg.TOPICS.includes(field.topic), `${name} has topic ${field.topic}`);
         assert.ok(field.doc && field.doc.length > 8, `${name} needs a doc line`);
+    }
+});
+
+test('every preset is a complete bar built from placeholders that exist', () => {
+    assert.ok(seg.PRESETS.length >= 4, 'a menu of one is not a menu');
+    const ids = seg.PRESETS.map((p) => p.id);
+    assert.equal(new Set(ids).size, ids.length, 'preset ids must be unique');
+
+    for (const preset of seg.PRESETS) {
+        assert.ok(preset.name && preset.about, `${preset.id} needs a name and a description`);
+        assert.ok(preset.segments.length > 0, `${preset.id} has no segments`);
+        for (const template of preset.segments) {
+            // A typo here ships a bar with a literal {plcaeholder} in it, and
+            // nothing else in the code would notice.
+            for (const [, name] of template.matchAll(seg.NAME_RE)) {
+                assert.ok(registry[name], `${preset.id} uses unknown placeholder {${name}}`);
+            }
+            // Every line must survive being rendered against real data, and a
+            // line built only of literals is a decoration, not a preset.
+            const out = seg.renderSegment(template, data, registry);
+            assert.equal(typeof out.text, 'string');
+            assert.ok(out.placeholders > 0, `${preset.id}: "${template}" carries no data at all`);
+        }
+    }
+});
+
+test('the default preset is the default bar, not a copy that can drift', () => {
+    const first = seg.PRESETS[0];
+    assert.equal(first.id, 'default');
+    assert.equal(first.segments, seg.DEFAULT_SEGMENTS);
+});
+
+test('a preset says something on a machine with data, and nothing on an empty one', () => {
+    for (const preset of seg.PRESETS) {
+        const shown = preset.segments
+            .map((t) => seg.renderSegment(t, data, registry))
+            .filter((o) => o.visible);
+        assert.ok(shown.length > 0, `${preset.id} draws nothing even with full data`);
+
+        // With no data at all every segment hides itself rather than leaving
+        // punctuation stranded in the bar.
+        for (const template of preset.segments) {
+            assert.equal(seg.renderSegment(template, {}, registry).visible, false,
+                `${preset.id}: "${template}" shows itself with nothing to say`);
+        }
     }
 });
 

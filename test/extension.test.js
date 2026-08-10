@@ -96,6 +96,16 @@ test('changing the configuration rebuilds the items without a reload', () => {
     } finally { run.dispose(); }
 });
 
+// The default bar is written twice: once in segments.js, once in the manifest
+// where the settings UI reads it. A user who never sets the key gets the
+// module's copy; one who clicks "reset to default" in VS Code gets the
+// manifest's. They have to be the same list.
+test('the manifest ships the same default bar as the module', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const declared = manifest.contributes.configuration.properties['claudeStatusline.segments'].default;
+    assert.deepEqual(declared, seg.DEFAULT_SEGMENTS);
+});
+
 test('the commands the package manifest promises are all registered', () => {
     const run = activate({ segments: ['x'] });
     try {
@@ -585,6 +595,179 @@ test('the index is read again only when it has changed', () => {
 
 // The landmine this task exists to defuse: both maps are keyed by topic, so a
 // topic a field can carry but neither map knows is not a missing tooltip — it
+// --- the settings tab -------------------------------------------------------
+
+// The dashboard is opened the way a user opens it — through the command — so
+// the panel, its message listener and the handlers behind them are all real.
+// The panel outlives activate(): the extension keeps one and reveals it again,
+// so each test closes it or the next one finds no listener to talk to.
+async function openDashboard() {
+    await vscode.__commands.get('claudeStatusline.dashboard')();
+    const panel = vscode.__panels[vscode.__panels.length - 1];
+    assert.ok(panel && panel.__receive, 'the dashboard must register a message listener');
+    return panel;
+}
+
+const lastPost = (panel) => panel.webview.posted[panel.webview.posted.length - 1];
+
+test('the settings tab previews a segment with the same code that draws the bar', async () => {
+    const run = activate({ segments: ['{weekly}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const state = run.context.claudeState;
+        // The limits come from the machine-wide cache rather than the scratch
+        // tree, so the expectation is whatever the bar itself would draw right
+        // now — the claim under test is that the two agree, not what they say.
+        const templates = ['plain text', '7d {weekly}', 'a {model} b'];
+        const expected = templates.map((t) => {
+            const out = seg.renderSegment(t, state.data, state.registry);
+            return out.visible ? out.text : '';
+        });
+
+        await panel.__receive({ type: 'preview', segments: templates });
+        const reply = lastPost(panel);
+        assert.equal(reply.type, 'preview');
+        assert.deepEqual(reply.previews.map((p) => p.text), expected);
+        assert.equal(reply.previews[0].text, 'plain text');
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+test('asking for the defaults returns the built-in bar, not the current one', async () => {
+    const run = activate({ segments: ['mine'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({ type: 'defaults' });
+        assert.deepEqual(lastPost(panel), { type: 'defaults', segments: seg.DEFAULT_SEGMENTS });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// The settings tab shipped blank: every palette value a dash, every preview
+// "hidden", while the bar two inches below was full of numbers. The page read
+// the state through a property parked on the ExtensionContext, which the stub
+// happily carried and the editor did not. Freezing the context here reproduces
+// that exactly — the state has to reach the page some other way.
+test('the dashboard reads live numbers even when the context refuses new properties', async () => {
+    vscode.__reset();
+    vscode.__setSettings({ segments: ['{weekly}'], alignment: 'right', priority: 100, refreshInterval: 3600 });
+    const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-frozen-'));
+    const context = Object.freeze({ subscriptions: [], globalStorageUri: { fsPath: storage } });
+
+    let panel;
+    try {
+        ext.activate(context);
+        panel = await openDashboard();
+        // Whatever the bar is showing must also reach the page.
+        const barText = vscode.__items[0].text;
+        await panel.__receive({ type: 'preview', segments: ['{weekly}'] });
+        assert.equal(lastPost(panel).previews[0].text, barText);
+        assert.ok(barText.length > 0, 'the bar itself must have something to show for this to prove anything');
+
+        // And the palette baked into the HTML carries the same value.
+        assert.ok(panel.webview.html.includes(`<span class="pal-val">${barText}</span>`),
+            'the palette must show the live value, not a dash');
+    } finally {
+        if (panel) panel.dispose();
+        for (const d of context.subscriptions) d.dispose();
+        fs.rmSync(storage, { recursive: true, force: true });
+    }
+});
+
+test('picking a preset fills the editor with that bar and saves nothing', async () => {
+    const run = activate({ segments: ['mine'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const preset = seg.PRESETS.find((p) => p.id === 'minimal');
+        await panel.__receive({ type: 'preset', id: preset.id });
+
+        assert.deepEqual(lastPost(panel), { type: 'defaults', segments: preset.segments });
+        assert.equal(vscode.__updates.length, 0, 'trying a preset on must not write settings');
+
+        // An id nobody offers is ignored rather than answered with an empty bar.
+        const before = panel.webview.posted.length;
+        await panel.__receive({ type: 'preset', id: 'no-such-preset' });
+        assert.equal(panel.webview.posted.length, before);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+test('each preset is previewed with what it would say on this machine', async () => {
+    const run = activate({ segments: ['mine'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const state = run.context.claudeState;
+        await panel.__receive({ type: 'presetPreviews' });
+
+        const reply = lastPost(panel);
+        assert.equal(reply.type, 'presetPreviews');
+        assert.deepEqual(Object.keys(reply.previews).sort(), seg.PRESETS.map((p) => p.id).sort());
+        for (const preset of seg.PRESETS) {
+            const expected = preset.segments.map((t) => {
+                const out = seg.renderSegment(t, state.data, state.registry);
+                return out.visible ? out.text : '';
+            });
+            assert.deepEqual(reply.previews[preset.id], expected, `${preset.id} previews as the bar would draw it`);
+        }
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+test('saving writes only the settings the extension owns, into the chosen scope', async () => {
+    const run = activate({ segments: ['mine'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({
+            type: 'save',
+            scope: 'workspace',
+            settings: {
+                segments: ['a', 'b'], alignment: 'left', priority: 7, refreshInterval: 30,
+                // A key the form never offers: it must not reach the settings file.
+                'terminal.integrated.shell': '/bin/evil',
+            },
+        });
+
+        const written = vscode.__updates;
+        assert.deepEqual(written.map((w) => w.key).sort(),
+            ['alignment', 'priority', 'refreshInterval', 'segments']);
+        assert.ok(written.every((w) => w.target === vscode.ConfigurationTarget.Workspace));
+        assert.deepEqual(written.find((w) => w.key === 'segments').value, ['a', 'b']);
+        assert.equal(lastPost(panel).type, 'saved');
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+test('saving without a scope goes to the user settings, not the workspace', async () => {
+    const run = activate({ segments: ['mine'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({ type: 'save', settings: { segments: ['x'] } });
+        assert.equal(vscode.__updates[0].target, vscode.ConfigurationTarget.Global);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+test('the settings tab is handed the live value of every placeholder', async () => {
+    const run = activate({ segments: ['{weekly}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const html = panel.webview.html;
+        // Every registered field appears in the palette, and the editor is
+        // seeded with the segments actually in force.
+        for (const name of Object.keys(seg.fields({}))) {
+            assert.ok(html.includes(`{${name}}`), `${name} missing from the palette`);
+        }
+        assert.match(html, /data-tab="settings"/);
+        assert.match(html, /value="\{weekly\}"/);
+        // Every preset is offered by name, with a button that carries its id.
+        for (const preset of seg.PRESETS) {
+            assert.ok(html.includes(`data-preset="${preset.id}"`), `${preset.id} missing from the menu`);
+            assert.ok(html.includes(preset.name), `${preset.name} is not named`);
+        }
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
 // is a throw inside render() that hides every item in the bar, not just its own.
 // The list comes from the fields themselves, not from the hand-written constant:
 // a field given a topic nobody registered is exactly the way this breaks again.
