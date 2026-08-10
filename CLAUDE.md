@@ -16,10 +16,25 @@ npx @vscode/vsce package                                      # build the .vsix
 code --install-extension claude-statusline-*.vsix             # install it
 ```
 
-No dependencies, no build step, no lint config, no npm scripts — plain CommonJS run by VS Code and
-by `node --test`. Bump `version` in `package.json` on every rebuild: a same-version reinstall leaves
-the old code live in the extension host. Reloading the window is the user's action, never yours —
-other Claude sessions may be alive in it.
+No build step, no lint config, no npm scripts — plain CommonJS run by VS Code and by `node --test`.
+Bump `version` in `package.json` on every rebuild: a same-version reinstall leaves the old code live
+in the extension host. Reloading the window is the user's action, never yours — other Claude sessions
+may be alive in it.
+
+**Add a dependency when it makes the work easier. Do not reimplement what already exists.** The tree
+happens to have none today; that is a fact about it, not a rule against them. Before writing a
+utility, look for one that already does the job — a built-in first (`Intl`, `URL`, `node:*` ship in
+the runtime and cost nothing), then npm — and if it removes real work, install it: `npm i <pkg>`,
+and `vsce` packs production dependencies into the `.vsix` by itself. Verify what you are adding
+instead of recalling it — `npm view <pkg> version time.modified license dependencies
+dist.unpackedSize` — and prefer one with no transitive dependencies.
+
+The test is whether it saves work, in both directions. Hand-rolling a date library, a diff, a parser
+or a scheduler because "no dependencies" sounds tidy is the failure this rule exists to prevent.
+Adding a package for something already written here is the other one: `pluralize` would ship a
+dictionary of English irregulars for sixteen nouns that are spelled out in our own source, so it buys
+nothing — while a package that replaced a hundred lines of parsing would buy a great deal. Ask which
+one you are looking at, and say so in the commit.
 
 **A version bump is a commit.** Raising `version` in `package.json` — by any amount, for any reason —
 means committing the working tree in the same step, with that version in the message trailer
@@ -67,8 +82,10 @@ in `indexer.js`, or stale-shaped aggregates are silently reused forever. This is
 discoverable trap in the repo.
 
 **Dashboard** is HTML and SVG assembled as strings under a strict CSP, coloured only from
-`--vscode-*` theme variables. Everything interpolated must go through `esc()`. Zero dependencies is
-a policy, not an accident — no charting library.
+`--vscode-*` theme variables. Everything interpolated must go through `esc()`. No charting library:
+the charts here are a bar, a heatmap, a stack and a line, and a library would bring its own DOM or
+canvas model into a page assembled as strings under a strict CSP that forbids fetching it. That is a
+decision about charts — the dependency rule above governs everything else.
 
 ## Conventions specific to this repo
 
