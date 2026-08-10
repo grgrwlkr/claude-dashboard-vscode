@@ -1518,8 +1518,9 @@ function statusBlocks(blocks) {
 function liveRuns(runs) {
     const body = runs.map((run) => {
         const agents = run.agents || [];
-        const working = (a) => wfm.outcomeOf(a.state, run.state) === 'running';
-        const order = [...agents].sort((a, b) => Number(working(b)) - Number(working(a)));
+        // Dispatch order, as the journal recorded it. Sorting the working ones to
+        // the top made a row move the moment its agent finished, which is the
+        // one thing you do not want while watching a particular agent.
 
         const facts = [
             run.project,
@@ -1530,14 +1531,19 @@ function liveRuns(runs) {
 
         const stalled = run.state === 'abandoned'
             ? ' <span class="kind o-stopped">no snapshot — nothing written lately</span>' : '';
-        const head = `<tr class="run-head"><th colspan="6">${esc(run.name || run.runId)}
+        const head = `<tr class="run-head"><th colspan="5">${esc(run.name || run.runId)}
             <span class="dim">${esc(facts)}</span>${stalled}</th></tr>`;
 
-        const rows = order.map((a) => {
+        const rows = agents.map((a) => {
             const outcome = wfm.outcomeOf(a.state, run.state);
+            // One column, not an id beside a name. `agentLabel` gives the name
+            // the workflow chose where it is known, and while a run is still
+            // going it is not: the journal records only an id, and the label
+            // reaches the disk with the snapshot at the end. Until then the
+            // first line of what the agent was told is its name, and the id is
+            // in the hover with the rest of the prompt.
             return `<tr class="run-agent">
-            <td class="mono nowrap">${esc(a.agentId.slice(0, 8))}</td>
-            <td class="wrap opt2" title="${esc(a.promptPreview || a.agentId)}">${esc(wfm.agentLabel(a))}</td>
+            <td class="wrap" title="${esc(`${a.agentId.slice(0, 8)} · ${a.promptPreview || ''}`)}">${esc(wfm.agentLabel(a))}</td>
             <td>${a.model ? esc(shortModel(a.model)) : '<span class="dim">—</span>'}</td>
             <td>${a.effort ? `<span class="kind">${esc(a.effort)}</span>` : '<span class="dim">—</span>'}</td>
             <td class="dim opt">${esc(a.lastToolName || '')}</td>
@@ -1545,13 +1551,13 @@ function liveRuns(runs) {
         }).join('');
 
         const empty = agents.length === 0
-            ? '<tr class="run-agent"><td colspan="6" class="dim">no agent has written anything yet</td></tr>'
+            ? '<tr class="run-agent"><td colspan="5" class="dim">no agent has written anything yet</td></tr>'
             : '';
 
         return head + rows + empty;
     }).join('');
 
-    return `<table><thead><tr><th>Agent</th><th class="opt2">Told to</th><th>Model</th>
+    return `<table><thead><tr><th>Agent</th><th>Model</th>
         <th>Effort</th><th class="opt">Doing</th><th>State</th></tr></thead>
       <tbody>${body}</tbody></table>`;
 }
@@ -1774,6 +1780,7 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .run-head:first-child > th { padding-top: 4px; border-top: none; }
 .run-head .dim { font-weight: 400; font-size: 11.5px; margin-left: 8px; }
 .run-agent > td { border-bottom: none; }
+.run-agent > td.wrap { max-width: 52ch; }
 .run-agent > td:first-child { padding-left: 16px; }
 .run-agent > td[colspan] { padding-left: 16px; font-size: 11.5px; padding-bottom: 6px; }
 
