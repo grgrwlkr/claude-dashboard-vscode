@@ -890,26 +890,59 @@ function withCost(runs, { index = null, live = false, carried = new Map() } = {}
     return out;
 }
 
-// Icons are named here and constructed in extension.js, which is the only file
-// that knows what a ThemeIcon is. A run's own word for how it ended is the
-// client's — "completed" is what a clean run writes — so anything else is drawn
-// as a failure rather than guessed into one.
-function runIcon(run) {
-    if (run.state === 'running') return 'sync~spin';
-    if (run.state === 'abandoned') return 'circle-slash';
-    return run.status === 'completed' ? 'check' : 'error';
+/**
+ * How a run ended, as the word to print and the outcome to draw it with. The
+ * word is the client's own — "completed" is what a clean run writes — and a run
+ * that never wrote a snapshot has none at all, so it says what it is doing or
+ * only that nobody recorded an end for it. Anything other than "completed" is a
+ * failure rather than a word guessed into success.
+ *
+ * The outcome is the same five-word vocabulary `outcomeOf` answers an agent in,
+ * which is what lets one icon table and one set of colours serve a run and its
+ * agents alike — and what keeps the tree's icon and the dashboard's chip from
+ * disagreeing about the same run.
+ */
+function verdictOf(run) {
+    if (run.state === 'running') return { word: 'running', outcome: 'running' };
+    if (run.state === 'abandoned') return { word: 'no snapshot', outcome: 'stopped' };
+    return { word: run.status || '', outcome: run.status === 'completed' ? 'done' : 'failed' };
 }
 
-// Read through outcomeOf and never off the raw word. The client writes `error`
-// and has never once written `failed`, and an agent of a killed run stays
-// recorded as working forever — a table keyed on the state itself would draw
-// both of those with a checkmark.
-const AGENT_ICONS = {
+// Read through outcomeOf and verdictOf, never off a raw word. The client writes
+// `error` and has never once written `failed`, and an agent of a killed run
+// stays recorded as working forever — a table keyed on the state itself would
+// draw both of those with a checkmark. Icons are named here and constructed in
+// extension.js, which is the only file that knows what a ThemeIcon is.
+const OUTCOME_ICONS = {
     running: 'sync~spin', done: 'check', failed: 'error',
     stopped: 'circle-slash', unknown: 'question',
 };
 
-const agentIcon = (agent, run) => AGENT_ICONS[outcomeOf(agent.state, run.state)];
+const runIcon = (run) => OUTCOME_ICONS[verdictOf(run).outcome];
+const agentIcon = (agent, run) => OUTCOME_ICONS[outcomeOf(agent.state, run.state)];
+
+/**
+ * How many agents a run stands for, in the words every surface uses. Two facts,
+ * and at most one of them is ever true: a run still going has no count of its
+ * own yet — `reported` is filled from the snapshot, which is written at the end —
+ * and a run that is over has nothing left working.
+ *
+ *   - while it runs: how many of its agents have settled, out of how many exist;
+ *   - once it ends: the client's own counter, but only where it exceeds the list.
+ *     On one killed run here it read 74 against 13 usable entries, and 13 rows
+ *     under a heading of 74 would say the run finished everything it began.
+ *
+ * The plain count is the one thing the two surfaces read differently, hence
+ * `always`: it is silence in a tree row that lists the agents underneath it, and
+ * a number in a table cell whose column is headed "Agents".
+ */
+function countLabel(run, { always = false } = {}) {
+    const totals = run.totals || {};
+    const listed = (run.agents || []).length;
+    if (totals.reported > listed) return `${listed} of ${totals.reported}`;
+    if (run.state === 'running') return `${totals.done || 0}/${totals.agents || listed}`;
+    return always ? String(totals.agents || listed) : '';
+}
 
 // How much of a prompt fits on a row before the panel starts eliding it itself.
 const LABEL_CHARS = 60;
@@ -965,10 +998,9 @@ function treeNodes(runs) {
     return ordered.map((run) => {
         const key = runKey(run);
         // Read once and guarded once: this is exported, so a caller may hand it
-        // a record the scan did not build. Both fields are always filled by
+        // a record the scan did not build. The field is always filled by
         // scanRuns; a half-built one draws an empty run rather than throwing.
         const agents = run.agents || [];
-        const totals = run.totals || {};
         const agentNode = (agent) => ({
             kind: 'agent',
             id: `${key}/${agent.agentId}`,
@@ -1024,13 +1056,11 @@ function treeNodes(runs) {
             id: key,
             label: run.name || run.runId,
             description: [
-                run.state === 'running' ? `${totals.done || 0}/${totals.agents || agents.length}` : '',
-                // The client's own agent counter, shown only when it disagrees
-                // with the list underneath. On a killed run it read 74 against 13
-                // entries; hiding that gap would make the tree look complete when
-                // it is not. A run still going has no count of its own yet, which
-                // is why this asks whether the client counted *more*.
-                totals.reported > agents.length ? `${agents.length} of ${totals.reported}` : '',
+                // How far a live run has got, or the gap between the client's
+                // own counter and the list underneath — countLabel decides which,
+                // and stays silent where a plain number would only repeat the
+                // rows already hanging under this one.
+                countLabel(run),
                 run.project,
             ].filter(Boolean).join(' · '),
             icon: runIcon(run),
@@ -1044,4 +1074,8 @@ function treeNodes(runs) {
 module.exports = {
     readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived,
     costIndex, withCost, accrue, treeNodes, tokenLabel, PROJECTS, RUN_STALE_MS,
+    // Read by the dashboard as well as by the tree: one rule about a run cannot
+    // live in two files, and dashboard.js may not require vscode, so it lives on
+    // this side of that line.
+    verdictOf, countLabel, agentLabel,
 };

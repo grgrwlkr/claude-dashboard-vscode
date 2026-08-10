@@ -383,19 +383,6 @@ function breakdownTab(name, title, entries, note) {
     </section>`;
 }
 
-// The run's own word for how it ended, or none at all: a snapshot that carried
-// no status gets no verdict invented for it. The colour follows the reading the
-// tree's icons already use — "completed" is what a clean run writes, so every
-// other word is drawn as a failure rather than trusted.
-const RUN_WORD = { running: 'running', abandoned: 'no snapshot' };
-
-function runStatus(run) {
-    if (run.state !== 'finished') {
-        return { word: RUN_WORD[run.state] || '', cls: run.state === 'running' ? 'running' : 'stopped' };
-    }
-    return { word: run.status || '', cls: run.status === 'completed' ? 'done' : 'failed' };
-}
-
 /**
  * One agent as a row that opens. The state is read through `outcomeOf` and never
  * off the raw word: the client writes `error` and has never written `failed`,
@@ -417,56 +404,83 @@ function agentCard(agent, run) {
     ].filter(Boolean).join(' · ');
 
     return `<details class="agent"><summary><span class="kind o-${outcome}">${esc(outcome)}</span>
-        ${esc(agent.label || agent.agentId)} <span class="dim">${esc(facts)}</span></summary>
+        ${esc(wfm.agentLabel(agent))} <span class="dim">${esc(facts)}</span></summary>
         ${agent.promptPreview ? `<p class="prompt">${esc(agent.promptPreview)}</p>` : ''}
         ${agent.resultPreview ? `<pre class="result">${esc(agent.resultPreview)}</pre>` : ''}
       </details>`;
 }
 
-// How many agents the row stands for. The client's own counter is shown only
-// where it exceeds the list underneath — on one killed run here it read 74
-// against 13 usable entries, and 13 rows under a heading of 74 would say the run
-// finished everything it started. A run still going has no count of its own yet,
-// so it says how many of its agents have settled instead.
-function agentCount(run) {
-    const totals = run.totals || {};
-    const listed = (run.agents || []).length;
-    if (totals.reported > listed) return `${listed} of ${totals.reported}`;
-    if (run.state === 'running') return `${totals.done || 0}/${totals.agents || listed}`;
-    return String(totals.agents || listed);
+const UNLISTED_TITLE = 'Spent in this run&#39;s directory by transcripts no snapshot lists';
+
+// The two halves of what a run cost, side by side and never added: the sum over
+// the agents its snapshot lists, and the money the index found in the same
+// directory under transcripts no snapshot names. A run whose own agents cost
+// nothing while its directory did is the case a dash followed by a plus sign
+// would read as arithmetic on nothing, so that one says the word instead.
+function spendCell(totals) {
+    const priced = totals.cost ? esc(`~${fmtCost(totals.cost)}`) : '';
+    if (!totals.unlisted) return priced || '—';
+    const extra = esc(`~${fmtCost(totals.unlisted)}`);
+    const text = priced ? `+${extra}` : `${extra} unlisted`;
+    return `${priced}${priced ? ' ' : ''}<span class="dim" title="${UNLISTED_TITLE}">${text}</span>`;
 }
 
 // A hundred runs is already more history than a table is read for, and each row
 // carries its agents underneath it.
 const RUN_LIMIT = 100;
 
+// How many agent cards the page may carry. The row limit bounds the table, not
+// the document: the widest run here lists 107 agents and the tree has seen 208,
+// so a hundred such rows would be tens of megabytes of prompt and result text
+// for cards nobody opened. Past the budget a run keeps its row — the numbers are
+// what the table is for — and the page says where the cards stopped.
+const CARD_BUDGET = 400;
+
+// How many of the newest runs get their agents drawn. The first run is never
+// budgeted away however wide it is: it is the one being looked at, and a rule
+// that hides it serves nobody.
+function cardedRuns(runs) {
+    let spent = 0;
+    let n = 0;
+    for (const run of runs) {
+        const size = (run.agents || []).length;
+        if (n > 0 && spent + size > CARD_BUDGET) break;
+        spent += size;
+        n++;
+    }
+    return n;
+}
+
 function runRows(runs) {
-    return [...runs].sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
-        .slice(0, RUN_LIMIT).map((run) => {
-            const totals = run.totals || {};
-            const agents = run.agents || [];
-            const status = runStatus(run);
-            const phases = (run.phases || []).map((p) => p.title).join(' → ');
-            // An agent list of its own row rather than of a cell: the agents are
-            // the answer to "what did this run actually do", and folding a
-            // hundred of them into the last column would leave the table
-            // unreadable for the ninety-nine runs nobody is looking at.
-            const detail = agents.length ? `<tr class="detail"><td colspan="8">
+    const shown = [...runs].sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
+        .slice(0, RUN_LIMIT);
+    const carded = cardedRuns(shown);
+
+    const rows = shown.map((run, i) => {
+        const totals = run.totals || {};
+        const agents = run.agents || [];
+        const verdict = wfm.verdictOf(run);
+        const phases = (run.phases || []).map((p) => p.title).join(' → ');
+        // An agent list of its own row rather than of a cell: the agents are the
+        // answer to "what did this run actually do", and folding a hundred of
+        // them into the last column would leave the table unreadable for the
+        // ninety-nine runs nobody is looking at.
+        const detail = agents.length && i < carded ? `<tr class="detail"><td colspan="8">
             <details class="agents"><summary>${agents.length} agent${agents.length === 1 ? '' : 's'}</summary>
               ${agents.map((agent) => agentCard(agent, run)).join('')}
             </details></td></tr>` : '';
 
-            return `<tr><td class="nowrap">${esc(fmtDateTime(run.lastActivity))}</td>
+        return `<tr><td class="nowrap">${esc(fmtDateTime(run.lastActivity))}</td>
             <td class="opt">${esc(run.project)}</td>
             <td class="wrap" title="${esc(run.runId)}">${esc(run.name || run.runId)}</td>
-            <td>${status.word ? `<span class="kind o-${status.cls}">${esc(status.word)}</span>` : '<span class="dim">—</span>'}</td>
+            <td>${verdict.word ? `<span class="kind o-${verdict.outcome}">${esc(verdict.word)}</span>` : '<span class="dim">—</span>'}</td>
             <td class="opt2">${esc(phases)}</td>
-            <td class="num">${esc(agentCount(run))}</td>
+            <td class="num">${esc(wfm.countLabel(run, { always: true }))}</td>
             <td class="num opt2">${run.durationMs ? esc(fmtDur(run.durationMs)) : '—'}</td>
-            <td class="num">${totals.cost ? esc(`~${fmtCost(totals.cost)}`) : '—'}${totals.unlisted
-                ? ` <span class="dim" title="Spent in this run's directory by transcripts no snapshot lists">+~${esc(fmtCost(totals.unlisted))}</span>`
-                : ''}</td></tr>${detail}`;
-        }).join('');
+            <td class="num">${spendCell(totals)}</td></tr>${detail}`;
+    }).join('');
+
+    return { rows, shown: shown.length, carded };
 }
 
 function agentsTab(total, runs = []) {
@@ -492,6 +506,7 @@ function agentsTab(total, runs = []) {
         ['workflow agent', quantiles(wf.map((s) => s.out))],
     ].filter(([, q]) => q);
     const perRun = quantiles(Object.values(perWorkflow));
+    const table = runRows(runs);
 
     return `<section class="tab" data-tab="agents" hidden>
         <p class="note">Subagents and workflows write their own transcripts, so this spend is invisible in the terminal statusline — it belongs to no single session there.</p>
@@ -514,7 +529,9 @@ function agentsTab(total, runs = []) {
         <table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
           <th>Status</th><th class="opt2">Phases</th><th class="num">Agents</th>
           <th class="num opt2">Duration</th><th class="num">Spend</th></tr></thead>
-          <tbody>${runRows(runs)}</tbody></table>` : '<p class="empty">No workflow runs recorded.</p>'}
+          <tbody>${table.rows}</tbody></table>
+        ${table.carded < table.shown ? `<p class="note">Agents are drawn only for the ${table.carded} newest runs of the ${table.shown} above. A fan-out of hundreds carries every prompt and every result into the page, so the rest keep their row without them — the tree in the sidebar has no such limit.</p>` : ''}`
+        : '<p class="empty">No workflow runs recorded.</p>'}
     </section>`;
 }
 

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const db = require('../dashboard');
 const ix = require('../indexer');
+const wf = require('../workflows');
 
 function bucket(cost, msgs = 1, extra = {}) {
     return {
@@ -385,7 +386,10 @@ function demoRun(over = {}) {
         runId: 'wf_demo-1', name: 'review-changes', state: 'finished', status: 'completed',
         project: 'demo', lastActivity: Date.parse('2026-08-09T10:00:00Z'), durationMs: 181000,
         phases: [{ title: 'Review', detail: '' }, { title: 'Verify', detail: '' }],
-        totals: { agents: 1, reported: 0, cost: 3.5, tokens: 400000, unlisted: 0, done: 1 },
+        totals: {
+            agents: 1, reported: 0, cost: 3.5, tokens: 400000, unlisted: 0, done: 1,
+            reportedTokens: 999000, toolCalls: 12,
+        },
         agents: [demoAgent()],
         ...over,
     };
@@ -435,13 +439,83 @@ test('the run row shows the client count when it disagrees with the list', () =>
 
 // A run's price is the sum over the agents it lists, and its directory can hold
 // transcripts no snapshot names — on one run here that is $88.45 beside $107.65.
+// Beside, in the same cell, and never added: $196.10 is what folding them
+// together would print.
 test('money no snapshot accounts for is shown beside the price of the run', () => {
     const total = ix.summarize(demoIndex());
-    const html = db.agentsTab(total, [demoRun({
+    const priced = db.agentsTab(total, [demoRun({
         totals: { agents: 1, reported: 0, cost: 107.65, tokens: 0, unlisted: 88.45, done: 1 },
     })]);
-    assert.match(html, /\$107\.65/);
-    assert.match(html, /\$88\.45/);
+    assert.match(priced, /~\$107\.65 <span class="dim"[^>]*>\+~\$88\.45<\/span><\/td>/);
+    assert.doesNotMatch(priced, /196\.10/);
+
+    // A run whose own agents cost nothing while its directory did: a dash next
+    // to "+~$88.45" would read as arithmetic on nothing.
+    const bare = db.agentsTab(total, [demoRun({
+        totals: { agents: 1, reported: 0, cost: 0, tokens: 0, unlisted: 88.45, done: 1 },
+    })]);
+    assert.match(bare, /~\$88\.45 unlisted/);
+    assert.doesNotMatch(bare, /—\s*<span class="dim"[^>]*>\+/);
+});
+
+// The three places a live run is drawn differently, none of which the brief had:
+// its own word, how far it has got, and the chip both it and its agents carry.
+test('a run still going says what it is doing and how far it has got', () => {
+    const total = ix.summarize(demoIndex());
+    const html = db.agentsTab(total, [demoRun({
+        state: 'running', status: '', durationMs: 0,
+        totals: { agents: 5, reported: 0, cost: 0, tokens: 0, unlisted: 0, done: 2 },
+        agents: [demoAgent({ state: 'progress' })],
+    })]);
+    assert.match(html, /class="kind o-running">running<\/span>/);
+    assert.match(html, /2\/5/);
+    assert.equal((html.match(/class="kind o-running"/g) || []).length, 2,
+        'the run and the agent still working in it both say so');
+});
+
+// A live agent has no label — it is computed in the runtime and reaches the disk
+// only with the final snapshot — and the tree names it by the first line of what
+// it was told. Both surfaces read one machine, so they name one agent alike.
+test('an agent with no label yet is named the way the tree names it', () => {
+    const agent = demoAgent({
+        agentId: 'abcdef1234', label: '', state: 'progress',
+        promptPreview: 'проверь индекс\nи верни таблицу',
+    });
+    const html = db.agentsTab(ix.summarize(demoIndex()), [demoRun({
+        state: 'running', status: '', agents: [agent],
+        totals: { agents: 1, reported: 0, cost: 0, tokens: 0, unlisted: 0, done: 0 },
+    })]);
+    assert.match(html, /проверь индекс <span class="dim"/);
+    assert.equal(wf.agentLabel(agent), 'проверь индекс', 'and by the same rule, not a copy of it');
+});
+
+// The client's own token figure is the agent's context at its last reply, not
+// what it spent — the two differ by a factor of 29 on this machine — so it
+// cannot appear on a page whose columns are money.
+test('the context size the client reports never reaches the page', () => {
+    const html = db.agentsTab(ix.summarize(demoIndex()), [demoRun()]);
+    assert.match(html, /~300k/, 'the priced tokens are shown');
+    assert.doesNotMatch(html, /120k/, 'the context of the agent is not');
+    assert.doesNotMatch(html, /999k/, 'nor the context the run adds up');
+});
+
+// The row limit bounds the table, not the document: a hundred rows of the widest
+// runs here would be tens of megabytes of markup for cards nobody opened.
+test('agent cards stop at a budget, and the page says where', () => {
+    const wide = (i) => demoRun({
+        runId: `wf_wide-${i}`, lastActivity: 1000 - i,
+        totals: { agents: 100, reported: 0, cost: 1, tokens: 0, unlisted: 0, done: 100 },
+        agents: Array.from({ length: 100 }, (_, k) => demoAgent({ agentId: `a${i}-${k}` })),
+    });
+    const runs = Array.from({ length: 6 }, (_, i) => wide(i));
+    const html = db.agentsTab(ix.summarize(demoIndex()), runs);
+
+    const cards = (html.match(/<details class="agent">/g) || []).length;
+    const details = (html.match(/<tr class="detail">/g) || []).length;
+    assert.ok(details >= 1 && details < 6, `every run drew its cards: ${details}`);
+    assert.equal(cards, details * 100, 'a run either carries all of its agents or none');
+    assert.match(html, /wf_wide-0/, 'the newest run is the one that keeps them');
+    assert.match(html, /drawn only for the \d+ newest runs/);
 });
 
 // Read through outcomeOf and never off the raw word: the client writes `error`

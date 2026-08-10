@@ -1064,3 +1064,46 @@ test('treeNodes shows the client count beside the list when the two disagree', (
     assert.match(going.description, /1\/3/, 'a live run counts how far it has got instead');
     assert.doesNotMatch(going.description, /of 0/, 'and the client has counted nothing for it yet');
 });
+
+// Two surfaces ask the same question of a run — the tree row and the dashboard
+// cell — so the answer is written once. The only difference is what a plain
+// count means: silence in a tree that lists the agents underneath it, a number
+// in a column headed "Agents".
+test('countLabel says the two things worth saying about an agent count', () => {
+    const listed = (n) => Array.from({ length: n }, (_, i) => ({ agentId: `a${i}` }));
+    const killed = { state: 'finished', totals: { agents: 13, reported: 74, done: 13 }, agents: listed(13) };
+    const going = { state: 'running', totals: { agents: 5, reported: 0, done: 2 }, agents: listed(2) };
+    const clean = { state: 'finished', totals: { agents: 3, reported: 3, done: 3 }, agents: listed(3) };
+
+    assert.equal(wf.countLabel(killed), '13 of 74');
+    assert.equal(wf.countLabel(going), '2/5');
+    assert.equal(wf.countLabel(clean), '', 'nothing to say where the client and the list agree');
+    assert.equal(wf.countLabel(clean, { always: true }), '3');
+    // A record the scan did not build: a blank, never a throw and never NaN.
+    assert.equal(wf.countLabel({ runId: 'wf_bare-1' }, { always: true }), '0');
+});
+
+// The word is the client's own or none at all, and the outcome is the same
+// five-word vocabulary an agent answers in — which is what lets one icon table
+// and one set of colours serve both.
+test('verdictOf reads a run the way its icon does', () => {
+    assert.deepEqual(wf.verdictOf({ state: 'running' }), { word: 'running', outcome: 'running' });
+    assert.deepEqual(wf.verdictOf({ state: 'abandoned' }), { word: 'no snapshot', outcome: 'stopped' });
+    assert.deepEqual(wf.verdictOf({ state: 'finished', status: 'completed' }), { word: 'completed', outcome: 'done' });
+    assert.deepEqual(wf.verdictOf({ state: 'finished', status: 'killed' }), { word: 'killed', outcome: 'failed' });
+    // A snapshot that carried no status gets no verdict invented for it, and the
+    // icon stays the one a run that did not say "completed" has always had.
+    assert.deepEqual(wf.verdictOf({ state: 'finished', status: '' }), { word: '', outcome: 'failed' });
+    const [a, b, c] = wf.treeNodes([
+        { runId: 'wf_a', state: 'running', phases: [], agents: [], totals: {}, lastActivity: 3 },
+        { runId: 'wf_b', state: 'finished', status: '', phases: [], agents: [], totals: {}, lastActivity: 2 },
+        { runId: 'wf_c', state: 'abandoned', phases: [], agents: [], totals: {}, lastActivity: 1 },
+    ]);
+    assert.deepEqual([a.icon, b.icon, c.icon], ['sync~spin', 'error', 'circle-slash']);
+});
+
+test('agentLabel names an agent that has no label yet by what it was told', () => {
+    assert.equal(wf.agentLabel({ agentId: 'a1', label: 'review:bugs', promptPreview: 'найди баги' }), 'review:bugs');
+    assert.equal(wf.agentLabel({ agentId: 'a1', label: '', promptPreview: ' найди баги\nвторая строка' }), 'найди баги');
+    assert.equal(wf.agentLabel({ agentId: 'abcdef1234', label: '', promptPreview: '' }), 'abcdef12');
+});
