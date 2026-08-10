@@ -82,10 +82,21 @@ in `indexer.js`, or stale-shaped aggregates are silently reused forever. This is
 discoverable trap in the repo.
 
 **Dashboard** is HTML and SVG assembled as strings under a strict CSP, coloured only from
-`--vscode-*` theme variables. Everything interpolated must go through `esc()`. No charting library:
-the charts here are a bar, a heatmap, a stack and a line, and a library would bring its own DOM or
-canvas model into a page assembled as strings under a strict CSP that forbids fetching it. That is a
-decision about charts — the dependency rule above governs everything else.
+`--vscode-*` theme variables. Everything interpolated must go through `esc()`.
+
+**No charting library — measured, not assumed (checked 2026-08-10).** The CSP is not the reason: it
+allows inline script, and `asWebviewUri` + `script-src ${cspSource}` is the documented path anyway.
+The reasons are that a library replaces 99 of the 182 lines of chart code here and no more — the
+calendar heatmap is not a chart any of them draws (uPlot has none, Chart.js needs the `matrix`
+plugin), and `barList`, `hourChart` and `matrixTable` are HTML tables; that these charts are static
+SVG in the markup, so they still render when the webview script fails, as it did the day
+`acquireVsCodeApi` was called twice; and that `currentColor` and `var(--vscode-*)` follow the editor
+theme for free, where a library needs a palette handed to it per theme. Against that, uPlot is 51 KB
+of minified JS on a page that is already 400 KB.
+
+Take one the day the charts need what they do best — zoom and pan over time, filtering legends,
+dozens of series, brushing. uPlot is the candidate: MIT, zero dependencies, 51 KB. The rest of the
+field is heavier or drags an ecosystem: Chart.js 6 MB unpacked with a dependency, D3 30 of them.
 
 ## Conventions specific to this repo
 
