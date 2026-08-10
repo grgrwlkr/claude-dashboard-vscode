@@ -426,6 +426,13 @@ function quantiles(values) {
     return { n: v.length, p50: at(0.5), p90: at(0.9), max: v[v.length - 1] };
 }
 
+// The version of the extension that drew the page, read from the manifest the
+// .vsix was built from — the same file VS Code reads, so the two cannot
+// disagree about which build is running.
+const VERSION = (() => {
+    try { return require('./package.json').version || ''; } catch { return ''; }
+})();
+
 // --- tabs -------------------------------------------------------------------
 
 /**
@@ -508,13 +515,13 @@ function overviewTab(total, dayModels, modelOrder) {
         ${panel('Calendar', heatmap(total.days), {
         note: 'One cell per day, darker for a heavier day. Weeks run down, so the same weekday sits on one row.',
     })}
-        <div class="pair">
-          ${panel('Models', barList(
+        ${panel('Models', barList(
         Object.entries(total.models).sort((a, b) => b[1].cost - a[1].cost),
         { byModel: true, label: (v, b) => `${fmtCost(v)} · ${tok(b.in + b.cacheRead + b.cacheWrite + b.out)}` },
     ))}
-          ${panel('Hour of day', hourChart(total.hours))}
-        </div>
+        ${panel('Hour of day', hourChart(total.hours, { width: 900, height: 180 }), {
+        note: 'Every request ever made, by the hour it was made in. Full width because twenty-four columns in half a panel are a texture rather than a chart.',
+    })}
     </section>`;
 }
 
@@ -1525,8 +1532,10 @@ function liveRuns(runs) {
             run.cost > 0 ? `~${fmtCost(run.cost)}` : '',
         ].filter(Boolean).join(' · ');
 
+        const stalled = run.state === 'abandoned'
+            ? ' <span class="kind o-stopped">no snapshot — nothing written lately</span>' : '';
         const head = `<tr class="run-head"><th colspan="6">${esc(run.name || run.runId)}
-            <span class="dim">${esc(facts)}</span></th></tr>`;
+            <span class="dim">${esc(facts)}</span>${stalled}</th></tr>`;
 
         const rows = working.map((a) => `<tr class="run-agent">
             <td class="mono nowrap">${esc(a.agentId.slice(0, 8))}</td>
@@ -1568,7 +1577,15 @@ function liveRuns(runs) {
 function nowTab(sections, workflows, metrics) {
     const rows = sections || [];
     const m = metrics || {};
-    const active = (workflows || []).filter((r) => r.state === 'running' || r.active);
+    // A run that has written no snapshot is either working or stuck, and both
+    // belong on a tab called Now — a fan-out whose last agent has been silent
+    // for half an hour is exactly what someone opens this to find. Only the
+    // recent ones: a run abandoned last week is history, and nothing ever takes
+    // one off the disk.
+    const RECENT_MS = 2 * 60 * 60 * 1000;
+    const now = Date.now();
+    const active = (workflows || []).filter((r) => r.state === 'running' || r.active
+        || (r.state === 'abandoned' && r.lastActivity > 0 && now - r.lastActivity < RECENT_MS));
 
     if (rows.length === 0) {
         return `<section class="tab" data-tab="now">
@@ -1712,6 +1729,8 @@ body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vsc
   background: var(--vscode-editor-background); margin: 0; padding: 16px 20px 40px;
   overflow-x: hidden; }
 h1 { font-size: 18px; margin: 0 0 2px; font-weight: 600; }
+.ver { font-size: 11.5px; font-weight: 500; opacity: .45; letter-spacing: .02em;
+  font-family: var(--vscode-editor-font-family); vertical-align: 2px; }
 h2 { font-size: 13px; margin: 22px 0 8px; font-weight: 600; opacity: .85; }
 .sub { opacity: .6; margin: 0 0 16px; }
 .note { opacity: .65; margin: 0 0 12px; max-width: 78ch; line-height: 1.5; }
@@ -2446,7 +2465,7 @@ function render(index, total, meta) {
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>Claude Dashboard</title><style>${STYLE}</style></head><body>
-<h1>Claude Dashboard</h1>
+<h1>Claude Dashboard <span class="ver">v${esc(VERSION)}</span></h1>
 <p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
  · <button id="refresh" class="link">Reindex</button></p>
 ${navHtml()}

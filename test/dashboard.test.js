@@ -714,7 +714,7 @@ test('the page names itself the same way the command that opens it does', () => 
     const manifest = JSON.parse(require('node:fs').readFileSync(`${__dirname}/../package.json`, 'utf8'));
     const html = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
     assert.match(html, /<title>Claude Dashboard<\/title>/);
-    assert.match(html, /<h1>Claude Dashboard<\/h1>/);
+    assert.match(html, /<h1>Claude Dashboard <span class="ver">/);
     const open = manifest.contributes.commands.find((c) => c.command === 'claudeStatusline.dashboard');
     assert.equal(open.title, 'Claude: Open dashboard');
 });
@@ -779,4 +779,33 @@ test('a live agent is counted as working whichever word the client used', () => 
     const done = db.nowTab(sections, [run('success')], {});
     assert.match(done, /all 1 returned — 1 × opus 5 xhigh/);
     assert.ok(!/not listed here/.test(done));
+});
+
+// A run with no snapshot is either working or stuck, and both belong on Now.
+// Only this one was drawn before, and the stuck one — the case somebody opens
+// the tab to find — was silently absent.
+test('a stalled run is shown on Now, and says that it is stalled', () => {
+    const sections = [{ id: 'money', title: 'spend', blocks: [{ kind: 'table', rows: [['today', '~$0']] }] }];
+    const run = (state, ago) => ({
+        runId: 'wf_s', name: 'stuck', state, project: 'p', lastActivity: Date.now() - ago,
+        totals: { agents: 2, done: 1, cost: 0 },
+        agents: [{ agentId: 'a1', label: '', phase: '', model: 'claude-opus-5', effort: 'xhigh', state: 'running', lastToolName: '', promptPreview: 'go' }],
+    });
+
+    const stalled = db.nowTab(sections, [run('abandoned', 30 * 60 * 1000)], {});
+    assert.match(stalled, /stuck/);
+    assert.match(stalled, /no snapshot/);
+
+    // A run abandoned a week ago is history: nothing ever takes one off the disk.
+    const old = db.nowTab(sections, [run('abandoned', 7 * 24 * 3600 * 1000)], {});
+    assert.ok(!/stuck/.test(old));
+});
+
+// The page says which build drew it, from the manifest the .vsix was built
+// from — a screenshot of a dashboard is worth much less when nobody can tell
+// whether the window was reloaded after the last install.
+test('the page names the version it was built from', () => {
+    const manifest = JSON.parse(require('node:fs').readFileSync(`${__dirname}/../package.json`, 'utf8'));
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
+    assert.ok(html.includes(`v${manifest.version}`), `no v${manifest.version} in the header`);
 });

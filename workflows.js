@@ -502,9 +502,17 @@ function finishRun(run) {
 
 // How long a run directory may sit untouched before it stops counting as live.
 // An agent on a high effort tier can think for minutes between writes, so a
-// tighter window would flicker; a live parent session is the second, independent
-// witness that keeps this from marking a slow run dead.
+// tighter window would flicker.
 const RUN_STALE_MS = 10 * 60 * 1000;
+
+// A live parent session is the second witness, and it buys the run a far longer
+// window rather than merely agreeing with the first. Ten minutes was measured
+// against the wrong thing: a fan-out of forty-one whose last agent thinks for
+// twenty writes nothing in that time, and the run — with its session plainly
+// alive — was being called abandoned while it was working. The comment here
+// claimed the session kept a slow run from being marked dead; the code required
+// both and so did the opposite.
+const RUN_STALE_LIVE_MS = 60 * 60 * 1000;
 
 // Creation time, falling back to mtime on filesystems that do not keep one.
 // The run directory is created when the run starts and never rewritten, so its
@@ -672,15 +680,15 @@ function scanRuns({ root = PROJECTS, liveSessions = new Set(), now = Date.now(),
         // directory — up to 417 of them here. A finished run already has its
         // answer, so it does not pay for one.
         const touched = !final && run.runDir ? lastTouch(run.runDir) : 0;
-        const fresh = touched > 0 && now - touched < RUN_STALE_MS;
+        const alive = run.sessions.some((s) => liveSessions.has(s));
+        const fresh = touched > 0 && now - touched < (alive ? RUN_STALE_LIVE_MS : RUN_STALE_MS);
         const written = final && run.jsonPath ? (statOf(run.jsonPath)?.mtimeMs || 0) : 0;
 
         // A snapshot is proof the run ended — it is written once, at the end.
         // Without one, a run counts as live only while one of its sessions is
         // alive and its files are still moving; anything else is a run whose
         // client died and will never write a snapshot.
-        const state = final ? 'finished'
-            : (fresh && run.sessions.some((s) => liveSessions.has(s)) ? 'running' : 'abandoned');
+        const state = final ? 'finished' : (fresh && alive ? 'running' : 'abandoned');
 
         // The two places a run without a snapshot describes itself: the roster
         // and the transcripts for its agents, the saved script for its name and
