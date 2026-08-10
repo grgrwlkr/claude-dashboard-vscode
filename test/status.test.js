@@ -23,6 +23,7 @@ const data = {
         session: { pct: 13, reset: NOW + 2 * 3600 },
         weekly: { pct: 52, reset: NOW + 2 * 86400 },
         scoped: [{ scope: 'Fable', pct: 1, reset: NOW + 2 * 86400 }],
+        credits: { used: 103.67, limit: 0, pct: 0, enabled: false, reason: 'out_of_credits' },
     },
     weekly: { pct: 52, reset: NOW + 2 * 86400 },
     pace: { plan: 61, elapsed: 400000, dryAt: NOW + 4 * 86400, beforeReset: false },
@@ -173,4 +174,24 @@ test('a section with nothing behind it is left out entirely', () => {
     // though the collector filled both fields with empty answers.
     const quiet = { ...data, todo: null, peers: { total: 0, busy: 0 } };
     assert.ok(!status.statusSections(quiet, helpers, {}).some((x) => x.id === 'work'));
+});
+
+// The one figure in this extension that is money rather than an estimate from
+// public rates, and the only one that may not carry a tilde.
+test('credits are stated as billed, and as spent when they have run out', () => {
+    const [limits] = status.statusSections(data, helpers, {});
+    const note = notes(limits).find((n) => n.label === 'Credits');
+    assert.equal(note.tone, 'warn');
+    assert.match(note.text, /\$103\.67 spent past the plan/);
+    assert.match(note.text, /none left/);
+    assert.ok(!note.text.includes('~'), 'a billed figure carries no tilde');
+
+    const on = { ...data, limits: { ...data.limits, credits: { used: 12, limit: 50, pct: 24, enabled: true, reason: '' } } };
+    const live = status.statusSections(on, helpers, {}).find((x) => x.id === 'limits');
+    assert.match(notes(live).find((n) => n.label === 'Credits').text, /\$12\.00 spent past the plan of \$50\.00, 24%/);
+
+    // No spend object, no note — an absent figure is not a zero.
+    const none = { ...data, limits: { ...data.limits, credits: null } };
+    const off = status.statusSections(none, helpers, {}).find((x) => x.id === 'limits');
+    assert.ok(!notes(off).some((n) => n.label === 'Credits'));
 });

@@ -80,6 +80,20 @@ function limits(d, h, env) {
         }
     }
 
+    // Credits are the one figure here that is money rather than an estimate, so
+    // they are stated without a tilde and said plainly when they have run out.
+    const cr = lim.credits;
+    if (cr) {
+        blocks.push({
+            kind: 'note',
+            tone: cr.enabled ? 'plain' : 'warn',
+            label: 'Credits',
+            text: cr.enabled
+                ? `${h.fmtCost(cr.used)} spent past the plan${cr.limit > 0 ? ` of ${h.fmtCost(cr.limit)}, ${cr.pct}%` : ''} — billed, not estimated`
+                : `${h.fmtCost(cr.used)} spent past the plan, and credits are off${cr.reason === 'out_of_credits' ? ': none left' : ''} — work stops at the limit rather than continuing on credit`,
+        });
+    }
+
     if (env.stale) blocks.push({ kind: 'note', tone: 'warn', text: 'showing cached data — refresh failed' });
     if (env.updatedAt) blocks.push({ kind: 'note', tone: 'muted', text: `updated ${h.fmtAbs(env.updatedAt)}` });
     return { id: 'limits', title: 'Limits', blocks };

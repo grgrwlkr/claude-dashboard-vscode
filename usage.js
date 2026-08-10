@@ -115,6 +115,35 @@ function limitsOf(payload) {
         scoped: rows
             .filter((r) => r.kind === 'weekly_scoped' && r.scope?.model?.display_name)
             .map(norm),
+        credits: creditsOf(payload),
+    };
+}
+
+/**
+ * Usage credits: what is spent past the plan's limits, and the only figure in
+ * this extension that is money rather than an estimate from public rates.
+ * Everything else here is `~` for a reason; this one is billed.
+ *
+ * The endpoint reports minor units with their own exponent, so the division is
+ * the API's own and not an assumption about cents. `enabled` is a fact about
+ * the account, not about the number: credits already spent stay spent when the
+ * account runs out of them, which is exactly the state this machine is in
+ * (`disabled_reason: out_of_credits`, $103.67 already used).
+ */
+function creditsOf(payload) {
+    const sp = payload?.spend;
+    if (!sp || !sp.used) return null;
+    const money = (v) => (v && v.amount_minor > 0
+        ? v.amount_minor / 10 ** (v.exponent ?? 2) : 0);
+    const used = money(sp.used);
+    const limit = money(sp.limit);
+    if (used <= 0 && !sp.enabled) return null;
+    return {
+        used,
+        limit,
+        pct: limit > 0 ? Math.floor(sp.percent ?? 0) : 0,
+        enabled: Boolean(sp.enabled),
+        reason: String(sp.disabled_reason || ''),
     };
 }
 
@@ -209,5 +238,5 @@ function barText(weekly, pc, nowMs = Date.now()) {
 module.exports = {
     CACHE, STAMP, WEEK, STAMP_TTL, CACHE_TTL, BAR_WIDTH,
     mtime, parseToken, readToken, refreshUsage, touchStamp, stampExpired, readCache,
-    isoToTs, limitsOf, pace, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText, dayLabel, WEEKDAYS,
+    isoToTs, limitsOf, creditsOf, pace, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText, dayLabel, WEEKDAYS,
 };
