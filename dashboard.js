@@ -483,7 +483,7 @@ const shareCell = (text, share, cls = 'num') => {
 
 const sumOf = (map, field) => Object.values(map).reduce((a, b) => a + (b[field] || 0), 0);
 
-function statCards(total) {
+function statCards(total, cfg = {}) {
     const days = Object.keys(total.days).sort();
     const todayKey = days[days.length - 1];
     const spend = Object.values(total.days).reduce((a, b) => a + b.cost, 0);
@@ -495,8 +495,19 @@ function statCards(total) {
 
     // Only the cache share is a share; a spend and a count are not fractions of
     // anything, and a meter under them would be an invented denominator.
+    const month = ix.monthToDate(total);
+    const budget = Number(cfg.monthlyBudget) || 0;
+    const share = budget > 0 ? Math.round((month.spent / budget) * 100) : null;
     return tiles(
         tile('All time', fmtCost(spend), `${days.length} active days`),
+        // The month is the unit a ceiling is set in, and the projection is what
+        // the ceiling is for: knowing on the 11th is worth more than knowing on
+        // the 31st.
+        tile('This month', fmtCost(month.spent),
+            budget > 0
+                ? `${share}% of ${fmtCost(budget)} · ~${fmtCost(month.projected)} by day ${month.days}`
+                : `day ${month.elapsed} of ${month.days} · ~${fmtCost(month.projected)} at this pace`,
+            share, share !== null && share >= 100 ? 'hot' : undefined),
         tile('Last 30 days', fmtCost(last30), ''),
         tile('Last 7 days', fmtCost(last7), ''),
         tile('Latest day', todayKey ? fmtCost(total.days[todayKey].cost) : '$0', todayKey || ''),
@@ -506,11 +517,11 @@ function statCards(total) {
     );
 }
 
-function overviewTab(total, dayModels, modelOrder) {
+function overviewTab(total, dayModels, modelOrder, cfg = {}) {
     const legend = `<div class="legend">${modelOrder.slice(0, 7).map((m, i) =>
         `<span class="chip"><i style="background:${modelColor(m, i)}"></i>${esc(shortModel(m))}</span>`).join('')}</div>`;
     return `<section class="tab" data-tab="overview" hidden>
-        ${statCards(total)}
+        ${statCards(total, cfg)}
         ${panel('Daily spend by model', stackedDays(total.days, modelOrder, dayModels) + legend)}
         ${panel('Calendar', heatmap(total.days), {
         note: 'One cell per day, darker for a heavier day. Weeks run down, so the same weekday sits on one row.',
@@ -1152,7 +1163,7 @@ function settingsList(settings) {
  * back, so "installed" and "used" can sit in the same row — which is the only
  * way the list answers what to uninstall.
  */
-function healthTab(total, sys) {
+function healthTab(total, sys, cfg = {}) {
     if (!sys) return '<section class="tab" data-tab="health" hidden><p class="empty">No installation data.</p></section>';
     const v = sys.versions || {};
     const usedServers = new Set();
@@ -1254,6 +1265,33 @@ function healthTab(total, sys) {
       </tr>`).join('')}
     </tbody></table>`;
 
+    // Installed against what the machine already has on disk: each marketplace
+    // is a local clone, so the version a plugin declares upstream is readable
+    // without asking anyone. What needs the network is whether that clone is
+    // itself behind — and that is the whole of what the setting buys.
+    const updates = sys.pluginUpdates || [];
+    const stale = updates.reduce((a, u) => Math.max(a, u.marketUpdated || 0), 0);
+    const checks = Boolean(cfg.checkPluginUpdates);
+    const behind = updates.filter((u) => u.declared && u.installed && u.installed !== u.available);
+    const updateTable = updates.length ? `<table><thead><tr><th>Plugin</th><th class="opt2">Marketplace</th>
+        <th>Installed</th><th>In the local copy</th><th class="opt">Since</th></tr></thead><tbody>
+      ${updates.map((u) => `<tr>
+        <td class="wrap">${esc(u.name)}</td>
+        <td class="dim opt2" title="${esc(u.repo)}">${esc(u.marketplace)}</td>
+        <td class="mono">${esc(u.installed || '—')}</td>
+        <td class="mono">${u.declared
+        ? (u.installed === u.available ? `<span class="ok">${esc(u.available)}</span>`
+            : `<span class="o-stopped">${esc(u.available)}</span>`)
+        : '<span class="dim">not declared</span>'}</td>
+        <td class="dim opt">${u.installedAt ? esc(fmtDateTime(u.installedAt)) : '—'}</td>
+      </tr>`).join('')}
+    </tbody></table>` : '<p class="empty">No installed plugins recorded.</p>';
+
+    const updateNote = `${updates.length} installed from ${new Set(updates.map((u) => u.marketplace)).size} marketplace${new Set(updates.map((u) => u.marketplace)).size === 1 ? '' : 's'}, each of which is a clone on this disk${stale ? `, last refreshed ${esc(fmtDateTime(stale))}` : ''}. ${behind.length ? `${behind.length} differ${behind.length === 1 ? 's' : ''} from the copy.` : 'None differs from the copy.'} Most manifests declare no version at all, and a missing version is reported as missing rather than as up to date.
+      ${checks
+        ? '<b>Update checking is on</b>: the extension may ask each marketplace whether the clone itself is behind.'
+        : '<b>Nothing is asked of the network.</b> Without <code>claudeStatusline.checkPluginUpdates</code> this compares against the copy already on disk, so a plugin whose marketplace moved after that date will read as current. Turn the setting on to check, or refresh the clone yourself with <code>claude plugin update</code>.'}`;
+
     const enabled = pluginRows.filter((p) => p.enabled).length;
     return `<section class="tab" data-tab="health" hidden>
         ${tiles(
@@ -1271,6 +1309,10 @@ function healthTab(total, sys) {
         ${panel('Plugins', pluginTable, {
         flush: true,
         note: 'What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call\'s arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.',
+    })}
+        ${panel('Versions', updateTable, {
+        flush: true,
+        note: updateNote,
     })}
         ${panel('What each plugin actually brings', componentTable, {
         flush: true,
@@ -2050,7 +2092,10 @@ code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity
 /* Right-aligned, but allowed to wrap: the last cell of a .kv table is a figure
    on some tabs and a file path on others, and kept on one line the path was
    what pushed Health past its panel in a narrow window. */
-.kv td:last-child { text-align: right; white-space: normal; }
+/* Wraps, but on words: the last cell of a .kv table holds a settings path, and
+   anywhere from the rule above broke a settings path into three lines down a
+   narrow column. */
+.kv td:last-child { text-align: right; white-space: normal; overflow-wrap: break-word; }
 /* The settings form reuses .kv for its layout, but its last column is a
    sentence, not a figure — kept on one line it was what pushed the tab past a
    narrow window. */
@@ -2545,7 +2590,7 @@ function render(index, total, meta) {
  · <button id="refresh" class="link">Reindex</button></p>
 ${navHtml()}
 ${nowTab(meta.now, meta.workflows, meta.metrics)}
-${overviewTab(total, dayModels, modelOrder)}
+${overviewTab(total, dayModels, modelOrder, meta.config || {})}
 ${sessionsTab(total)}
 ${breakdownTab('projects', 'Spend by project', projects, 'Grouped by the repository a session ran in.')}
 ${breakdownTab('branches', 'Spend by git branch', branches, 'The branch recorded on each request, so long-lived branches accumulate across sessions.')}
@@ -2559,7 +2604,7 @@ ${cacheTab(total)}
 ${frictionTab(total)}
 ${limitsTab(meta.history)}
 ${settingsTab(meta.config)}
-${healthTab(total, meta.system)}
+${healthTab(total, meta.system, meta.config || {})}
 ${jobsTab(meta.system)}
 ${liveTab(meta.system)}
 ${tasksTab(meta.system)}

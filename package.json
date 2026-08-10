@@ -2,7 +2,7 @@
   "name": "claude-statusline",
   "displayName": "Statusline for Claude Code",
   "description": "Unofficial. Claude Code limits, session context, spend and a usage dashboard, in the VS Code status bar.",
-  "version": "0.19.9",
+  "version": "0.19.10",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -64,6 +64,10 @@
       {
         "command": "claudeStatusline.reindex",
         "title": "Claude: Rebuild the usage index"
+      },
+      {
+        "command": "claudeStatusline.export",
+        "title": "Claude: Export usage as CSV or JSON"
       },
       {
         "command": "claudeStatusline.refresh",
@@ -148,6 +152,17 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Ask Anthropic for the account's limits.\n\nWhen on, the extension reads the OAuth token Claude Code already stores (macOS Keychain, falling back to `~/.claude/.credentials.json`) and sends it in one `Authorization` header to `https://api.anthropic.com/api/oauth/usage` — the same endpoint `/usage` reads. The answer is cached in `~/.claude/statusline-usage.json`, shared with `statusline.sh`, at most once a minute per machine. The token is not stored, copied or sent anywhere else.\n\nWhen off, nothing leaves the machine and the token is never read. Limit fields then come from that cache if something else wrote it, and stay empty otherwise; everything drawn from local transcripts — context, spend, workflows, the dashboard — is unaffected."
+        },
+        "claudeStatusline.monthlyBudget": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "A spend ceiling for the calendar month, in dollars.\n\nSet it above zero and the dashboard draws the month against it and the extension says so once at 80% and once at 100% — once per month each, not on every tick. Zero turns both off.\n\nThe figure is an estimate from public per-million-token rates across every transcript on this machine, not a bill."
+        },
+        "claudeStatusline.checkPluginUpdates": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Ask each plugin's marketplace whether a newer version exists.\n\n**Off by default, and off means nothing leaves the machine.** With it off the Health tab still lists every installed plugin, its version and what actually ran — it simply cannot tell you which of them is out of date, because that answer only exists on a server.\n\nWith it on, the extension fetches the marketplace manifest each plugin was installed from, at most once an hour, and compares versions. No credentials are sent and nothing about your usage is transmitted — only a request for a public manifest."
         },
         "claudeStatusline.refreshInterval": {
           "type": "number",

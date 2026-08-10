@@ -12,6 +12,7 @@ const commands = new Map();
 const views = new Map();
 const listeners = { config: [], window: [] };
 let settings = {};
+let saveTarget;
 
 const disposable = () => ({ dispose() {} });
 
@@ -63,6 +64,7 @@ const vscode = {
         showInformationMessage: async () => undefined,
         showWarningMessage: async () => undefined,
         showTextDocument: async () => undefined,
+        showSaveDialog: async () => saveTarget,
         withProgress: async (_opts, task) => task({ report() {} }),
         createWebviewPanel() {
             // The panel records what the extension posts back and hands over the
@@ -119,6 +121,7 @@ vscode.__updates = updates;
 vscode.__commands = commands;
 vscode.__views = views;
 vscode.__setSettings = (next) => { settings = next; };
+vscode.__setSaveTarget = (uri) => { saveTarget = uri; };
 vscode.__setWorkspace = (folder) => {
     vscode.workspace.workspaceFolders = folder ? [{ uri: { fsPath: folder } }] : undefined;
 };
@@ -135,6 +138,7 @@ vscode.__reset = () => {
     listeners.config.length = 0;
     listeners.window.length = 0;
     settings = {};
+    saveTarget = undefined;
     vscode.workspace.workspaceFolders = undefined;
 };
 

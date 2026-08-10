@@ -466,6 +466,46 @@ function disk(root = ROOT, known = null) {
 // rather than imported because system.js reads ~/.claude and session.js reads a
 // session — neither is the other's dependency — and the rule is one line that
 // has not changed since the client shipped it.
+/**
+ * What is installed against what the machine already knows is available.
+ *
+ * Both halves are on disk: `installed_plugins.json` says which version is in
+ * use and when it was put there, and each marketplace is a **local clone**
+ * under `plugins/marketplaces/`, so the version a plugin declares upstream can
+ * be read without asking anyone. What cannot be known offline is whether that
+ * clone is itself behind — hence the freshness date, which is the honest half
+ * of an update check that makes no request.
+ *
+ * A manifest that declares no version is reported as declaring none. Most of
+ * them do not, and inventing "up to date" from a missing field would be the one
+ * wrong answer here.
+ */
+function pluginUpdates(root = ROOT) {
+    const markets = readJson(path.join(root, 'plugins', 'known_marketplaces.json')) || {};
+    const installed = (readJson(path.join(root, 'plugins', 'installed_plugins.json')) || {}).plugins || {};
+    const rows = [];
+    for (const [key, entries] of Object.entries(installed)) {
+        const [name, marketplace] = String(key).split('@');
+        const list = Array.isArray(entries) ? entries : [entries];
+        const first = list[0] || {};
+        const market = markets[marketplace] || null;
+        const manifest = market && market.installLocation
+            ? readJson(path.join(market.installLocation, 'plugins', name, '.claude-plugin', 'plugin.json'))
+            : null;
+        rows.push({
+            name,
+            marketplace,
+            installed: first.version || '',
+            installedAt: Date.parse(first.lastUpdated || first.installedAt || '') || 0,
+            available: manifest ? (manifest.version || '') : '',
+            declared: Boolean(manifest && manifest.version),
+            repo: market && market.source ? market.source.repo || '' : '',
+            marketUpdated: market ? Date.parse(market.lastUpdated || '') || 0 : 0,
+        });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 const slugFor = (dir) => String(dir).replace(/[^a-zA-Z0-9]/g, '-');
 const slugsOf = (projects) => projects.map(slugFor);
 
@@ -683,6 +723,7 @@ function snapshot({ root = ROOT, workspace = '', projects = [], sessionProjects 
         tasks: tasks(root, sessionProjects),
         disk: withDisk ? disk(root, jobRows) : null,
         context: contextBudget(root, projects, slugsOf(projects)),
+        pluginUpdates: pluginUpdates(root),
         changelog: changelog(root, current),
         projects: projectMetrics(config),
         prompts: promptLog(root),
@@ -692,6 +733,6 @@ function snapshot({ root = ROOT, workspace = '', projects = [], sessionProjects 
 module.exports = {
     ROOT, CONFIG, CHARS_PER_TOKEN,
     settingsChain, settingsOf, hooksOf, permissionsOf, mcpServers, plugins, componentsOf,
-    jobs, live, tasks, disk, dirSize, contextBudget, changelog, compareVersions,
+    jobs, live, tasks, disk, dirSize, contextBudget, changelog, compareVersions, pluginUpdates,
     projectMetrics, promptLog, versions, runningVersion, snapshot, shortPath,
 };

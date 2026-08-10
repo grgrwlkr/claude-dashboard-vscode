@@ -9,6 +9,9 @@ const dashboard = require('./dashboard');
 const wfm = require('./workflows');
 const status = require('./status');
 const { fmtCost, ratesFor } = require('./pricing');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 // Complaining about the cache is only meaningful once refreshes have failed for
 // a while: with a one-minute period, a two-minute threshold would fire on an
@@ -684,6 +687,53 @@ async function buildIndex(storageDir, { force = false, silent = false } = {}) {
 const SYSTEM_TTL = 3600 * 1000;
 let systemCache = null;
 
+/**
+ * The month against its ceiling, said once per threshold. It fires where the
+ * index is refreshed — opening the dashboard, a reindex, activation — and not
+ * on the tick: a month of spend comes from the index, and rebuilding the index
+ * every minute is the one expensive read this extension keeps off a timer.
+ */
+/**
+ * The index, out of the extension and into a file the user picked. Two shapes
+ * because two questions: JSON keeps every aggregate the page draws, CSV is one
+ * row per transcript, which is what a spreadsheet can pivot.
+ */
+async function exportIndex(context) {
+    const { index } = await buildIndex(context.globalStorageUri.fsPath, { silent: true });
+    const total = ix.summarize(index);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const target = await vscode.window.showSaveDialog({
+        defaultUri: vscode.Uri.file(path.join(os.homedir(), `claude-usage-${stamp}.csv`)),
+        filters: { CSV: ['csv'], JSON: ['json'] },
+        saveLabel: 'Export',
+    });
+    if (!target) return;
+    const asJson = target.fsPath.toLowerCase().endsWith('.json');
+    try {
+        fs.writeFileSync(target.fsPath, asJson ? ix.exportJson(index, total) : ix.exportCsv(total));
+        vscode.window.showInformationMessage(
+            `Exported ${asJson ? 'the whole summary' : `${total.sessions.length} transcripts`} to ${target.fsPath}`);
+    } catch (err) {
+        vscode.window.showErrorMessage(`Export failed: ${err.message}`);
+    }
+}
+
+function checkBudget(context, total) {
+    const budget = Number(vscode.workspace.getConfiguration('claudeStatusline').get('monthlyBudget')) || 0;
+    if (budget <= 0) return;
+    const month = ix.monthToDate(total);
+    const share = (month.spent / budget) * 100;
+    const key = `budget:${new Date().getFullYear()}-${new Date().getMonth() + 1}`;
+    const said = context.globalState.get(key) || 0;
+    const level = share >= 100 ? 100 : share >= 80 ? 80 : 0;
+    if (level <= said) return;
+    context.globalState.update(key, level);
+    const text = level === 100
+        ? `Claude: ${fmtCost(month.spent)} this month, past the ${fmtCost(budget)} you set.`
+        : `Claude: ${fmtCost(month.spent)} this month — ${Math.round(share)}% of ${fmtCost(budget)}, on track for ~${fmtCost(month.projected)}.`;
+    vscode.window.showWarningMessage(text);
+}
+
 function systemSnapshot(state, index, { force = false } = {}) {
     const fresh = systemCache && !force && Date.now() - systemCache.at < SYSTEM_TTL;
     if (fresh) return systemCache;
@@ -735,6 +785,8 @@ function configView(state) {
         alignment: cfg.get('alignment'),
         priority: cfg.get('priority'),
         refreshInterval: cfg.get('refreshInterval'),
+        monthlyBudget: cfg.get('monthlyBudget'),
+        checkPluginUpdates: cfg.get('checkPluginUpdates'),
         palette,
     };
 }
@@ -825,6 +877,7 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
     const storageDir = context.globalStorageUri.fsPath;
     const { index, stats } = await buildIndex(storageDir, { force, silent });
     const total = ix.summarize(index);
+    checkBudget(context, total);
     const html = dashboard.render(index, total, {
         files: stats.total,
         lastRun: Date.now(),
@@ -967,6 +1020,7 @@ function activate(context) {
         vscode.window.createTreeView('claudeStatusline.workflows', { treeDataProvider: state.tree }),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
+        vscode.commands.registerCommand('claudeStatusline.export', () => exportIndex(context)),
         vscode.commands.registerCommand('claudeStatusline.refresh', async () => {
             // "Refresh now" is still not a way around the setting: with limits
             // switched off this re-reads the disk and redraws, nothing more.

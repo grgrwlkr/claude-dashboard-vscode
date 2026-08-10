@@ -948,3 +948,43 @@ test('the open-file message is refused for a path the page never carried', async
         assert.deepEqual(vscode.__errors, [], 'a refused path must not even be attempted');
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
+
+// An export is the one place the index leaves the machine's own process, so
+// what it writes has to be exactly what the page drew — and a session title
+// full of commas and quotes has to survive the trip.
+test('export writes the file the user picked, in the shape its name asks for', async () => {
+    const run = activate({ segments: ['{weekly}'] });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-exp-'));
+    try {
+        for (const [name, check] of [
+            ['out.csv', (t) => t.startsWith('end,project,branch')],
+            ['out.json', (t) => JSON.parse(t).exportedAt && Array.isArray(JSON.parse(t).sessions)],
+        ]) {
+            const target = path.join(dir, name);
+            vscode.__setSaveTarget({ fsPath: target });
+            await vscode.__commands.get('claudeStatusline.export')();
+            assert.ok(fs.existsSync(target), `${name} was not written`);
+            assert.ok(check(fs.readFileSync(target, 'utf8')), `${name} is not in its own shape`);
+        }
+
+        // Nothing is written when the dialog is dismissed.
+        vscode.__setSaveTarget(undefined);
+        const before = fs.readdirSync(dir).length;
+        await vscode.__commands.get('claudeStatusline.export')();
+        assert.equal(fs.readdirSync(dir).length, before);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); run.dispose(); }
+});
+
+// A cell that could be misread is quoted: one unescaped quote shifts every
+// column after it on that row, and a session title is user text.
+test('a csv cell survives commas, quotes and newlines', () => {
+    const csv = ix.exportCsv({
+        days: {}, models: {}, projects: {}, branches: {}, skills: {}, tools: {},
+        sessions: [{ end: 1, project: 'p', title: 'a, "b"\nc', models: ['x', 'y'], cost: 1 }],
+    });
+    const rows = csv.split('\n');
+    assert.match(rows[0], /^end,project,branch/);
+    // The quoted cell keeps its newline, so the row spans two lines on purpose.
+    assert.match(csv, /"a, ""b""\nc"/);
+    assert.match(csv, /x y/);
+});

@@ -612,7 +612,71 @@ function summarize(index) {
     return total;
 }
 
+/**
+ * The index as something another program can read. JSON is the whole summary;
+ * CSV is one row per transcript, because that is the shape a spreadsheet wants
+ * and the totals can be re-derived from it. Both are built from the same
+ * summary the page draws, so an export cannot disagree with what was on screen.
+ */
+function exportJson(index, total) {
+    return JSON.stringify({
+        exportedAt: new Date().toISOString(),
+        transcripts: total.sessions.length,
+        spend: Object.values(total.days).reduce((a, b) => a + b.cost, 0),
+        days: total.days,
+        models: total.models,
+        projects: total.projects,
+        branches: total.branches,
+        skills: total.skills,
+        tools: total.tools,
+        sessions: total.sessions,
+    }, null, 2);
+}
+
+const CSV_COLUMNS = ['end', 'project', 'branch', 'kind', 'entrypoint', 'title',
+    'models', 'efforts', 'start', 'msgs', 'tokens', 'out', 'cacheRead', 'cacheWrite', 'cost'];
+
+// A field is quoted whenever it could be misread — a session title carries
+// commas, quotes and newlines, and one unescaped quote shifts every column
+// after it on that row.
+const csvCell = (v) => {
+    const text = Array.isArray(v) ? v.join(' ') : String(v ?? '');
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+function exportCsv(total) {
+    const rows = total.sessions.map((s) => CSV_COLUMNS.map((c) => csvCell(s[c])).join(','));
+    return [CSV_COLUMNS.join(','), ...rows].join('\n');
+}
+
+/**
+ * The calendar month so far, and where it lands if the rest of it looks like
+ * the part that has happened. Days come from the index, which already keys them
+ * `YYYY-MM-DD`, so this costs nothing beyond the summary the page already has —
+ * walking transcripts for a month of spend would be the one expensive read this
+ * dashboard refuses to put on a tick.
+ */
+function monthToDate(total, nowMs = Date.now()) {
+    const now = new Date(nowMs);
+    const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-`;
+    let spent = 0;
+    let active = 0;
+    for (const [day, b] of Object.entries(total.days || {})) {
+        if (!day.startsWith(prefix)) continue;
+        spent += b.cost || 0;
+        if (b.cost > 0) active++;
+    }
+    const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const elapsed = now.getDate();
+    // Against the days gone, not the days worked: a month with weekends off
+    // still has to be paid for by the month's end, and dividing by active days
+    // alone forecasts a figure nobody will ever be billed.
+    const projected = elapsed > 0 ? (spent / elapsed) * days : 0;
+    return { spent, projected, elapsed, days, active };
+}
+
 module.exports = {
+    monthToDate, exportJson, exportCsv,
     PROJECTS, INDEX_VERSION, SUBAGENT_RE, INTERESTING,
     describeFile, projectName, indexFile, walk, loadIndex, freshIndex, saveIndex, refreshIndex,
     summarize, dayKey, bucket, emptyAgg, emptyFriction, effortKey, splitEffort,
