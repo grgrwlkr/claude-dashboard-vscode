@@ -413,27 +413,29 @@ function nameFromScriptPath(scriptPath) {
 /**
  * Where the snapshot of a run that was going is, or '' while it has none. A
  * running run has no jsonPath — that field is filled by the scan, and the scan
- * is exactly what the fast tick must not do — so the file is looked for instead
- * of being asked for.
+ * is exactly what the fast tick must not do — so the file is looked for beside
+ * the run's own directory instead of being asked for.
  *
- * Every session of the project is asked, not the run's own: five runs on this
- * machine keep their directory under one session and their snapshot under
- * another, and while the run is still going that second session does not exist
- * on disk yet, so neither the run record nor its path can name it. The cost is
- * one readdir and at most 37 stats — the widest project here — against the whole
- * tree the full scan walks.
+ * Only that one session is asked, because a run id does not identify a run: two
+ * attempts of one workflow keep one id on purpose — `resumeFromRunId` needs it —
+ * and one such pair exists here, killed with 7 agents and 880255 ms in one
+ * session against completed with 65 agents and 3047744 ms in another. Searching
+ * the project would let either of them read the other's verdict, agent list and
+ * duration off a file that is not about it. An mtime guard does not separate
+ * them: those two snapshots are an hour apart and the wrong one still passes.
+ *
+ * The cost of the narrow lookup is the five runs on this machine whose snapshot
+ * lands in a sibling session — 65 of 70 keep it in their own — and they lose
+ * nothing but immediacy: the full scan pairs the halves by `slug/runId`, and it
+ * is the only reader that knows which pairs are halves and which are attempts.
  */
 function snapshotPath(run) {
     if (run.jsonPath) return statOf(run.jsonPath) ? run.jsonPath : '';
     if (!run.runDir) return '';
-    // <slug>/<session>/subagents/workflows/<runId>: four levels up is the project.
-    const slugRoot = path.dirname(path.dirname(path.dirname(path.dirname(run.runDir))));
-    for (const entry of listDir(slugRoot)) {
-        if (!entry.isDirectory()) continue;
-        const file = path.join(slugRoot, entry.name, 'workflows', `${run.runId}.json`);
-        if (statOf(file)) return file;
-    }
-    return '';
+    // <slug>/<session>/subagents/workflows/<runId>: three levels up is the session.
+    const session = path.dirname(path.dirname(path.dirname(run.runDir)));
+    const file = path.join(session, 'workflows', `${run.runId}.json`);
+    return statOf(file) ? file : '';
 }
 
 /**

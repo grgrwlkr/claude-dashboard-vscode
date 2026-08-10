@@ -533,15 +533,55 @@ test('snapshotPath notices a run that just finished', () => tree((t) => {
 }));
 
 // Five runs on this machine write their snapshot into a session other than the
-// one holding the run directory. While the run is going that session does not
-// exist yet, so no path derived from the run can name it — every session of the
-// project has to be asked.
-test('snapshotPath finds a snapshot that landed in a sibling session', () => tree((t) => {
+// one holding the run directory. The lookup deliberately does not go looking for
+// it: a run id is not unique across sessions, so a search of the project cannot
+// tell a half of this run from another attempt of it. Nothing is lost but
+// immediacy — the full scan pairs the halves itself, one tick later.
+test('snapshotPath does not reach into a sibling session', () => tree((t) => {
     runFixture(t, 'wf_sib-1', { journal: [{ type: 'started', agentId: 'a1' }] });
-    const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    const live = { root: t.root, liveSessions: new Set([t.session]), now: Date.now() };
+    const [run] = wf.scanRuns(live);
     assert.equal(wf.snapshotPath(run), '');
-    const file = writeAt(t, SECOND, 'workflows/wf_sib-1.json', { ...FINAL, runId: 'wf_sib-1' });
-    assert.equal(wf.snapshotPath(run), file);
+
+    writeAt(t, SECOND, 'workflows/wf_sib-1.json', { ...FINAL, runId: 'wf_sib-1' });
+    assert.equal(wf.snapshotPath(run), '', 'a file under another session is not this run to read');
+    assert.equal(wf.finishRun(run), null);
+
+    const [merged] = wf.scanRuns(live);
+    assert.equal(merged.state, 'finished', 'and the scan is the reader that pairs the two halves');
+    assert.equal(merged.status, 'completed');
+}));
+
+// What binding the lookup to the run's own session buys. Two attempts of one
+// workflow keep one run id on purpose — one such pair here reads killed with 7
+// agents and 880255 ms against completed with 65 and 3047744 ms — so a search
+// across the project hands a run the other one's verdict, agent count and
+// duration. An mtime guard does not separate them: the wrong snapshot here is
+// the newer of the two, and it still passes.
+test('finishRun takes the status of its own session, not of another attempt', () => tree((t) => {
+    runFixture(t, 'wf_twin-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    const [going] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+
+    const other = writeAt(t, SECOND, 'workflows/wf_twin-1.json', {
+        ...FINAL, runId: 'wf_twin-1', status: 'completed', durationMs: 3047744, agentCount: 65,
+    });
+    assert.equal(wf.finishRun(going), null, "another attempt's snapshot is not this run's ending");
+
+    const mine = t.write('workflows/wf_twin-1.json', {
+        ...FINAL, runId: 'wf_twin-1', status: 'killed', durationMs: 880255, agentCount: 7,
+        workflowProgress: [FINAL.workflowProgress[1]],
+    });
+    // The run's own snapshot is the older file, exactly as on the real pair.
+    const hourAgo = new Date(Date.now() - 3600 * 1000);
+    fs.utimesSync(mine, hourAgo, hourAgo);
+    assert.ok(fs.statSync(other).mtimeMs > fs.statSync(mine).mtimeMs);
+
+    const done = wf.finishRun(going);
+    assert.equal(done.status, 'killed');
+    assert.equal(done.durationMs, 880255);
+    assert.equal(done.totals.reported, 7);
+    assert.equal(done.agents.length, 1);
+    assert.deepEqual(wf.verdictOf(done), { word: 'killed', outcome: 'failed' });
 }));
 
 // The whole point of reading the snapshot the moment it is noticed rather than
