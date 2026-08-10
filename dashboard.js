@@ -1072,7 +1072,7 @@ function settingsList(settings) {
     const rows = Object.entries(settings.values || {});
     if (rows.length === 0) return '<p class="empty">No settings found.</p>';
     return `<table class="kv"><tbody>${rows.map(([key, v]) =>
-        `<tr><th scope="row"><span>${esc(key)}</span></th><td>${esc(String(v.value))}</td>
+        `<tr><th scope="row" title="${esc(key)}"><span>${esc(key)}</span></th><td>${esc(String(v.value))}</td>
          <td class="dim opt">${esc(v.from)}</td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -1122,7 +1122,7 @@ function healthTab(total, sys) {
     const settingsBody = settingsList(sys.settings || {})
         + (Object.keys((sys.settings || {}).env || {}).length
             ? `<h3 class="now-sub">Environment</h3><table class="kv"><tbody>${Object.entries(sys.settings.env).map(([k, val]) =>
-        `<tr><th scope="row"><span>${esc(k)}</span></th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : '');
+        `<tr><th scope="row" title="${esc(k)}"><span>${esc(k)}</span></th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : '');
 
     const mcpBody = `<table><thead><tr><th>Server</th><th>Scope</th><th class="opt2">Via</th><th>Used</th></tr></thead><tbody>
             ${mcpRows.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.scope)}${m.project ? ` <span class="dim">${esc(m.project)}</span>` : ''}</td>
@@ -1316,7 +1316,7 @@ function tasksTab(sys) {
     const table = `<table><thead><tr><th class="nowrap">Last touched</th><th>Project</th><th class="opt">Session</th>
           <th class="num">Done</th><th>Still open</th></tr></thead><tbody>
         ${rows.map((t) => `<tr><td class="nowrap">${esc(fmtDateTime(t.at))}</td>
-          <td>${esc(t.project || '—')}</td><td class="mono opt">${esc(t.session.slice(0, 8))}</td>
+          <td>${esc(t.project || '—')}</td><td class="mono nowrap opt">${esc(t.session.slice(0, 8))}</td>
           <td class="num">${t.done}/${t.total}</td>
           <td>${t.open.length ? esc(t.open.join(' · ')) : '<span class="dim">nothing</span>'}</td></tr>`).join('')}
         </tbody></table>`;
@@ -1536,14 +1536,25 @@ function liveRuns(runs) {
             <td class="dim opt">${esc(a.lastToolName || '')}</td>
             <td><span class="kind o-${esc(wfm.outcomeOf(a.state, run.state))}">${esc(wfm.outcomeOf(a.state, run.state))}</span></td></tr>`).join('');
 
+        // The ones that have returned, as what they ran on rather than as forty
+        // more rows. "40 finished" on its own was a row that said data existed
+        // and declined to show it; this answers the question the model and the
+        // effort columns are here for, in one line whatever the fleet size.
+        const fleet = new Map();
+        for (const a of agents) {
+            if (wfm.outcomeOf(a.state, run.state) === 'running') continue;
+            const key = `${a.model ? shortModel(a.model) : 'model not recorded'}${a.effort ? ` ${a.effort}` : ''}`;
+            fleet.set(key, (fleet.get(key) || 0) + 1);
+        }
+        const breakdown = [...fleet].sort((a, b) => b[1] - a[1])
+            .map(([key, n]) => `${n} × ${key}`).join(' · ');
+
         // An empty block would read as "nothing is happening" on a run that is
         // simply between waves, so it says which of the two it is.
-        const tail = working.length === 0
-            ? `<tr class="run-agent"><td colspan="6" class="dim">${agents.length === 0
-                ? 'no agent has written anything yet'
-                : `all ${agents.length} have returned — the run is finishing`}</td></tr>`
+        const tail = agents.length === 0
+            ? '<tr class="run-agent"><td colspan="6" class="dim">no agent has written anything yet</td></tr>'
             : (settled > 0
-                ? `<tr class="run-agent"><td colspan="6" class="dim">${settled} finished, not listed here</td></tr>`
+                ? `<tr class="run-agent"><td colspan="6" class="dim">${working.length === 0 ? 'all ' : ''}${settled} returned — ${esc(breakdown)}</td></tr>`
                 : '');
 
         return head + rows + tail;
@@ -1738,6 +1749,20 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
   gap: 14px; margin-bottom: 14px; }
 .pair > .panel { margin: 0; }
 
+/* The full name of a label that did not fit, on hover. The title attribute
+   covers the same ground and stays as the fallback, but it waits about a second
+   and cannot be styled; this appears at once. Only cells the script found
+   clipped get it, so it never covers a name that was already whole. */
+[data-clipped] { position: relative; }
+[data-clipped]:hover::after {
+  content: attr(title); position: absolute; left: 0; top: calc(100% + 2px); z-index: 20;
+  padding: 3px 8px; border-radius: 4px; white-space: nowrap; font-size: 11.5px;
+  font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 1;
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border));
+  box-shadow: 0 2px 8px rgb(0 0 0 / .35); pointer-events: none; }
+
 /* A workflow is a row and its agents are the rows beneath it, so several runs
    stack in one table instead of each taking a panel. The run's row is a heading
    inside the table body — heavier, with a rule above it — and its agents are
@@ -1835,8 +1860,21 @@ table { width: 100%; border-collapse: collapse; }
    as the browser is concerned; anywhere-wrapping is what keeps it inside its
    column instead of widening the table past the panel. */
 th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--vscode-panel-border);
-  overflow-wrap: anywhere; }
-th { font-weight: 600; opacity: .6; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  overflow-wrap: break-word; }
+/* break-word, not anywhere, and the difference is not cosmetic: only anywhere
+   lets a break count towards a cell's min-content width, so a shrink-to-fit
+   column could be one character wide. That is what "model" and "allow" and
+   "service" became — a letter per line down the page. break-word still breaks a
+   token that genuinely cannot fit; it simply does not offer to. The cells that
+   really do hold unbreakable strings — paths, hook commands, JSON — ask for
+   anywhere by name below. */
+th { font-weight: 600; opacity: .6; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  overflow-wrap: normal; }
+/* A path, a permission rule, a hook command or a settings value is one long
+   token with nothing to break on, and holding it whole widens the table past
+   its panel. Every selector here is a cell that takes the width left over, so
+   it has no shrink-to-fit column to collapse into. */
+.mono, td.wrap, .kv td { overflow-wrap: anywhere; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums;
   white-space: nowrap; overflow-wrap: normal; }
 tbody tr:hover { background: var(--vscode-list-hoverBackground); }
@@ -1921,6 +1959,9 @@ code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity
    min-content is one character collapses to one character, which is what
    "model" rendered as — stacked down the page a letter at a time. */
 .kv th[scope="row"] span { display: block; max-width: 26ch; overflow-wrap: break-word; }
+/* A label inside a header cell wraps like text: the form's row headings are
+   sentences, not identifiers. */
+.kv th[scope="row"] label { overflow-wrap: break-word; }
 .kv td { font-variant-numeric: tabular-nums; }
 /* Right-aligned, but allowed to wrap: the last cell of a .kv table is a figure
    on some tabs and a file path on others, and kept on one line the path was
@@ -2131,6 +2172,27 @@ let scrollTimer = null;
 window.addEventListener('scroll', () => {
   clearTimeout(scrollTimer);
   scrollTimer = setTimeout(() => remember({ scrollY: window.scrollY }), 150);
+});
+
+// A label that has been cut short says so, and says the whole of itself on
+// hover. The title attribute is already on every one of them and stays as the
+// fallback — this only marks the ones actually clipped at the current width, so
+// the hover panel never appears over a name that is already whole.
+function markClipped() {
+  for (const el of document.querySelectorAll('.bars th span, .kv th[scope="row"] span, td.wrap')) {
+    const cut = el.scrollWidth > el.clientWidth + 1;
+    const cell = el.closest('th, td');
+    if (cut) cell.setAttribute('data-clipped', '');
+    else cell.removeAttribute('data-clipped');
+  }
+}
+addEventListener('load', markClipped);
+let clipTimer = null;
+addEventListener('resize', () => { clearTimeout(clipTimer); clipTimer = setTimeout(markClipped, 120); });
+// A tab is laid out only once it is on screen, so its own widths are unknown
+// until it opens.
+document.addEventListener('click', (e) => {
+  if (e.target.closest('nav button')) requestAnimationFrame(markClipped);
 });
 
 // --- the settings editor ----------------------------------------------------

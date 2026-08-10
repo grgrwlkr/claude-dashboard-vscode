@@ -773,7 +773,10 @@ test('a live agent is counted as working whichever word the client used', () => 
         assert.match(html, /o-running/, `${word} was not drawn as working`);
         assert.ok(!/have returned|finished, not listed/.test(html), `${word} was counted as settled`);
     }
-    // And one that really has finished is not listed among them.
+    // And one that really has finished is summarised by what it ran on rather
+    // than listed: a count with no breakdown is a row that says data exists and
+    // refuses to show it.
     const done = db.nowTab(sections, [run('success')], {});
-    assert.match(done, /all 1 have returned/);
+    assert.match(done, /all 1 returned — 1 × opus 5 xhigh/);
+    assert.ok(!/not listed here/.test(done));
 });
