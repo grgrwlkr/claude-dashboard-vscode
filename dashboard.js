@@ -1506,24 +1506,20 @@ function statusBlocks(blocks) {
  * here in full.
  */
 /**
- * Every workflow still going, as one table: a run is a row, and the agents it
- * has in flight are the rows under it. Several runs stack in the same table
- * rather than each taking a panel of its own.
+ * Every workflow still going, as one table: a run is a row, and its agents are
+ * the rows under it. Several runs stack in the same table rather than each
+ * taking a panel of its own.
  *
- * Only the agents still working are drawn. A fan-out of forty settles thirty of
- * them within the hour, and thirty rows of "done" is the history of the run,
- * not its state — which is the question this tab exists to answer. The count is
- * in the run's own row, and every agent it ever had is under Work → Agents &
- * workflows.
+ * Every agent, not only the ones still working. A fan-out of forty is forty
+ * rows and that is the point — the tab is where you watch a run, and an agent
+ * that has returned is still part of what the run did. Working ones come first,
+ * because a finished agent is a fact and a running one is a question.
  */
 function liveRuns(runs) {
     const body = runs.map((run) => {
         const agents = run.agents || [];
-        // Through outcomeOf, not off the raw word: the client writes `progress`
-        // and `queued` too, and a row that tested for one spelling drew every
-        // other one as finished.
-        const working = agents.filter((a) => wfm.outcomeOf(a.state, run.state) === 'running');
-        const settled = agents.length - working.length;
+        const working = (a) => wfm.outcomeOf(a.state, run.state) === 'running';
+        const order = [...agents].sort((a, b) => Number(working(b)) - Number(working(a)));
 
         const facts = [
             run.project,
@@ -1537,36 +1533,22 @@ function liveRuns(runs) {
         const head = `<tr class="run-head"><th colspan="6">${esc(run.name || run.runId)}
             <span class="dim">${esc(facts)}</span>${stalled}</th></tr>`;
 
-        const rows = working.map((a) => `<tr class="run-agent">
+        const rows = order.map((a) => {
+            const outcome = wfm.outcomeOf(a.state, run.state);
+            return `<tr class="run-agent">
             <td class="mono nowrap">${esc(a.agentId.slice(0, 8))}</td>
             <td class="wrap opt2" title="${esc(a.promptPreview || a.agentId)}">${esc(wfm.agentLabel(a))}</td>
             <td>${a.model ? esc(shortModel(a.model)) : '<span class="dim">—</span>'}</td>
             <td>${a.effort ? `<span class="kind">${esc(a.effort)}</span>` : '<span class="dim">—</span>'}</td>
             <td class="dim opt">${esc(a.lastToolName || '')}</td>
-            <td><span class="kind o-${esc(wfm.outcomeOf(a.state, run.state))}">${esc(wfm.outcomeOf(a.state, run.state))}</span></td></tr>`).join('');
+            <td><span class="kind o-${esc(outcome)}">${esc(outcome)}</span></td></tr>`;
+        }).join('');
 
-        // The ones that have returned, as what they ran on rather than as forty
-        // more rows. "40 finished" on its own was a row that said data existed
-        // and declined to show it; this answers the question the model and the
-        // effort columns are here for, in one line whatever the fleet size.
-        const fleet = new Map();
-        for (const a of agents) {
-            if (wfm.outcomeOf(a.state, run.state) === 'running') continue;
-            const key = `${a.model ? shortModel(a.model) : 'model not recorded'}${a.effort ? ` ${a.effort}` : ''}`;
-            fleet.set(key, (fleet.get(key) || 0) + 1);
-        }
-        const breakdown = [...fleet].sort((a, b) => b[1] - a[1])
-            .map(([key, n]) => `${n} × ${key}`).join(' · ');
-
-        // An empty block would read as "nothing is happening" on a run that is
-        // simply between waves, so it says which of the two it is.
-        const tail = agents.length === 0
+        const empty = agents.length === 0
             ? '<tr class="run-agent"><td colspan="6" class="dim">no agent has written anything yet</td></tr>'
-            : (settled > 0
-                ? `<tr class="run-agent"><td colspan="6" class="dim">${working.length === 0 ? 'all ' : ''}${settled} returned — ${esc(breakdown)}</td></tr>`
-                : '');
+            : '';
 
-        return head + rows + tail;
+        return head + rows + empty;
     }).join('');
 
     return `<table><thead><tr><th>Agent</th><th class="opt2">Told to</th><th>Model</th>
@@ -1623,7 +1605,7 @@ function nowTab(sections, workflows, metrics) {
         </div>
         ${active.length ? panel('Running right now', liveRuns(active), {
         flush: true,
-        note: 'One block per workflow still going, and under it the agents it has in flight — the model and the effort each was dispatched at. What every agent was told and what it answered, finished ones included, is under Work → Agents &amp; workflows.',
+        note: 'One block per workflow still going, and under it every agent it dispatched — the model and the effort each got, and what it is doing now. What each was told in full and what it answered is under Work → Agents &amp; workflows.',
     }) : ''}
     </section>`;
 }

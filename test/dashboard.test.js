@@ -773,12 +773,12 @@ test('a live agent is counted as working whichever word the client used', () => 
         assert.match(html, /o-running/, `${word} was not drawn as working`);
         assert.ok(!/have returned|finished, not listed/.test(html), `${word} was counted as settled`);
     }
-    // And one that really has finished is summarised by what it ran on rather
-    // than listed: a count with no breakdown is a row that says data exists and
-    // refuses to show it.
-    const done = db.nowTab(sections, [run('success')], {});
-    assert.match(done, /all 1 returned — 1 × opus 5 xhigh/);
-    assert.ok(!/not listed here/.test(done));
+    // A finished agent keeps its row: the list is every agent the run
+    // dispatched, and hiding the settled ones was a decision nobody asked for.
+    const done = db.nowTab(sections, [run('done')], {});
+    assert.match(done, /o-done/);
+    assert.match(done, /a1234567/);
+    assert.ok(!/not listed here|returned —/.test(done));
 });
 
 // A run with no snapshot is either working or stuck, and both belong on Now.
