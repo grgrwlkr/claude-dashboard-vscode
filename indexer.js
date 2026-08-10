@@ -19,7 +19,9 @@ const PROJECTS = path.join(HOME, '.claude', 'projects');
 // Bump on every change to the shape of a per-file aggregate. A file whose size
 // and mtime are unchanged is never re-read, so without a bump the old shape is
 // reused forever and the new fields stay empty for everything already indexed.
-const INDEX_VERSION = 3;
+// 4: skill buckets carry `last`, the newest reply attributed to them. A stored
+// aggregate of shape 3 has no such field and would read as "never used".
+const INDEX_VERSION = 4;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only
@@ -125,7 +127,7 @@ function bucket() {
 const BUCKET_FIELDS = ['in', 'out', 'cacheRead', 'cacheWrite', 'cw1h', 'cw5m', 'saved', 'cost', 'msgs'];
 
 function add(map, key, usage, model) {
-    if (!key) return;
+    if (!key) return null;
     const b = map[key] || (map[key] = bucket());
     const cache = cacheSplit(usage);
     b.in += usage.input_tokens || 0;
@@ -137,6 +139,7 @@ function add(map, key, usage, model) {
     b.saved += cacheSaving(model, usage);
     b.cost += costOf(model, usage);
     b.msgs++;
+    return b;
 }
 
 function mergeBucket(target, key, src) {
@@ -145,6 +148,7 @@ function mergeBucket(target, key, src) {
     // index version guards against that, but a missing field must still add
     // zero rather than turn the total into NaN.
     for (const f of BUCKET_FIELDS) b[f] += src[f] || 0;
+    if (src.last) b.last = Math.max(b.last || 0, src.last);
 }
 
 function mergeFriction(target, src) {
@@ -315,7 +319,13 @@ function indexFile(file, root = PROJECTS) {
         }
         add(agg.models, model, usage, model);
         if (r.gitBranch) { add(agg.branches, r.gitBranch, usage, model); row.branch = r.gitBranch; }
-        if (r.attributionSkill) add(agg.skills, r.attributionSkill, usage, model);
+        if (r.attributionSkill) {
+            const b = add(agg.skills, r.attributionSkill, usage, model);
+            // When it last ran, which is the difference between "installed and
+            // idle" and "was useful in June". A max rather than a sum, so it
+            // travels beside BUCKET_FIELDS rather than in it.
+            if (b) b.last = Math.max(b.last || 0, at || 0);
+        }
         // The reasoning tier is recorded per reply, so a session that switched
         // effort mid-way is counted honestly on both sides of the switch. Model
         // and effort share a key because neither is meaningful without the other.

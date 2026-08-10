@@ -764,6 +764,19 @@ async function handleMessage(context, msg) {
 
     if (msg.type === 'tab') { openTab = String(msg.id || ''); return; }
 
+    // Open one of the files the page lists, for editing. Only a path the page
+    // was given — the message carries what the extension itself put there, and
+    // anything else is refused rather than opened.
+    if (msg.type === 'open') {
+        const wanted = String(msg.path || '');
+        const known = (systemCache && systemCache.context && systemCache.context.files) || [];
+        if (!known.some((f) => f.abs === wanted)) return;
+        vscode.workspace.openTextDocument(vscode.Uri.file(wanted))
+            .then((doc) => vscode.window.showTextDocument(doc),
+                (err) => vscode.window.showErrorMessage(`Cannot open ${wanted}: ${err.message}`));
+        return;
+    }
+
     if (msg.type === 'preview') {
         const previews = (msg.segments || []).map((template) => ({ text: renderFor(state, template) }));
         panel.webview.postMessage({ type: 'preview', previews });

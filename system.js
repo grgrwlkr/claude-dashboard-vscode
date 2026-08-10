@@ -461,17 +461,41 @@ function disk(root = ROOT, known = null) {
  * tax — the one number in this dashboard the user can act on directly by
  * deleting a paragraph.
  */
-function contextBudget(root = ROOT, projects = []) {
+// The transcript directory a project's files live under, by the same rule
+// session.js uses: every non-alphanumeric character becomes a dash. Duplicated
+// rather than imported because system.js reads ~/.claude and session.js reads a
+// session — neither is the other's dependency — and the rule is one line that
+// has not changed since the client shipped it.
+const slugFor = (dir) => String(dir).replace(/[^a-zA-Z0-9]/g, '-');
+const slugsOf = (projects) => projects.map(slugFor);
+
+// How much of a file the page carries. Enough to read a rule without leaving
+// the dashboard; past it, the file itself is one click away and the page does
+// not grow by a megabyte because someone pasted a corpus into a memory note.
+const MEMORY_CHARS = 60 * 1024;
+
+function contextBudget(root = ROOT, projects = [], slugs = []) {
     const files = [];
-    const addFile = (file, scope) => {
+    const addFile = (file, scope, kind = 'instructions') => {
         const st = statOf(file);
         if (!st || !st.isFile()) return;
+        // The text travels with the row so the page can show it without a round
+        // trip — a static page is one that still works when its script does not.
+        let text = '';
+        try { text = fs.readFileSync(file, 'utf8').slice(0, MEMORY_CHARS); } catch { text = ''; }
         files.push({
-            path: shortPath(file), scope, bytes: st.size,
+            path: shortPath(file), abs: file, scope, kind, bytes: st.size,
             tokens: Math.round(st.size / CHARS_PER_TOKEN),
+            mtime: st.mtimeMs || 0,
+            text,
+            clipped: st.size > MEMORY_CHARS,
         });
     };
 
+    // Scope order, which is the order the client layers them in: what applies
+    // everywhere, then what applies to the repository you are in. The exact
+    // concatenation inside one scope belongs to the client and is not claimed
+    // here.
     addFile(path.join(root, 'CLAUDE.md'), 'global');
     for (const entry of listDir(path.join(root, 'rules'))) {
         if (entry.isFile() && entry.name.endsWith('.md')) addFile(path.join(root, 'rules', entry.name), 'global');
@@ -480,8 +504,20 @@ function contextBudget(root = ROOT, projects = []) {
         addFile(path.join(project, 'CLAUDE.md'), 'project');
         addFile(path.join(project, 'AGENTS.md'), 'project');
     }
+    // Auto-memory: what the client wrote about this repository itself. It loads
+    // exactly like the files above and was the one layer this never counted.
+    for (const slug of slugs) {
+        const dir = path.join(root, 'projects', slug, 'memory');
+        for (const entry of listDir(dir)) {
+            if (entry.isFile() && entry.name.endsWith('.md')) addFile(path.join(dir, entry.name), 'memory', 'memory');
+        }
+    }
     const globalTokens = files.filter((f) => f.scope === 'global').reduce((a, f) => a + f.tokens, 0);
-    return { files: files.sort((a, b) => b.bytes - a.bytes), globalTokens };
+    const ORDER = { global: 0, project: 1, memory: 2 };
+    return {
+        files: files.sort((a, b) => ORDER[a.scope] - ORDER[b.scope] || b.bytes - a.bytes),
+        globalTokens,
+    };
 }
 
 /**
@@ -646,7 +682,7 @@ function snapshot({ root = ROOT, workspace = '', projects = [], sessionProjects 
         live: live(root),
         tasks: tasks(root, sessionProjects),
         disk: withDisk ? disk(root, jobRows) : null,
-        context: contextBudget(root, projects),
+        context: contextBudget(root, projects, slugsOf(projects)),
         changelog: changelog(root, current),
         projects: projectMetrics(config),
         prompts: promptLog(root),

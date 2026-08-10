@@ -1086,6 +1086,58 @@ const ago = (ms) => {
 };
 
 /** A definition list of resolved settings — the value in force, and its source. */
+/**
+ * Every skill, agent and command every installed plugin brings, against what
+ * the transcripts say actually ran. The plugin table answers "did any of this
+ * fire"; this answers which part — 56 skills are installed here and 14 have
+ * ever run, and a plugin reads as used on the strength of one of its six.
+ *
+ * A component is matched by the two names the client attributes with:
+ * `plugin:name` for a skill of a plugin, and the bare name for one that reached
+ * the index without its plugin. An agent is a third case and rarely visible at
+ * all — its type is named in a tool call's arguments, not its result — so an
+ * agent that never matched is reported as unknown rather than as unused.
+ */
+function componentRows(plugins, skills) {
+    const rows = [];
+    for (const p of plugins) {
+        const c = p.components || {};
+        const of = (kind, name) => {
+            const key = `${p.name}:${name}`.toLowerCase();
+            const hit = skills[key] || skills[name.toLowerCase()] || null;
+            return { plugin: p.name, kind, name, enabled: p.enabled, hit };
+        };
+        for (const name of c.skills || []) rows.push(of('skill', name));
+        for (const name of c.commands || []) rows.push(of('command', name));
+        for (const name of c.agents || []) rows.push(of('agent', name));
+    }
+    // Used first and dearest first inside that, because the question a reader
+    // brings here is which of the forty plugins is earning its place.
+    return rows.sort((a, b) => Number(Boolean(b.hit)) - Number(Boolean(a.hit))
+        || (b.hit ? b.hit.cost : 0) - (a.hit ? a.hit.cost : 0)
+        || a.plugin.localeCompare(b.plugin));
+}
+
+/**
+ * MCP servers with what their tools actually did. The tools tab counts calls
+ * and failures per tool and `mcpServer` maps a tool back to its server; joining
+ * the two is the difference between "this server has been called" and "this
+ * server answers, and fails one call in three".
+ */
+function mcpHealth(servers, tools) {
+    const stats = {};
+    for (const [name, t] of Object.entries(tools || {})) {
+        const server = mcpServer(name);
+        if (!server) continue;
+        const s = stats[server] || (stats[server] = { calls: 0, errors: 0, denials: 0, tools: 0 });
+        s.calls += t.calls || 0;
+        s.errors += t.errors || 0;
+        s.denials += t.denials || 0;
+        s.tools++;
+    }
+    return (servers || []).map((m) => ({ ...m, stats: stats[m.name] || null }));
+}
+
 function settingsList(settings) {
     const rows = Object.entries(settings.values || {});
     if (rows.length === 0) return '<p class="empty">No settings found.</p>';
@@ -1116,7 +1168,7 @@ function healthTab(total, sys) {
         const key = String(name).toLowerCase();
         return [...usedServers].some((s) => s === key || s.endsWith(`_${key}`) || s.endsWith(`-${key}`));
     };
-    const mcpRows = (sys.mcp || []).map((m) => ({ ...m, used: serverUsed(m.name) }));
+    const mcpRows = mcpHealth(sys.mcp || [], total.tools).map((m) => ({ ...m, used: serverUsed(m.name) }));
 
     const usedSkills = new Set(Object.keys(total.skills || {}).map((s) => s.toLowerCase()));
     const usedTools = new Set(Object.keys(total.tools || {}).map((s) => s.toLowerCase()));
@@ -1142,9 +1194,23 @@ function healthTab(total, sys) {
             ? `<h3 class="now-sub">Environment</h3><table class="kv"><tbody>${Object.entries(sys.settings.env).map(([k, val]) =>
         `<tr><th scope="row" title="${esc(k)}"><span>${esc(k)}</span></th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : '');
 
-    const mcpBody = `<table><thead><tr><th>Server</th><th>Scope</th><th class="opt2">Via</th><th>Used</th></tr></thead><tbody>
-            ${mcpRows.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.scope)}${m.project ? ` <span class="dim">${esc(m.project)}</span>` : ''}</td>
-              <td class="dim opt2">${esc(m.command || m.transport)}</td><td>${m.used ? yes : no}</td></tr>`).join('')}
+    const mcpBody = `<table><thead><tr><th>Server</th><th class="opt2">Scope</th><th class="num">Calls</th>
+            <th class="num">Failed</th><th>State</th></tr></thead><tbody>
+            ${mcpRows.map((m) => {
+        const st = m.stats;
+        const rate = st && st.calls > 0 ? st.errors / st.calls : 0;
+        // A server that answers most of the time and fails a third is neither
+        // used nor idle, and calling it "used" was the whole of what Health
+        // could say about it.
+        const word = !m.used ? '<span class="idle">never called</span>'
+            : rate >= 0.2 ? `<span class="o-failed">failing ${Math.round(rate * 100)}%</span>`
+                : '<span class="ok">used</span>';
+        return `<tr><td title="${esc(m.command || m.transport)}">${esc(m.name)}</td>
+              <td class="dim opt2">${esc(m.scope)}${m.project ? ` ${esc(m.project)}` : ''}</td>
+              <td class="num">${st ? esc(String(st.calls)) : '·'}</td>
+              <td class="num">${st && st.errors ? esc(String(st.errors)) : '·'}</td>
+              <td>${word}</td></tr>`;
+    }).join('')}
             </tbody></table>
             <h3 class="now-sub">Hooks</h3>
             ${(sys.hooks || []).length ? `<table><thead><tr><th>Event</th><th class="opt2">Matcher</th><th>Runs</th></tr></thead><tbody>
@@ -1172,6 +1238,22 @@ function healthTab(total, sys) {
             <td class="dim opt">${esc(p.from)}</td></tr>`).join('')}
         </tbody></table>`;
 
+    const componentRows_ = componentRows(sys.plugins || [], total.skills || {});
+    const ranCount = componentRows_.filter((r) => r.hit).length;
+    const componentTable = `<table><thead><tr><th>Component</th><th class="opt2">Plugin</th><th>Kind</th>
+        <th class="num opt">Requests</th><th class="num">Spend</th><th class="opt">Last used</th></tr></thead><tbody>
+      ${componentRows_.map((r) => `<tr class="${r.enabled ? '' : 'off'}">
+        <td class="wrap">${esc(r.name)}</td>
+        <td class="dim opt2">${esc(r.plugin)}</td>
+        <td><span class="kind">${esc(r.kind)}</span></td>
+        <td class="num opt">${r.hit ? esc(String(r.hit.msgs)) : '·'}</td>
+        <td class="num">${r.hit ? esc(fmtCost(r.hit.cost)) : '·'}</td>
+        <td class="opt">${r.hit
+        ? (r.hit.last ? esc(fmtDateTime(r.hit.last)) : '<span class="dim">—</span>')
+        : (r.kind === 'agent' ? '<span class="dim">not visible</span>' : '<span class="idle">never</span>')}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+
     const enabled = pluginRows.filter((p) => p.enabled).length;
     return `<section class="tab" data-tab="health" hidden>
         ${tiles(
@@ -1189,6 +1271,10 @@ function healthTab(total, sys) {
         ${panel('Plugins', pluginTable, {
         flush: true,
         note: 'What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call\'s arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.',
+    })}
+        ${panel('What each plugin actually brings', componentTable, {
+        flush: true,
+        note: `Every skill, command and agent the installed plugins carry, against what ran. The plugin table above says whether <em>any</em> of a plugin fired; this says which part — ${ranCount} of ${componentRows_.length} components have ever appeared in a transcript. An agent is named in a tool call's arguments rather than its result, so one that never matched is unknown here rather than unused.`,
     })}
         ${(sys.permissions || []).length ? panel('Permission rules', permTable, {
         flush: true,
@@ -1301,27 +1387,61 @@ function diskTab(sys) {
     </section>`;
 }
 
+// A memory note's own name is what identifies it; the directory it sits in is
+// the same forty characters for every one of them and pushed the name off the
+// end of the column.
+const memoryName = (f) => (f.scope === 'memory' ? String(f.path).split('/').pop() : f.path);
+
+const SCOPE_NOTE = {
+    global: 'Loaded in every session on this machine, whatever repository you are in.',
+    project: 'Loaded only in the repository it belongs to.',
+    memory: 'What the client wrote down about a repository itself, loaded with that repository.',
+};
+
+/**
+ * Everything that is read into the prompt before you type a word: the
+ * instruction layer and the per-project memory the client keeps. Grouped by
+ * scope, because that is the order the layers apply in — what holds everywhere
+ * first, then what holds here. The order inside one scope belongs to the client
+ * and is not claimed.
+ *
+ * Each file carries its own text, so it can be read without leaving the page or
+ * waking the webview's script, and a button hands the path to the editor.
+ */
 function contextTab(total, sys) {
     const c = (sys && sys.context) || { files: [], globalTokens: 0 };
     const msgs = sumOf(total.models, 'msgs');
-    // Rough, and it says so: the instruction layer is re-sent with every
-    // request, but almost always from cache — so this is what it would cost at
-    // the input rate, not a second bill.
     const perRequest = c.globalTokens;
     const lifetime = (perRequest * msgs) / 1e6 * 5;
+    const files = c.files || [];
+    const totalTokens = files.reduce((a, f) => a + f.tokens, 0);
+
+    const groups = ['global', 'project', 'memory']
+        .map((scope) => [scope, files.filter((f) => f.scope === scope)])
+        .filter(([, list]) => list.length > 0);
+
+    const fileRow = (f) => `<details class="memory">
+        <summary>
+          <span class="mem-name" title="${esc(f.abs || f.path)}">${esc(memoryName(f))}</span>
+          <span class="dim">~${esc(tok(f.tokens))} · ${esc(bytes(f.bytes))}${f.mtime ? ` · ${esc(fmtDateTime(f.mtime))}` : ''}</span>
+          <button class="link mem-open" data-open="${esc(f.abs || '')}">open</button>
+        </summary>
+        <pre class="mem-text">${esc(f.text || '')}</pre>
+        ${f.clipped ? `<p class="note">Shown to 60 KB of ${esc(bytes(f.bytes))} — open the file for the rest.</p>` : ''}
+    </details>`;
 
     return `<section class="tab" data-tab="context" hidden>
         ${tiles(
-        tile('Global instructions', `~${tok(perRequest)}`, 'tokens in every request'),
+        tile('Every request pays', `~${tok(perRequest)}`, 'tokens of instructions, before you type'),
         tile('Across all requests', `~${fmtCost(lifetime)}`, `${plural(msgs, 'request')} at Opus input rates`),
-        tile('Files', String(c.files.length), 'CLAUDE.md, rules, project memory'),
+        tile('Files', String(files.length), `~${tok(totalTokens)} tokens in total`),
     )}
-        ${panel('What is loaded', barList(c.files.map((f) => [f.path, f]), {
-        limit: 20, value: (f) => f.tokens,
-        label: (v, f) => `~${tok(v)} · ${bytes(f.bytes)} · ${f.scope}`,
-    }) + '<p class="note">Cached, this is read at a tenth of the input rate — the figure above is the uncached case, which is what a fresh session pays.</p>', {
-        note: 'Files that are loaded into the prompt of every session in scope. Sizes are exact; tokens are the size over four characters, which is close enough to compare paragraphs against each other.',
-    })}
+        ${groups.map(([scope, list]) => panel(scope === 'memory' ? 'Project memory' : `${scope[0].toUpperCase()}${scope.slice(1)} instructions`,
+        list.map(fileRow).join(''), {
+        note: `${esc(SCOPE_NOTE[scope])} ${list.length} file${list.length === 1 ? '' : 's'}, ~${esc(tok(list.reduce((a, f) => a + f.tokens, 0)))} tokens. Click one to read it, or <b>open</b> to edit it.`,
+    })).join('')}
+        ${files.length === 0 ? panel('Nothing loaded', '<p class="empty">No instruction file was found.</p>') : ''}
+        ${panel('What this costs', `<p class="note">Sizes are exact; tokens are the size over four characters, which is close enough to compare paragraphs against each other. Cached, the instruction layer is read at a tenth of the input rate — the figure above is the uncached case, which is what a fresh session pays.</p>`)}
     </section>`;
 }
 
@@ -1688,6 +1808,22 @@ nav.tabs { border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 1
 nav.tabs.empty { min-height: 0; margin-bottom: 14px; }
 nav.tabs button { border-bottom: 2px solid transparent; }
 nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--vscode-focusBorder); }
+/* A loaded file: its name and size on one line, its text under it. <details>
+   rather than a handler, for the same reason the agents of a run use one — the
+   page opens it without a script. */
+.memory { border-bottom: 1px solid var(--vscode-panel-border); padding: 4px 0; }
+.memory > summary { cursor: pointer; display: flex; align-items: baseline; gap: 10px;
+  padding: 3px 0; font-size: 12.5px; }
+.mem-name { font-family: var(--vscode-editor-font-family); font-size: 11.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.memory > summary .dim { font-size: 11px; margin-left: auto; white-space: nowrap; }
+.mem-open { flex: none; }
+.mem-text { margin: 6px 0 10px; padding: 10px 12px; border-radius: 5px; max-height: 460px;
+  overflow: auto; background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  font-family: var(--vscode-editor-font-family); font-size: 11.5px; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* A block of the page: heading, the sentence under it, and the answer. The
    panel is what makes a tab read as a set of answers instead of a scroll; a
    flush one is for a wide table, which keeps its full width inside the border
@@ -2116,6 +2252,16 @@ if (wanted.scrollY) {
   requestAnimationFrame(restore);
   addEventListener('load', () => requestAnimationFrame(restore));
 }
+document.addEventListener('click', (e) => {
+  const open = e.target.closest('[data-open]');
+  if (!open || !api) return;
+  // Inside a <summary>: without this the click also toggles the disclosure,
+  // so the file would open and the text would flap shut behind it.
+  e.preventDefault();
+  e.stopPropagation();
+  api.postMessage({ type: 'open', path: open.dataset.open });
+});
+
 let scrollTimer = null;
 window.addEventListener('scroll', () => {
   clearTimeout(scrollTimer);
@@ -2358,7 +2504,7 @@ const SECTIONS = [
         ['live', 'Live now'],
         ['tasks', 'Task lists'],
         ['disk', 'Disk'],
-        ['context', 'Context budget'],
+        ['context', 'Memory & context'],
         ['changelog', 'Changelog'],
     ]],
 ];

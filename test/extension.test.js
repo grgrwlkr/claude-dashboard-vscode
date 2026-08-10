@@ -934,3 +934,17 @@ test('every topic a segment can carry has a tooltip and a colour source', () => 
         }
     } finally { run.dispose(); }
 });
+
+// The page hands back a path to open. Only paths the extension itself put on
+// the page are honoured — a webview is a document, and a document that can name
+// any file on disk is a document that can be made to name the wrong one.
+test('the open-file message is refused for a path the page never carried', async () => {
+    const run = activate({ segments: ['{weekly}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        vscode.__errors.length = 0;
+        await panel.__receive({ type: 'open', path: '/etc/passwd' });
+        assert.deepEqual(vscode.__errors, [], 'a refused path must not even be attempted');
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
