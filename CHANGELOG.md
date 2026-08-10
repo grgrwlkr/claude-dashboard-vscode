@@ -5,10 +5,12 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
-## [0.19.0] — 2026-08-11
+## [0.19.11] — 2026-08-11
 
 First public release. Everything below existed before it, built and used
-locally; this is the version that leaves one machine.
+locally; this is the version that leaves one machine. The patch number is high
+because it was built and installed many times over two days — every one of those
+builds went to a single machine.
 
 ### Added
 
@@ -30,6 +32,16 @@ locally; this is the version that leaves one machine.
   per segment and a placeholder palette carrying current values.
 - **`claudeStatusline.fetchLimits`** — the one outbound request is opt-out. Off
   means the OAuth token is not read at all.
+- **Usage credits**, the one figure here that is money rather than an estimate:
+  what the account has spent past its plan, read from the same endpoint.
+- **A monthly budget** (`claudeStatusline.monthlyBudget`) with the month drawn
+  against it, and a word at 80 % and at 100 % — once each, not every tick.
+- **Export** of the index as CSV or JSON, for the questions a dashboard is the
+  wrong shape for.
+- **Plugin and MCP health**: what each plugin ships, which of it ever ran, which
+  MCP servers earn their place. Version checking against a plugin's marketplace
+  is a separate opt-in (`claudeStatusline.checkPluginUpdates`, off by default)
+  because it is the only other thing here that could leave the machine.
 
 ### Notes
 

@@ -346,8 +346,9 @@ request leaves the machine, and it is optional.**
 | What is written | Only inside the extension's own `globalStorage`: the aggregate index and the limit history. Neither holds prompt text. |
 | What leaves the machine | One `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint Claude Code's own `/usage` screen reads — carrying the OAuth token Claude Code already stores. At most once a minute per machine, shared with `statusline.sh` through the same cache file. |
 | What happens to the token | It is read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and goes into one `Authorization` header. It is never logged, never cached, never written, never sent anywhere else. |
+| The only other thing that could | `"claudeStatusline.checkPluginUpdates"` asks each plugin's marketplace whether a newer version exists. It is **off by default**, and off means those requests are never made — the Health tab still lists every plugin and what ran, it simply cannot say which is out of date. |
 | Telemetry | None. No analytics, no crash reporting, no phoning home. |
-| How to switch the request off | `"claudeStatusline.fetchLimits": false`. Off means the token is not read at all; the limit fields go quiet and everything drawn from local transcripts keeps working. |
+| How to switch the request off | `"claudeStatusline.fetchLimits": false`. Off means the token is not read at all; the limit fields go quiet and everything drawn from local transcripts keeps working. With `checkPluginUpdates` left alone, the extension then makes no network request whatsoever. |
 
 The **Content** tab never stores prompt text — only counts, a length histogram
 and word tallies, computed and discarded in the same pass.
@@ -431,14 +432,17 @@ apply the moment they change — none of them needs a window reload.
 | --- | --- | --- |
 | `claudeStatusline.segments` | four templates | One status-bar item per string; see [Configuring the bar](#configuring-the-bar) |
 | `claudeStatusline.fetchLimits` | `true` | Ask Anthropic for the account's limits; `false` keeps the token unread and the network untouched — see [Privacy](#privacy) |
+| `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 %; zero turns both off |
+| `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made — see [Privacy](#privacy) |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |
 
 Commands: **Claude: Open dashboard**, **Claude: Rebuild the usage index**,
-**Claude Statusline: Refresh now**, **Claude Statusline: List status-bar
-placeholders**, and — from a row of the workflow view — **Claude: Open the
-workflow script** and **Claude: Copy the workflow run id**.
+**Claude: Export usage as CSV or JSON**, **Claude Statusline: Refresh now**,
+**Claude Statusline: List status-bar placeholders**, and — from a row of the
+workflow view — **Claude: Open the workflow script** and **Claude: Copy the
+workflow run id**.
 
 ## Tests
 
