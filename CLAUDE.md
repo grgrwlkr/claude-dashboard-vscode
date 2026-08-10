@@ -56,8 +56,17 @@ disagree about the same run.
 
 **Two trees are read, and only one is ours.** `indexer.js` and `system.js` read `~/.claude`, which
 belongs to Claude Code: never write there. Anything of ours — the index, the limit history — goes in
-the extension's `globalStorage`. `.credentials.json` and the `authToken` in an IDE lock file are
-never read at all; `system.js` has tests that assert both stay out of its output.
+the extension's `globalStorage`. **One credential is touched, in exactly one place:** `usage.js`
+asks the Keychain for the Claude Code OAuth token and falls back to
+`~/.claude/.credentials.json`'s `claudeAiOauth.accessToken` only when the Keychain says no — it
+goes into one `Authorization` header for the limits request and is never logged, cached or written
+anywhere. `claudeStatusline.fetchLimits` turns that request off entirely, and off means the token
+is never read either: `limitsWanted()` in `extension.js` guards both call sites, the slow tick and
+the refresh command, and a test asserts neither is reached. Everything else
+stays clear of it: `system.js` has tests asserting that neither `.credentials.json` nor the
+`authToken` of an IDE lock file reaches its output. Say it that way — the older wording here
+claimed the file was never read at all, which `usage.js:43` has always contradicted, and in a
+public repository a false promise about secrets costs more than the feature is worth.
 
 **The bar is a template, not a layout.** `claudeStatusline.segments` is a list of strings; each one
 becomes a status-bar item. `segments.js` holds the grammar (`{field}`, `[optional group]`, backslash
@@ -101,6 +110,29 @@ discoverable trap in the repo.
 
 **Dashboard** is HTML and SVG assembled as strings under a strict CSP, coloured only from
 `--vscode-*` theme variables. Everything interpolated must go through `esc()`.
+
+**Every tab is built from four components, and nothing else.** `tile`/`tiles` is the headline strip
+— label, a big monospace figure, an optional meter, a sub line pinned to the bottom so a tile
+without a meter still lines up with its neighbours. `panel(title, body, { note, flush, id })` is a
+block of the page: a `<h2>` outside a panel is a bug, and every tab is a stack of them. `flush` is
+for a wide table — the panel keeps its border and the table runs edge to edge inside it instead of
+paying for padding twice. `shareCell(text, share)` is a figure that is also a share of its column,
+drawn as a rule under it. `.pair` puts two panels side by side, `.cols` packs a set of them into
+balanced columns. **`title` is escaped here; `note` and `body` are markup** the caller has already
+run through `esc()`.
+
+**Colour follows the entity, never its rank.** `assignModelColors(modelOrder)` runs once per render
+and fixes each model's hue; `modelColor` consults it. Keying on the row index — which is what it did
+— meant the stacked chart and the list beside it agreed only because their two sort orders happen to
+match. A `barList` is one hue, because it draws one measure; `byModel: true` is the exception, where
+the hue carries a model's identity from the chart above it.
+
+**Verify a page change by driving it, not by reading it.** The page is static SVG and markup, so a
+dead script still looks right, a `max-width` on a table cell is silently ignored, and a track painted
+in the surface colour is invisible only on the surface it sits on. Every one of those shipped and was
+caught by a screenshot. The overflow probe walks all 22 tabs and compares `scrollWidth` to
+`clientWidth` at 1500/1000/800/720/620/520 px; run it and screenshot both themes before calling a
+change done.
 
 **No charting library — measured, not assumed (checked 2026-08-10).** The CSP is not the reason: it
 allows inline script, and `asWebviewUri` + `script-src ${cspSource}` is the documented path anyway.

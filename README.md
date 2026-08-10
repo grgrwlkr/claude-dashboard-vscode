@@ -1,6 +1,10 @@
-# Claude Statusline
+# Statusline for Claude Code
 
 Claude Code limits, session context and spend — in the VS Code status bar.
+
+> Unofficial. Not affiliated with, endorsed by or sponsored by Anthropic, PBC.
+> "Claude" and "Claude Code" are their trademarks; this extension only reads what
+> the tool leaves on your own disk.
 
 The Claude Code extension does not execute the `statusLine` command from
 `~/.claude/settings.json`: the native panel has no status line at all, and the
@@ -39,6 +43,17 @@ parentheses), `▸` tracks the current session's task list.
 **Workflow.** While a workflow runs anywhere on the machine, this names it and
 counts the agents that have settled against the ones it dispatched, with how
 long it has been going. Between runs it has nothing to say and is not drawn.
+
+## Requirements
+
+- **Claude Code** installed and used on this machine — the extension reads its
+  state and asks nothing of the CLI.
+- **VS Code 1.100** or newer. Cursor, Windsurf, VSCodium and Gitpod install it
+  from Open VSX.
+- **macOS or Linux.** Windows is not supported: the token lives behind the macOS
+  Keychain or in the credentials file, and session ownership is resolved with
+  POSIX `ps`. On Windows the extension degrades quietly — items stay hidden
+  rather than showing wrong numbers — but that is tolerance, not support.
 
 ## Configuring the bar
 
@@ -126,6 +141,14 @@ tabs in five sections: one for the state of Claude right now, three drawn from a
 index of every transcript on the machine, and one that reads the installation
 itself.
 
+Every tab is built the same way: a strip of headline figures across the top, then
+one panel per answer — a title, the sentence that explains it, and the thing
+itself. A figure that is a share of something is drawn as one rather than only
+written: a meter under a headline number, a fill in a list, a rule under a figure
+in a table so a list sorted by time can still be ranked by eye. Colours come from
+the editor's own theme and follow the entity they name, so a model keeps its
+colour across every chart on the page.
+
 **Now** — the state of Claude as the page was opened:
 
 | Tab | What it answers |
@@ -194,8 +217,10 @@ half-typed segments. Press **Reindex** for an immediate rebuild.
 
 Nothing in the Setup section writes to `~/.claude`, and there is no delete
 button anywhere in it: the numbers are the point, the decision is the user's.
-Two files are never read at all — `.credentials.json`, and the `authToken` an
-IDE lock file carries.
+Nothing in it reads a credential either — neither `.credentials.json` nor the
+`authToken` an IDE lock file carries, and `system.js` has tests asserting both
+stay out of its output. The single place a credential is touched at all is the
+limits request; [Privacy](#privacy) describes it exactly.
 
 The Agents tab is the reason this exists: subagents and workflow agents write
 their own transcripts, so on a machine that runs them their spend is the larger
@@ -268,9 +293,10 @@ agents, about thirty times apart, so pricing that field would understate every
 run by roughly that factor. It is shown as a token count and nothing else.
 
 A run's price is the sum over the agents its own snapshot lists. A run directory
-can also hold transcripts that no snapshot names — 175 of them here, ~$120
-across 10 runs — and that money is shown beside the run rather than folded into
-a total whose meaning is "the agents you can see".
+can also hold transcripts that no snapshot names — on the machine this was built
+on, 175 of them across 10 runs, a three-figure sum — and that money is shown
+beside the run rather than folded into a total whose meaning is "the agents you
+can see".
 
 One run can also arrive in two halves: a background workflow puts its directory
 under one session of a project and its snapshot under another session of the
@@ -291,6 +317,23 @@ transcripts, which is bounded by the number of live agents rather than by the
 history of the machine. A workflow that has just started therefore shows up to a
 minute late, while one already being watched moves immediately. None of this
 writes to `~/.claude`.
+
+## Privacy
+
+Everything on the dashboard and in the bar is read from your own disk. **One
+request leaves the machine, and it is optional.**
+
+| | |
+| --- | --- |
+| What is read locally | `~/.claude` — transcripts, the session registry, settings, plugins, workflow runs. Read-only: nothing of ours is ever written there. |
+| What is written | Only inside the extension's own `globalStorage`: the aggregate index and the limit history. Neither holds prompt text. |
+| What leaves the machine | One `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint Claude Code's own `/usage` screen reads — carrying the OAuth token Claude Code already stores. At most once a minute per machine, shared with `statusline.sh` through the same cache file. |
+| What happens to the token | It is read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and goes into one `Authorization` header. It is never logged, never cached, never written, never sent anywhere else. |
+| Telemetry | None. No analytics, no crash reporting, no phoning home. |
+| How to switch the request off | `"claudeStatusline.fetchLimits": false`. Off means the token is not read at all; the limit fields go quiet and everything drawn from local transcripts keeps working. |
+
+The **Content** tab never stores prompt text — only counts, a length histogram
+and word tallies, computed and discarded in the same pass.
 
 ## Where the data comes from
 
@@ -337,6 +380,16 @@ is derived from gaps between records.
 
 ## Install
 
+From the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-statusline)
+or, for Cursor / Windsurf / VSCodium / Gitpod, from
+[Open VSX](https://open-vsx.org/extension/grgrwlkr/claude-statusline):
+
+```bash
+code --install-extension grgrwlkr.claude-statusline
+```
+
+From source, which is also how you develop on it:
+
 ```bash
 npx @vscode/vsce package
 code --install-extension claude-statusline-*.vsix
@@ -344,6 +397,13 @@ code --install-extension claude-statusline-*.vsix
 
 Then reload the window (`Cmd+Shift+P` → Reload Window) — VS Code keeps the old
 code in the extension host until you do.
+
+**Nothing appeared in the status bar?** That is the designed behaviour rather
+than a failure: every item hides itself when it has nothing true to say. It has
+nothing to say when Claude Code has never run on this machine (no `~/.claude`),
+when no Claude session belongs to *this* window yet — open the Claude Code panel
+and it appears within ten seconds — or when limits are switched off and no cache
+exists. The dashboard works either way: **Claude: Open usage dashboard**.
 
 ## Settings
 
@@ -353,6 +413,7 @@ apply the moment they change — none of them needs a window reload.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `claudeStatusline.segments` | four templates | One status-bar item per string; see [Configuring the bar](#configuring-the-bar) |
+| `claudeStatusline.fetchLimits` | `true` | Ask Anthropic for the account's limits; `false` keeps the token unread and the network untouched — see [Privacy](#privacy) |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |
