@@ -2,3 +2,10 @@ test/**
 .git/**
 .gitignore
 *.vsix
+
+# Working notes, not the extension: the SDD ledger of a plan, the plans and
+# specs themselves, and the guidance file addressed to Claude rather than to
+# anyone installing this. Leaving them in took the package from 75 KB to 419 KB.
+.superpowers/**
+docs/**
+CLAUDE.md

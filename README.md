@@ -99,8 +99,8 @@ without `{today}` does not pay for the walk across every project it needs.
 
 ## Usage dashboard
 
-Click any status-bar item, or run **Claude: Open usage dashboard**. Twenty tabs in
-four sections: three drawn from an index of every transcript on the machine, and
+Click any status-bar item, or run **Claude: Open usage dashboard**. Twenty-one
+tabs in four sections: three drawn from an index of every transcript on the machine, and
 one that reads the installation itself.
 
 **Spend** — where the money went:
