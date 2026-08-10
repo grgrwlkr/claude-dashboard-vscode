@@ -1498,6 +1498,39 @@ function statusBlocks(blocks) {
  * behind what the hover says, and a number hidden from a narrow bar is still
  * here in full.
  */
+/**
+ * The agents of one run that is still going. The Now tab is about this minute,
+ * and while a fan-out is in flight the question is not how much it cost but
+ * which of them are still thinking and on what — a dispatch that named no model
+ * or no effort inherited the session's, and this is where that shows.
+ */
+function liveAgents(run) {
+    const agents = run.agents || [];
+    if (agents.length === 0) return '<p class="empty">No agent has written anything yet.</p>';
+    // Working first: a finished agent is a fact, a running one is a question.
+    const order = [...agents].sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running'));
+    // A run read off disk has no phases yet — the journal names the agents, the
+    // snapshot names their phases, and the snapshot is written when the run
+    // ends. So the column appears only once there is something in it.
+    const phased = agents.some((a) => a.phase);
+    return `<table><thead><tr><th>Agent</th><th class="opt2">Told to</th>${phased ? '<th class="opt">Phase</th>' : ''}<th>Model</th>
+        <th>Effort</th><th class="opt2">Doing</th><th>State</th></tr></thead><tbody>
+      ${order.map((a) => {
+        const outcome = wfm.outcomeOf(a.state, run.state);
+        // The id leads: two agents of one fan-out are often told nearly the
+        // same thing, so a truncated prompt does not tell their rows apart —
+        // and the id is what the journal and the transcript file are named by.
+        return `<tr><td class="mono nowrap">${esc(a.agentId.slice(0, 8))}</td>
+          <td class="wrap opt2" title="${esc(a.promptPreview || a.agentId)}">${esc(wfm.agentLabel(a))}</td>
+          ${phased ? `<td class="dim opt">${esc(a.phase || '—')}</td>` : ''}
+          <td>${a.model ? esc(shortModel(a.model)) : '<span class="dim">—</span>'}</td>
+          <td>${a.effort ? `<span class="kind">${esc(a.effort)}</span>` : '<span class="dim">—</span>'}</td>
+          <td class="dim opt2">${esc(a.lastToolName || '')}</td>
+          <td><span class="kind o-${esc(outcome)}">${esc(outcome)}</span></td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
 function nowTab(sections, workflows, metrics) {
     const rows = sections || [];
     const m = metrics || {};
@@ -1537,16 +1570,13 @@ function nowTab(sections, workflows, metrics) {
         <div class="cols">
           ${rows.map((section) => panel(section.title, statusBlocks(section.blocks), { id: section.id })).join('')}
         </div>
-        ${active.length ? panel('Running right now', `<table><thead><tr><th>Run</th><th>Project</th><th class="num">Agents</th><th class="num">Elapsed</th><th class="num">Spend</th></tr></thead><tbody>
-        ${active.map((r) => `<tr><td class="wrap">${esc(r.name || r.runId)}</td>
-          <td class="dim">${esc(r.project || '')}</td>
-          <td class="num">${esc(String((r.totals && r.totals.done) ?? ''))}${r.agents ? `/${r.agents.length}` : ''}</td>
-          <td class="num">${esc(r.elapsed || '')}</td>
-          <td class="num">${esc(r.cost > 0 ? fmtCost(r.cost) : '')}</td></tr>`).join('')}
-        </tbody></table>`, {
+        ${active.map((run) => panel(run.name || run.runId, liveAgents(run), {
         flush: true,
-        note: 'One line per workflow still going. The full picture — phases, agents, what each was told and what it answered — is under Work → Agents &amp; workflows.',
-    }) : ''}
+        note: `${esc(run.project || '')}${run.elapsed ? ` · going ${esc(run.elapsed)}` : ''}`
+            + `${run.cost > 0 ? ` · ~${esc(fmtCost(run.cost))} so far` : ''}`
+            + ` · ${esc(wfm.countLabel(run, { always: true }))} agents settled`
+            + '. What each was told and what it answered is under Work → Agents &amp; workflows.',
+    })).join('')}
     </section>`;
 }
 
@@ -2307,8 +2337,8 @@ function render(index, total, meta) {
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-<title>Claude usage</title><style>${STYLE}</style></head><body>
-<h1>Claude usage</h1>
+<title>Claude Dashboard</title><style>${STYLE}</style></head><body>
+<h1>Claude Dashboard</h1>
 <p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
  · <button id="refresh" class="link">Reindex</button></p>
 ${navHtml()}

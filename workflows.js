@@ -304,13 +304,17 @@ function promptOf(file) {
     return '';
 }
 
-// Model and current tool, from the newest complete record in the tail.
+// Model, effort and current tool, from the newest complete record in the tail.
+// `effort` sits on the record rather than inside `message`, beside the model it
+// was requested with — an agent dispatched at a tier its lead never named
+// inherits the session's, and this is the only place that shows which.
 function tailOf(file) {
     const records = parsedLines(readChunk(file, { fromEnd: true }));
-    const out = { model: '', lastToolName: '' };
+    const out = { model: '', effort: '', lastToolName: '' };
     for (const r of records) {
         if (r.type !== 'assistant' || !r.message) continue;
         if (r.message.model) out.model = r.message.model;
+        if (r.effort) out.effort = String(r.effort);
         for (const block of (Array.isArray(r.message.content) ? r.message.content : [])) {
             if (block && (block.type === 'tool_use' || block.type === 'server_tool_use')) {
                 out.lastToolName = block.name || out.lastToolName;
@@ -365,8 +369,8 @@ function readLive(runDir, { known = null } = {}) {
         // The file has not been written to since it was last read, so what was
         // read from it then is what is in it now.
         const still = Boolean(was && st && was.lastActivity === st.mtimeMs);
-        const tail = still ? { model: was.model, lastToolName: was.lastToolName }
-            : (st ? tailOf(file) : { model: '', lastToolName: '' });
+        const tail = still ? { model: was.model, effort: was.effort || '', lastToolName: was.lastToolName }
+            : (st ? tailOf(file) : { model: '', effort: '', lastToolName: '' });
         // An empty preview counts as none: the agent may simply not have written
         // its first line yet, and next time it will have.
         const told = (was && was.promptPreview) || '';
@@ -378,6 +382,9 @@ function readLive(runDir, { known = null } = {}) {
             label: '',
             phase: '',
             model: tail.model,
+            // An agent dispatched without a tier inherits the session's, and
+            // the transcript is the only place that says which one it got.
+            effort: tail.effort,
             state: done.has(agentId) ? 'done' : 'running',
             lastToolName: tail.lastToolName,
             promptPreview: told || (st ? promptOf(file) : ''),

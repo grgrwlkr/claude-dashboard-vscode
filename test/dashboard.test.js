@@ -706,3 +706,50 @@ test('a model keeps its colour whichever list it is drawn in', () => {
             `${model} changed colour when the list was sorted the other way`);
     }
 });
+
+// The panel title, the page heading and the command that opens it are three
+// separate strings for one thing. They drifted apart the moment one was
+// renamed, and nothing but this notices.
+test('the page names itself the same way the command that opens it does', () => {
+    const manifest = JSON.parse(require('node:fs').readFileSync(`${__dirname}/../package.json`, 'utf8'));
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
+    assert.match(html, /<title>Claude Dashboard<\/title>/);
+    assert.match(html, /<h1>Claude Dashboard<\/h1>/);
+    const open = manifest.contributes.commands.find((c) => c.command === 'claudeStatusline.dashboard');
+    assert.equal(open.title, 'Claude: Open dashboard');
+});
+
+// A column that hides at a narrow width hides as a pair. With the class on the
+// header alone the body kept a cell the header had dropped, and every heading
+// to its right sat over the wrong column — invisible at full width, and no
+// overflow for a probe to find.
+test('every hideable column hides its header and its cells together', () => {
+    const total = ix.summarize(demoIndex());
+    const html = db.render(demoIndex(), total, { files: 1, lastRun: Date.now(), history: [] })
+        // A section is required: with none, nowTab returns its empty state and
+        // the agent table this is here to inspect is never drawn.
+        + db.nowTab([{ id: 'money', title: 'spend', blocks: [{ kind: 'table', rows: [['today', '~$0']] }] }], [{
+            runId: 'wf_x', name: 'demo', state: 'running', project: 'p', agents: [{
+                agentId: 'a1234567890', label: '', phase: '', model: 'claude-opus-5',
+                effort: 'xhigh', state: 'running', lastToolName: 'Bash', promptPreview: 'go',
+            }],
+            totals: { agents: 1, done: 0, cost: 0 },
+        }], {});
+
+    for (const table of html.match(/<table[\s\S]*?<\/table>/g) || []) {
+        const head = table.match(/<thead>[\s\S]*?<\/thead>/);
+        if (!head) continue;
+        const rows = (table.match(/<tbody>([\s\S]*?)<\/tbody>/) || ['', ''])[1]
+            .split('</tr>').filter((r) => r.includes('<td') || r.includes('<th'));
+        const cls = (cell) => ['opt3', 'opt2', 'opt'].find((c) => new RegExp(`class="[^"]*\\b${c}\\b`).test(cell)) || '';
+        // `<th` must be followed by a space or `>`: `<thead>` matches `<th[^>]*>`
+        // otherwise, which put a phantom column at the head of every list and
+        // made the lengths disagree — so this skipped every table it looked at.
+        const heads = (head[0].match(/<th(?=[\s>])[^>]*>/g) || []).map(cls);
+        for (const row of rows) {
+            const cells = (row.match(/<t[dh](?=[\s>])[^>]*>/g) || []).map(cls);
+            if (cells.length !== heads.length) continue; // a colspan row, not a data row
+            assert.deepEqual(cells, heads, `header and cells hide differently:\n${head[0]}\n${row}`);
+        }
+    }
+});

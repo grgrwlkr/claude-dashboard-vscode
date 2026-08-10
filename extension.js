@@ -830,7 +830,7 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
 
     if (!panel) {
         panel = vscode.window.createWebviewPanel(
-            'claudeStatusline.dashboard', 'Claude usage', vscode.ViewColumn.Active,
+            'claudeStatusline.dashboard', 'Claude Dashboard', vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true },
         );
         panel.onDidDispose(() => { panel = null; });
