@@ -923,11 +923,13 @@ function agentLabel(agent) {
     return agent.label || first.slice(0, LABEL_CHARS) || agent.agentId.slice(0, 8);
 }
 
-// Reads the way the bar writes a token count, so one agent does not get two
-// different sizes in the tree and in the hover. The four lines exist twice
-// because the other copy lives in extension.js, and that file cannot be imported
-// here — it is the one module that requires vscode. Most workflow agents land in
-// the millions: what is counted is every cache read they made.
+// A token count as both the bar and the tree write it: thousands up to a
+// million, millions above, and a round one reads "1M" rather than "1.0M" — the
+// way ~/.claude/statusline.sh writes it. It lives here and not beside the bar
+// because extension.js is the one module allowed to require vscode, so nothing
+// may import it: anything two sides share has to sit on the vscode-free side of
+// that line. Most workflow agents land in the millions — what is counted is
+// every cache read they made.
 function tokenLabel(n) {
     if (n < 1e6) return `${Math.round(n / 1000)}k`;
     const m = n / 1e6;
@@ -962,6 +964,11 @@ function treeNodes(runs) {
 
     return ordered.map((run) => {
         const key = runKey(run);
+        // Read once and guarded once: this is exported, so a caller may hand it
+        // a record the scan did not build. Both fields are always filled by
+        // scanRuns; a half-built one draws an empty run rather than throwing.
+        const agents = run.agents || [];
+        const totals = run.totals || {};
         const agentNode = (agent) => ({
             kind: 'agent',
             id: `${key}/${agent.agentId}`,
@@ -975,37 +982,55 @@ function treeNodes(runs) {
             agent,
         });
 
-        // Indexed rather than titled: a script is free to write one title twice,
-        // and two phases sharing a row id would collapse into one row.
-        const phases = (run.phases || []).map((phase, i) => ({
-            kind: 'phase',
-            id: `${key}#${i}`,
-            label: phase.title,
-            description: phase.detail || '',
-            icon: '',
-            children: run.agents.filter((a) => a.phase === phase.title).map(agentNode),
-            run,
-        })).filter((p) => p.children.length > 0);
+        // Every agent is drawn once, under the first phase that names it, and
+        // `drawn` is what enforces it. A script is free to write one title
+        // twice — which is also why phases are numbered rather than titled — and
+        // an agent hanging under both would carry one node id twice. A repeated
+        // id does not duplicate a row: VS Code refuses to register it and the
+        // whole view stops drawing until the window is reloaded.
+        const drawn = new Set();
+        const claim = (list, agent) => {
+            const node = agentNode(agent);
+            if (drawn.has(node.id)) return;
+            drawn.add(node.id);
+            list.push(node);
+        };
+
+        const phases = [];
+        (run.phases || []).forEach((phase, i) => {
+            const mine = [];
+            for (const agent of agents) if (agent.phase === phase.title) claim(mine, agent);
+            if (mine.length === 0) return;
+            phases.push({
+                kind: 'phase',
+                id: `${key}#${i}`,
+                label: phase.title,
+                description: phase.detail || '',
+                icon: '',
+                children: mine,
+                run,
+            });
+        });
 
         // Agents the phase list does not account for still have to appear: the
         // live phases come from the script and the final ones from the snapshot,
         // so a title can move between them, and losing an agent is worse than an
         // extra row.
-        const claimed = new Set(phases.flatMap((p) => p.children.map((c) => c.id)));
-        const loose = run.agents.map(agentNode).filter((n) => !claimed.has(n.id));
+        const loose = [];
+        for (const agent of agents) claim(loose, agent);
 
         return {
             kind: 'run',
             id: key,
             label: run.name || run.runId,
             description: [
-                run.state === 'running' ? `${run.totals.done || 0}/${run.totals.agents || run.agents.length}` : '',
+                run.state === 'running' ? `${totals.done || 0}/${totals.agents || agents.length}` : '',
                 // The client's own agent counter, shown only when it disagrees
                 // with the list underneath. On a killed run it read 74 against 13
                 // entries; hiding that gap would make the tree look complete when
                 // it is not. A run still going has no count of its own yet, which
                 // is why this asks whether the client counted *more*.
-                run.totals.reported > run.agents.length ? `${run.agents.length} of ${run.totals.reported}` : '',
+                totals.reported > agents.length ? `${agents.length} of ${totals.reported}` : '',
                 run.project,
             ].filter(Boolean).join(' · '),
             icon: runIcon(run),
@@ -1018,5 +1043,5 @@ function treeNodes(runs) {
 
 module.exports = {
     readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived,
-    costIndex, withCost, accrue, treeNodes, PROJECTS, RUN_STALE_MS,
+    costIndex, withCost, accrue, treeNodes, tokenLabel, PROJECTS, RUN_STALE_MS,
 };

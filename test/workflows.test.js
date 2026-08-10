@@ -1002,6 +1002,26 @@ test('treeNodes gives two attempts of one run id their own node ids', () => {
     assert.equal(new Set(ids).size, ids.length, `every node is its own row: ${ids.join(' ')}`);
 });
 
+// The reason phases are numbered rather than titled: a script is free to write
+// one title twice, and an agent named by it would hang under both — carrying one
+// node id twice. A repeated id does not duplicate a row, it stops the view from
+// drawing at all, so the first phase to name an agent is the only one that gets it.
+test('treeNodes gives an agent to one phase when two phases share a title', () => {
+    const [run] = wf.treeNodes([{
+        runId: 'wf_dup-1', slug: '-Users-x-Develop-demo', sessionId: 'sess-a', name: 'dup',
+        state: 'finished', status: 'completed', lastActivity: 1,
+        phases: [{ title: 'A' }, { title: 'A' }], totals: { agents: 1 },
+        agents: [{ agentId: 'x1', label: 'a:one', phase: 'A', model: '', state: 'done', tokens: 0 }],
+    }]);
+    const ids = [];
+    const walk = (nodes) => { for (const n of nodes) { ids.push(n.id); walk(n.children); } };
+    walk([run]);
+
+    assert.equal(new Set(ids).size, ids.length, `every node is its own row: ${ids.join(' ')}`);
+    assert.deepEqual(run.children.map((n) => n.kind), ['phase'], 'the second A holds nobody, so it is not drawn');
+    assert.deepEqual(run.children[0].children.map((n) => n.label), ['a:one'], 'and the agent is drawn once');
+});
+
 // A phase list is not a partition: the live one is read off the script and the
 // final one off the snapshot, so a title can move between them, and an agent
 // under a title nobody lists still has to appear somewhere.

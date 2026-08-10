@@ -265,6 +265,69 @@ test('the tooltip shows a dozen agents and counts the rest', () => {
     } finally { run.dispose(); }
 });
 
+// The provider decides one thing of its own — whether a row starts open — and
+// turns a node into an item; everything it draws was decided in treeNodes. What
+// this covers is the wiring: the view really got a provider, the provider
+// answers, and borrowed text arrives escaped rather than as markup.
+test('the workflow view draws the runs the collector filled', () => {
+    const run = activate({ segments: ['{wfRuns}'] });
+    try {
+        const state = run.context.claudeState;
+        const going = {
+            runId: 'wf_shown', slug: '-p', sessionId: 'sess-1', name: 'shown', state: 'running',
+            lastActivity: 2, phases: [], totals: { agents: 1, done: 0 },
+            agents: [{
+                agentId: 'a1', label: '', phase: '', model: 'claude-opus-5', state: 'running',
+                promptPreview: '# делай это', resultPreview: '', tokens: 2000,
+            }],
+        };
+        state.data.workflows = { runs: [going], active: [going] };
+
+        const provider = vscode.__views.get('claudeStatusline.workflows');
+        assert.ok(provider, 'the view was registered with a provider');
+
+        const [node] = provider.getChildren();
+        const item = provider.getTreeItem(node);
+        assert.equal(item.label, 'shown');
+        assert.equal(item.description, '0/1');
+        assert.equal(item.iconPath.id, 'sync~spin');
+        assert.equal(item.contextValue, 'run');
+        assert.equal(item.collapsibleState, vscode.TreeItemCollapsibleState.Expanded,
+            'a run in flight opens itself — it is watched while it happens');
+
+        const [agent] = provider.getChildren(node);
+        const agentItem = provider.getTreeItem(agent);
+        assert.equal(agentItem.label, '# делай это', 'a live agent is named by its prompt');
+        assert.equal(agentItem.collapsibleState, vscode.TreeItemCollapsibleState.None);
+        assert.match(String(agentItem.tooltip.value), /\\#/,
+            'a prompt is prose out of someone else\'s file, not markup to render');
+    } finally { run.dispose(); }
+});
+
+// The fast tick draws six times a minute and the run list is refilled once, so
+// five of those draws would rebuild a tree nobody asked for. Both collectors
+// replace state.data.workflows wholesale, which is the signal.
+test('the tree is redrawn when the runs change, not on every tick', () => {
+    const run = activate({ segments: ['{wfRuns}'] });
+    try {
+        const state = run.context.claudeState;
+        const runs = { runs: [], active: [] };
+        state.data.workflows = runs;
+        ext.__render(state);
+
+        const provider = vscode.__views.get('claudeStatusline.workflows');
+        let fired = 0;
+        provider.onDidChangeTreeData(() => { fired += 1; });
+
+        ext.__render(state);
+        assert.equal(fired, 0, 'the same reading draws no tree');
+
+        state.data.workflows = { runs: [], active: [] };
+        ext.__render(state);
+        assert.equal(fired, 1, 'a fresh reading does');
+    } finally { run.dispose(); }
+});
+
 // Re-parsing the index is ~40 ms over 5.6 MB on this machine, and the file only
 // changes when the dashboard is opened — a repeating tick has no business paying
 // for it every minute.

@@ -85,12 +85,10 @@ function limitsTooltip(lim, pc, now, stale) {
 }
 
 // A round million reads as "1M", not "1.0M" — the model window is written the
-// way statusline.sh writes it.
-const tok = (n) => {
-    if (n < 1e6) return `${Math.round(n / 1000)}k`;
-    const m = n / 1e6;
-    return Number.isInteger(m) ? `${m}M` : `${m.toFixed(1)}M`;
-};
+// way statusline.sh writes it. The formula sits in workflows.js because the tree
+// writes the same numbers and cannot import this file: this is the one module
+// allowed to require vscode, so what both sides share lives on the other side.
+const tok = wfm.tokenLabel;
 
 function contextTooltip(state) {
     const { context: ctx, settings, version } = state;
@@ -197,6 +195,13 @@ function cell(text) {
     return String(text || '').replace(/\s+/g, ' ').replace(/\|/g, '\\|');
 }
 
+// The same rule where the hover is not a table: an agent's prompt is prose out
+// of someone else's file — hashes, backticks, asterisks, dashes — and a
+// MarkdownString renders every one of them as markup. The escaped set is the one
+// VS Code escapes in MarkdownString.appendText; the escaping is spelled out here
+// because the value is assembled in one string rather than appended.
+const prose = (text) => String(text || '').replace(/[\\`*_{}[\]()#+\-!~>]/g, '\\$&');
+
 // How many agents of one run a hover shows. A run here has reached 208 of them,
 // and a table that long is a wall rather than a hint — the tree and the dashboard
 // tab have the room for the whole list, a tooltip does not.
@@ -293,9 +298,22 @@ class WorkflowTree {
         this.state = state;
         this.emitter = new vscode.EventEmitter();
         this.onDidChangeTreeData = this.emitter.event;
+        // The reading the tree was last drawn from, so a draw that changed
+        // nothing does not ask for one.
+        this.drawn = null;
     }
 
-    refresh() { this.emitter.fire(); }
+    // Only when the reading actually changed. Both collectors replace
+    // state.data.workflows wholesale rather than editing it, so the object
+    // itself is the signal — and without this the fast tick rebuilds the same
+    // 1500 nodes five times a minute for nothing, since only the slow tick
+    // refills the list of finished runs.
+    refresh() {
+        const data = this.state.data.workflows || null;
+        if (data === this.drawn) return;
+        this.drawn = data;
+        this.emitter.fire();
+    }
 
     getChildren(node) {
         if (node) return node.children;
@@ -321,9 +339,9 @@ class WorkflowTree {
         // What the context menu of Task 9 keys on: run rows get run commands.
         item.contextValue = node.kind;
         if (node.kind === 'agent') {
-            item.tooltip = new vscode.MarkdownString(
-                `${node.agent.promptPreview}\n\n${node.agent.resultPreview || ''}`, true,
-            );
+            const text = [prose(node.agent.promptPreview), prose(node.agent.resultPreview)]
+                .filter(Boolean).join('\n\n');
+            if (text) item.tooltip = new vscode.MarkdownString(text);
         }
         return item;
     }
