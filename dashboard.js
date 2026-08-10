@@ -101,20 +101,74 @@ function modelColor(model, i) {
 
 // --- charts -----------------------------------------------------------------
 
+/**
+ * A y-axis for a column chart: four gridlines and their values, drawn the way
+ * lineChart already draws its own. Without it a column chart has no scale at
+ * all — a tall bar next to a short one says which is bigger and nothing about
+ * how much, and the single "max" label these charts carried was one number
+ * floating above a plot with no line to attach it to.
+ */
+const AXIS_W = 52;
+
+/**
+ * Round tick values, chosen the way every chart library chooses them: pick a
+ * step from the 1 / 2 / 2.5 / 5 family closest to max/target, then run it up to
+ * the first multiple that clears the data. Quartering the maximum instead put
+ * $1593.67 and $2390.51 on the axis — arithmetic about one column rather than a
+ * scale anyone can hold in their head — and rounding only the top left the four
+ * values between it just as ragged.
+ */
+function niceTicks(max, target = 4) {
+    if (!(max > 0)) return { ticks: [], ceiling: 0 };
+    const raw = max / target;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const rel = raw / mag;
+    const step = [1, 2, 2.5, 5, 10]
+        .reduce((best, n) => (Math.abs(n - rel) < Math.abs(best - rel) ? n : best), 1) * mag;
+    const ceiling = step * Math.ceil(max / step);
+    const ticks = [];
+    for (let v = 0; v <= ceiling + step / 2; v += step) ticks.push(v);
+    return { ticks, ceiling };
+}
+
+/**
+ * A y-axis for a column chart: four gridlines and their values, drawn the way
+ * lineChart already draws its own. Without it a column chart has no scale at
+ * all — a tall bar beside a short one says which is bigger and nothing about
+ * how much, and the single "max" label these charts used to carry was a number
+ * floating over a plot with nothing to attach it to.
+ *
+ * Returns the rounded top as well, because the bars have to be scaled against
+ * the same number the axis is labelled with.
+ */
+function yAxis(max, fmt, { top, base, right }) {
+    const { ticks, ceiling } = niceTicks(max);
+    if (!(ceiling > 0)) return { svg: '', ceiling: 0 };
+    let svg = '';
+    for (const v of ticks) {
+        const y = base - (v / ceiling) * (base - top);
+        svg += `<line class="grid" x1="${AXIS_W}" y1="${y.toFixed(1)}" x2="${right}" y2="${y.toFixed(1)}"/>`
+            + `<text class="tick" x="${AXIS_W - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end">${esc(fmt(v))}</text>`;
+    }
+    return { svg, ceiling };
+}
+
 /** Stacked daily spend, one segment per model. */
 function stackedDays(days, modelOrder, dayModels, { width = 860, height = 190 } = {}) {
     const keys = Object.keys(days).sort();
     if (keys.length === 0) return '<p class="empty">No activity recorded yet.</p>';
 
     const max = Math.max(...keys.map((k) => days[k].cost));
-    const barW = Math.max(2, Math.min(26, Math.floor(width / keys.length) - 2));
+    const plot = width - AXIS_W;
+    const barW = Math.max(2, Math.min(26, Math.floor(plot / keys.length) - 2));
     const step = barW + 2;
-    const w = Math.max(width, keys.length * step);
-    const scale = (v) => (max > 0 ? (v / max) * (height - 26) : 0);
+    const w = AXIS_W + Math.max(plot, keys.length * step);
+    const axis = yAxis(max, (v) => fmtCost(v), { top: 8, base: height - 18, right: 0 });
+    const scale = (v) => (axis.ceiling > 0 ? (v / axis.ceiling) * (height - 26) : 0);
 
     let bars = '';
     keys.forEach((key, i) => {
-        const x = i * step;
+        const x = AXIS_W + i * step;
         let y = height - 18;
         const perModel = (dayModels[key] || {});
         // Draw the models in a fixed order so a colour means one model in every
@@ -132,10 +186,9 @@ function stackedDays(days, modelOrder, dayModels, { width = 860, height = 190 } 
         }
     });
 
-    // The scale's top, said as what it is. On its own the figure read as a
-    // subtitle of the chart rather than as the height of its tallest column.
     return `<svg class="chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="xMinYMin meet" role="img">`
-        + `<text class="tick" x="0" y="10">${esc(fmtCost(max))} — dearest day</text>${bars}</svg>`;
+        + yAxis(max, (v) => fmtCost(v), { top: 8, base: height - 18, right: w }).svg
+        + `${bars}</svg>`;
 }
 
 /** GitHub-style calendar: one cell per day, columns are weeks. */
@@ -183,7 +236,16 @@ function heatmap(days, { weeks = 27, cell = 12, now = Date.now() } = {}) {
         }
     }
     const w = weeks * (cell + 2);
-    return `<svg class="chart heat" viewBox="0 0 ${w} ${7 * (cell + 2) + 16}" role="img">${months}${cells}</svg>`;
+    // Five levels and what the darkest one is worth: without it the shading is
+    // a texture, and "darker for a heavier day" is a claim with no unit.
+    const legendY = 7 * (cell + 2) + 26;
+    let legend = `<text class="tick" x="0" y="${legendY + 9}">less</text>`;
+    for (let l = 0; l <= 4; l++) {
+        legend += `<rect class="hm key l${l}" x="${30 + l * (cell + 2)}" y="${legendY}" width="${cell}" height="${cell}" rx="2"/>`;
+    }
+    legend += `<text class="tick" x="${30 + 5 * (cell + 2) + 4}" y="${legendY + 9}">more · up to ${esc(fmtCost(max))} a day</text>`;
+
+    return `<svg class="chart heat" viewBox="0 0 ${w} ${legendY + cell + 4}" role="img">${months}${cells}${legend}</svg>`;
 }
 
 /**
@@ -198,10 +260,13 @@ function heatmap(days, { weeks = 27, cell = 12, now = Date.now() } = {}) {
  * there is one. `byModel` is the exception — there the colour is the model's
  * identity, carried over from the chart above the list.
  */
-function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12, byModel = false } = {}) {
+function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12, byModel = false, scaleMax = 0 } = {}) {
     const rows = entries.slice(0, limit);
     if (rows.length === 0) return '<p class="empty">Nothing here yet.</p>';
-    const max = Math.max(...rows.map(([, b]) => value(b)));
+    // `scaleMax` is for a series that already has a scale of its own. A window
+    // at 1% is 1% of a hundred, not 100% of the only row on screen — which is
+    // what the biggest-row default drew, and it read as a full bar.
+    const max = scaleMax || Math.max(...rows.map(([, b]) => value(b)));
     return `<table class="bars">${rows.map(([key, b], i) => {
         const v = value(b);
         const w = max > 0 ? (v / max) * 100 : 0;
@@ -214,18 +279,35 @@ function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12, 
     }).join('')}</table>`;
 }
 
-/** Activity by hour of day — 24 columns. */
-function hourChart(hours) {
+/**
+ * Activity by hour of day — 24 columns, and the only chart here that used to
+ * carry no figure whatsoever: a row of bars whose height meant nothing you
+ * could name without hovering each one.
+ */
+function hourChart(hours, { width = 420, height = 132 } = {}) {
     const values = Array.from({ length: 24 }, (_, h) => (hours[String(h)] ? hours[String(h)].cost : 0));
     const max = Math.max(...values, 0);
     if (max <= 0) return '<p class="empty">Nothing here yet.</p>';
+
+    const base = height - 18;
+    const top = 8;
+    const plot = width - AXIS_W;
+    const step = plot / 24;
+    const barW = Math.max(3, step - 3);
+
+    const axis = yAxis(max, (v) => fmtCost(v), { top, base, right: width });
     const cols = values.map((v, h) => {
-        const height = (v / max) * 70;
-        return `<div class="hour" title="${h}:00 · ${esc(fmtCost(v))}">`
-            + `<span class="hour-bar" style="height:${height.toFixed(1)}px"></span>`
-            + `<span class="hour-lbl">${h % 6 === 0 ? h : ''}</span></div>`;
+        const barH = (v / axis.ceiling) * (base - top);
+        const x = AXIS_W + h * step + (step - barW) / 2;
+        return `<rect class="hour-bar" x="${x.toFixed(1)}" y="${(base - barH).toFixed(1)}" `
+            + `width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="2">`
+            + `<title>${h}:00 · ${esc(fmtCost(v))}</title></rect>`
+            + (h % 6 === 0
+                ? `<text class="tick" x="${(AXIS_W + h * step + step / 2).toFixed(1)}" y="${height - 4}" text-anchor="middle">${h}</text>`
+                : '');
     }).join('');
-    return `<div class="hours">${cols}</div>`;
+
+    return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img">${axis.svg}${cols}</svg>`;
 }
 
 /**
@@ -282,14 +364,16 @@ function stackedTokens(days, parts, { width = 860, height = 170 } = {}) {
 
     const totalOf = (b) => parts.reduce((a, p) => a + (b[p.field] || 0), 0);
     const max = Math.max(...keys.map((k) => totalOf(days[k])));
-    const barW = Math.max(2, Math.min(26, Math.floor(width / keys.length) - 2));
+    const plot = width - AXIS_W;
+    const barW = Math.max(2, Math.min(26, Math.floor(plot / keys.length) - 2));
     const step = barW + 2;
-    const w = Math.max(width, keys.length * step);
-    const scale = (v) => (max > 0 ? (v / max) * (height - 26) : 0);
+    const w = AXIS_W + Math.max(plot, keys.length * step);
+    const axis = yAxis(max, (v) => tok(Math.round(v)), { top: 8, base: height - 18, right: 0 });
+    const scale = (v) => (axis.ceiling > 0 ? (v / axis.ceiling) * (height - 26) : 0);
 
     let bars = '';
     keys.forEach((key, i) => {
-        const x = i * step;
+        const x = AXIS_W + i * step;
         let y = height - 18;
         for (const part of parts) {
             const v = days[key][part.field] || 0;
@@ -305,7 +389,8 @@ function stackedTokens(days, parts, { width = 860, height = 170 } = {}) {
     });
 
     return `<svg class="chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="xMinYMin meet" role="img">`
-        + `<text class="tick" x="0" y="10">${esc(tok(max))} — busiest day</text>${bars}</svg>`;
+        + yAxis(max, (v) => tok(Math.round(v)), { top: 8, base: height - 18, right: w }).svg
+        + `${bars}</svg>`;
 }
 
 /**
@@ -810,7 +895,7 @@ function toolsTab(total) {
         note: 'A server with no calls at all does not appear here — that is the answer to whether it earns its place in the config.',
     })}
         </div>
-        ${panel('Failing most often', barList(flaky, { limit: 8, value: (t) => t.rate * 100, label: (v, t) => `${v.toFixed(0)}% of ${t.calls}` }), {
+        ${panel('Failing most often', barList(flaky, { limit: 8, scaleMax: 100, value: (t) => t.rate * 100, label: (v, t) => `${v.toFixed(0)}% of ${t.calls}` }), {
         note: 'Only tools called at least twenty times: two failures out of three is worth seeing, two out of nine hundred is noise.',
     })}
     </section>`;
@@ -867,7 +952,7 @@ function cacheTab(total) {
         ${panel('Cache reads, by day', stackedTokens(total.days, READ_PARTS, { height: 110 }), {
         note: 'The same days on their own scale — reads run an order of magnitude above everything above, which is the point of them.',
     })}
-        ${panel('Cache hit rate by model', barList(byModel, { limit: 10, byModel: true, value: (b) => b.hit * 100, label: (v, b) => `${v.toFixed(0)}% · ${tok(b.cacheRead)} read` }))}
+        ${panel('Cache hit rate by model', barList(byModel, { limit: 10, byModel: true, scaleMax: 100, value: (b) => b.hit * 100, label: (v, b) => `${v.toFixed(0)}% · ${tok(b.cacheRead)} read` }))}
     </section>`;
 }
 
@@ -958,7 +1043,7 @@ function limitsTab(history, nowMs = Date.now()) {
     })}
         ${models.length ? panel('Per-model windows, latest reading', barList(
         models.map(([name, p]) => [name, { cost: p, msgs: p }]),
-        { limit: 8, label: (v) => `${v}%` }), {
+        { limit: 8, scaleMax: 100, label: (v) => `${v}%` }), {
         note: "The usage endpoint answers only for right now, so this is a local log: one row whenever a percentage moves, kept in the extension's own storage. It starts empty and fills in as the extension runs.",
     }) : ''}
     </section>`;
@@ -1621,10 +1706,13 @@ td.share.wide i { left: 0; right: auto; }
    below its content clips the number instead of wrapping the row, and a clipped
    number is a wrong number. */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));
-  gap: 1px; background: var(--vscode-panel-border); border: 1px solid var(--vscode-panel-border);
-  border-radius: 6px; overflow: hidden; margin-bottom: 16px; }
+  gap: 1px; border-radius: 6px; overflow: hidden; margin-bottom: 16px; }
+/* The hairline belongs to each tile rather than to the strip behind them: with
+   a background on the strip, six tiles across five columns left the sixth
+   beside an empty cell painted like a tile that is not there. */
 .tile { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px 13px;
-  background: var(--vscode-editor-background); }
+  background: var(--vscode-editor-background);
+  box-shadow: 0 0 0 1px var(--vscode-panel-border); }
 .tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; opacity: .5; }
 .tile-value { font-family: var(--vscode-editor-font-family); font-size: 24px; line-height: 1.05;
   font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
@@ -1651,29 +1739,34 @@ td.share.wide i { left: 0; right: auto; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .two > * { min-width: 0; }
 @media (max-width: 1100px) { .two { grid-template-columns: 1fr; gap: 4px; } }
-.bars { width: 100%; border-collapse: collapse; }
+/* Fixed layout, so the three columns are shares of the panel rather than of
+   their own content. Under the default auto layout the label and the value both
+   claimed their full width and the table grew past the panel — visible only as
+   text crossing into the panel beside it, because the body clips horizontally
+   and so nothing scrolls to give it away. */
+.bars { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .bars th, .bars td { border: none; padding: 3px 0; vertical-align: middle; }
 .bars th { font: inherit; text-transform: none; letter-spacing: 0; opacity: .85;
-  text-align: left; white-space: nowrap; padding-right: 14px; width: 1%; }
+  text-align: left; white-space: nowrap; padding-right: 14px; width: 38%; }
 /* A long key — a file path, an MCP tool id — otherwise takes the whole row and
    squeezes the bar out of existence, which is the one thing the bar is for. The
    clamp is on a span rather than on the cell: a max-width on a table cell is
    advisory under the default auto layout, and was being ignored. The full text
    is on the row's title attribute. */
-.bars th span { display: block; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
-.bar-cell { width: 100%; padding-right: 14px !important; min-width: 60px; }
+.bars th span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.bar-cell { width: auto; padding-right: 12px !important; }
 /* Tinted from the foreground rather than painted with a surface colour: inside
    a panel the widget background IS the panel, and the track disappeared. */
 .bar-track { display: block; border-radius: 3px; height: 14px; overflow: hidden;
   background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
 .bar-fill { display: block; height: 100%; border-radius: 3px;
   background: var(--vscode-charts-blue, hsl(200 62% 55%)); }
-.bar-val { opacity: .7; text-align: right; white-space: nowrap;
-  font-variant-numeric: tabular-nums; width: 1%; }
-.hours { display: flex; align-items: flex-end; gap: 3px; height: 92px; }
-.hour { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; flex: 1; height: 100%; }
-.hour-bar { width: 100%; background: var(--vscode-charts-blue, hsl(200 60% 55%)); border-radius: 2px 2px 0 0; }
-.hour-lbl { font-size: 9px; opacity: .5; margin-top: 3px; }
+/* A value wraps rather than clipping: half a figure is a wrong figure, and an
+   ellipsis inside a number is worse than a second line. keep-all stops a break
+   from landing inside one. */
+.bar-val { opacity: .7; text-align: right; white-space: normal; word-break: keep-all;
+  font-variant-numeric: tabular-nums; width: 30%; }
+.hour-bar { fill: var(--vscode-charts-blue, hsl(200 60% 55%)); }
 table { width: 100%; border-collapse: collapse; }
 /* A path, a JSON setting or a hook command is one long unbreakable token as far
    as the browser is concerned; anywhere-wrapping is what keeps it inside its
@@ -1723,7 +1816,6 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 }
 @media (max-width: 900px) {
   .opt2 { display: none; }
-  .bars th span { max-width: 22ch; }
   .tiles { grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); }
   .tile { padding: 9px 11px 10px; }
   .tile-value { font-size: 19px; }
@@ -1748,10 +1840,16 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity: .85; }
 .kv { width: 100%; }
+/* The key column stays as narrow as its content allows but may wrap: an env
+   var name is forty characters, which on one line was wider than the panel it
+   sits in on a split editor. */
 .kv th[scope="row"] { text-transform: none; letter-spacing: 0; font-size: inherit;
-  font-weight: 500; opacity: .75; white-space: nowrap; width: 1%; padding-right: 14px; }
+  font-weight: 500; opacity: .75; width: 1%; padding-right: 14px; }
 .kv td { font-variant-numeric: tabular-nums; }
-.kv td:last-child { text-align: right; white-space: nowrap; }
+/* Right-aligned, but allowed to wrap: the last cell of a .kv table is a figure
+   on some tabs and a file path on others, and kept on one line the path was
+   what pushed Health past its panel in a narrow window. */
+.kv td:last-child { text-align: right; white-space: normal; }
 /* The settings form reuses .kv for its layout, but its last column is a
    sentence, not a figure — kept on one line it was what pushed the tab past a
    narrow window. */

@@ -55,7 +55,13 @@ test('stackedDays draws one rect per model per day and labels them', () => {
     const svg = db.stackedDays(days, ['claude-opus-5', 'claude-fable-5'], dayModels);
     assert.equal((svg.match(/<rect /g) || []).length, 3);
     assert.match(svg, /08\.07/);
-    assert.match(svg, /\$30\.00/); // the scale label is the busiest day
+    // The axis runs in round steps up to the first one clearing the data — a
+    // busiest day of $30 gets 0/10/20/30, not four quarters of 30.
+    assert.match(svg, /class="grid"/);
+    for (const tick of ['$0', '$10.00', '$20.00', '$30.00']) {
+        assert.ok(svg.includes(`>${tick}<`), `no ${tick} on the axis`);
+    }
+    assert.ok(!/\$7\.50/.test(svg), 'the axis quartered the data instead of stepping');
 });
 
 test('heatmap keeps cells inside the calendar and never runs past today', () => {
@@ -71,7 +77,8 @@ test('heatmap keeps cells inside the calendar and never runs past today', () => 
     };
 
     const svg = db.heatmap({ [day(0)]: bucket(5) }, { now });
-    const cells = (svg.match(/class="hm/g) || []).length;
+    // Day cells only: the scale's own swatches are `hm key l#`.
+    const cells = (svg.match(/class="hm l/g) || []).length;
     assert.ok(cells > 100 && cells <= 27 * 7, `unexpected cell count: ${cells}`);
     assert.match(svg, /l4/); // the only day with spend is the darkest level
     assert.ok(svg.includes(`<title>${day(0)} `), 'today has a cell of its own');
@@ -80,7 +87,13 @@ test('heatmap keeps cells inside the calendar and never runs past today', () => 
     // half of the name the old assertion never actually checked.
     const ahead = db.heatmap({ [day(1)]: bucket(5) }, { now });
     assert.ok(!ahead.includes(`<title>${day(1)} `), 'tomorrow was given a cell');
-    assert.ok(!/l4/.test(ahead), 'a future day coloured the calendar');
+    assert.ok(!/class="hm l4/.test(ahead), 'a future day coloured the calendar');
+
+    // The scale is drawn whatever the data, and says what its darkest step is
+    // worth — without that the shading is a texture with no unit.
+    assert.match(svg, /class="hm key l4"/);
+    assert.match(svg, /less/);
+    assert.match(svg, /more · up to \$5\.00 a day/);
 });
 
 test('barList sorts by the caller and caps the list', () => {
