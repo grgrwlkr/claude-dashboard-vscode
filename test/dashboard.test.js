@@ -59,13 +59,28 @@ test('stackedDays draws one rect per model per day and labels them', () => {
 });
 
 test('heatmap keeps cells inside the calendar and never runs past today', () => {
-    const p = (n) => String(n).padStart(2, '0');
-    const today = new Date();
-    const key = `${today.getFullYear()}-${p(today.getMonth() + 1)}-${p(today.getDate())}`;
-    const svg = db.heatmap({ [key]: bucket(5) });
+    // The clock is passed in rather than read twice. Reading it here and again
+    // inside heatmap() put the two on different days across midnight, and the
+    // test's own day landed in the future the grid refuses to draw.
+    const now = Date.parse('2026-08-08T12:00:00');
+    const day = (offset) => {
+        const d = new Date(now);
+        d.setDate(d.getDate() + offset);
+        const p = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    };
+
+    const svg = db.heatmap({ [day(0)]: bucket(5) }, { now });
     const cells = (svg.match(/class="hm/g) || []).length;
     assert.ok(cells > 100 && cells <= 27 * 7, `unexpected cell count: ${cells}`);
     assert.match(svg, /l4/); // the only day with spend is the darkest level
+    assert.ok(svg.includes(`<title>${day(0)} `), 'today has a cell of its own');
+
+    // A day past today is not drawn at all, whatever it cost — which is the
+    // half of the name the old assertion never actually checked.
+    const ahead = db.heatmap({ [day(1)]: bucket(5) }, { now });
+    assert.ok(!ahead.includes(`<title>${day(1)} `), 'tomorrow was given a cell');
+    assert.ok(!/l4/.test(ahead), 'a future day coloured the calendar');
 });
 
 test('barList sorts by the caller and caps the list', () => {

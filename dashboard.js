@@ -139,12 +139,18 @@ function stackedDays(days, modelOrder, dayModels, { width = 860, height = 190 } 
 }
 
 /** GitHub-style calendar: one cell per day, columns are weeks. */
-function heatmap(days, { weeks = 27, cell = 12 } = {}) {
+/**
+ * `now` exists for the tests. The grid ends at today and skips anything past it,
+ * so a caller that computes "today" from its own clock and a heatmap that reads
+ * the clock again can disagree — across midnight, by a whole day. Injecting the
+ * moment is the only way to assert "today has a cell" without a race.
+ */
+function heatmap(days, { weeks = 27, cell = 12, now = Date.now() } = {}) {
     const keys = Object.keys(days);
     if (keys.length === 0) return '<p class="empty">No activity recorded yet.</p>';
 
     const max = Math.max(...keys.map((k) => days[k].cost));
-    const today = new Date();
+    const today = new Date(now);
     today.setHours(0, 0, 0, 0);
     // Start on the Sunday that begins the first visible week, counting whole
     // weeks back from the one today sits in — so the last column is the current
@@ -299,7 +305,7 @@ function stackedTokens(days, parts, { width = 860, height = 170 } = {}) {
     });
 
     return `<svg class="chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="xMinYMin meet" role="img">`
-        + `<text class="tick" x="0" y="10">${esc(tok(max))}</text>${bars}</svg>`;
+        + `<text class="tick" x="0" y="10">${esc(tok(max))} — busiest day</text>${bars}</svg>`;
 }
 
 /**
@@ -735,19 +741,18 @@ function modelsTab(total) {
     }).filter(([, v]) => v.msgs > 0).sort((a, b) => b[1].perReq - a[1].perReq);
 
     return `<section class="tab" data-tab="models" hidden>
-        <p class="note">Which model did the work, at which reasoning effort, from which client. A dispatch that forgot to name a model or an effort inherits the session's — and that inheritance is only visible here.</p>
-        <h2>Spend by model and effort</h2>
-        ${matrixTable(m.models, m.tiers, (model, tier) => (m.get(model, tier) || {}).cost,
-        { rowLabel: shortModel })}
-        <div class="two">
-          <div><h2>Where the requests came from</h2>
-            ${barList(entries, { limit: 8, label: (v, b) => `${fmtCost(v)} · ${b.msgs} req` })}
-            <p class="note">An <code>sdk-*</code> entrypoint is a program driving Claude Code, not a session you typed in: it carries its own model choice and ignores <code>settings.json</code>.</p>
-          </div>
-          <div><h2>Output per request, by effort</h2>
-            ${barList(perTier, { limit: 8, value: (b) => b.perReq, label: (v, b) => `${tok(Math.round(v))} · ${b.msgs} req` })}
-            ${speeds.length > 1 ? `<h2>Speed</h2>${barList(speeds, { limit: 4, label: (v, b) => `${fmtCost(v)} · ${b.msgs} req` })}` : ''}
-          </div>
+        ${panel('Spend by model and effort', matrixTable(m.models, m.tiers,
+        (model, tier) => (m.get(model, tier) || {}).cost, { rowLabel: shortModel }), {
+        note: "Which model did the work, at which reasoning effort, from which client. A dispatch that forgot to name a model or an effort inherits the session's — and that inheritance is only visible here.",
+    })}
+        <div class="pair">
+          ${panel('Where the requests came from',
+        barList(entries, { limit: 8, label: (v, b) => `${fmtCost(v)} · ${b.msgs} req` }), {
+        note: 'An <code>sdk-*</code> entrypoint is a program driving Claude Code, not a session you typed in: it carries its own model choice and ignores <code>settings.json</code>.',
+    })}
+          ${panel('Output per request, by effort',
+        barList(perTier, { limit: 8, value: (b) => b.perReq, label: (v, b) => `${tok(Math.round(v))} · ${b.msgs} req` })
+        + (speeds.length > 1 ? `<h3 class="now-sub">Speed</h3>${barList(speeds, { limit: 4, label: (v, b) => `${fmtCost(v)} · ${b.msgs} req` })}` : ''))}
         </div>
     </section>`;
 }
@@ -845,22 +850,24 @@ function cacheTab(total) {
         .map(([m, b]) => [shortModel(m), { ...b, hit: b.cacheRead / (b.cacheRead + b.cacheWrite + b.in) }]);
 
     return `<section class="tab" data-tab="cache" hidden>
-        <p class="note">A cached token is read at a tenth of the input rate; putting it there costs 1.25x at the five-minute TTL and 2x at the hourly one. Which TTL a request used is recorded per reply, so both sides are exact.</p>
-        <div class="tiles">
-          ${tile('Served from cache', pct(read, allIn), `${tok(read)} of ${tok(allIn)} input tokens`)}
-          ${tile('Saved by reads', `~${fmtCost(saved)}`, 'against sending them fresh')}
-          ${tile('Read per token written', leverage.toFixed(1) + '×', leverage < 1 ? 'rebuilt more than reused' : 'each write paid off')}
-          ${tile('Hourly TTL', pct(w1h, write), `${tok(w1h)} at 2× · ${tok(w5m)} at 1.25×`)}
-        </div>
-        <h2>Tokens billed at the full rate, by day</h2>
-        ${stackedTokens(total.days, BILLED_PARTS, { height: 150 })}
-        <div class="legend">${BILLED_PARTS.map((p) =>
-        `<span class="chip"><i style="background:${p.color}"></i>${esc(p.label)}</span>`).join('')}</div>
-        <h2>Cache reads, by day</h2>
-        <p class="note">The same days on their own scale — reads run an order of magnitude above everything above, which is the point of them.</p>
-        ${stackedTokens(total.days, READ_PARTS, { height: 110 })}
-        <h2>Cache hit rate by model</h2>
-        ${barList(byModel, { limit: 10, byModel: true, value: (b) => b.hit * 100, label: (v, b) => `${v.toFixed(0)}% · ${tok(b.cacheRead)} read` })}
+        ${tiles(
+        tile('Served from cache', pct(read, allIn), `${tok(read)} of ${tok(allIn)} input tokens`,
+            allIn > 0 ? Math.round((read / allIn) * 100) : null, 'cool'),
+        tile('Saved by reads', `~${fmtCost(saved)}`, 'against sending them fresh'),
+        tile('Read per token written', `${leverage.toFixed(1)}×`, leverage < 1 ? 'rebuilt more than reused' : 'each write paid off'),
+        tile('Hourly TTL', pct(w1h, write), `${tok(w1h)} at 2× · ${tok(w5m)} at 1.25×`,
+            write > 0 ? Math.round((w1h / write) * 100) : null, 'warm'),
+    )}
+        ${panel('Tokens billed at the full rate, by day',
+        stackedTokens(total.days, BILLED_PARTS, { height: 150 })
+        + `<div class="legend">${BILLED_PARTS.map((p) =>
+        `<span class="chip"><i style="background:${p.color}"></i>${esc(p.label)}</span>`).join('')}</div>`, {
+        note: 'A cached token is read at a tenth of the input rate; putting it there costs 1.25x at the five-minute TTL and 2x at the hourly one. Which TTL a request used is recorded per reply, so both sides are exact.',
+    })}
+        ${panel('Cache reads, by day', stackedTokens(total.days, READ_PARTS, { height: 110 }), {
+        note: 'The same days on their own scale — reads run an order of magnitude above everything above, which is the point of them.',
+    })}
+        ${panel('Cache hit rate by model', barList(byModel, { limit: 10, byModel: true, value: (b) => b.hit * 100, label: (v, b) => `${v.toFixed(0)}% · ${tok(b.cacheRead)} read` }))}
     </section>`;
 }
 
@@ -877,29 +884,30 @@ function frictionTab(total) {
     const toolErrors = Object.entries(total.tools || {}).filter(([, t]) => t.errors > 0)
         .sort((a, b) => b[1].errors - a[1].errors);
 
-    return `<section class="tab" data-tab="friction" hidden>
-        <p class="note">What the spend ran into. None of it is priced separately — a rejected call still cost the tokens that proposed it, and those are already counted as spend.</p>
-        <div class="tiles">
-          ${tile('Failed tool calls', String(f.toolErrors || 0), '')}
-          ${tile('Denied', String(Object.values(f.denials || {}).reduce((a, n) => a + n, 0)), 'refused before running')}
-          ${tile('Compactions', String(compactions), `${tok(f.droppedTokens || 0)} of context dropped`)}
-          ${tile('Cut off', String(f.shutdowns || 0), 'by the client going away')}
-        </div>
-        <div class="two">
-          <div><h2>Why a call was refused</h2>${barList(denials, { limit: 8, label: (v) => String(v) })}</div>
-          <div><h2>What triggered a compaction</h2>${barList(compactRows, { limit: 6, label: (v) => String(v) })}
-            ${f.compactMs > 0 ? `<p class="note">Compacting took ${esc(fmtDur(f.compactMs))} of wall-clock in total.</p>` : ''}
-          </div>
-        </div>
-        <h2>Tools that failed</h2>
-        ${barList(toolErrors, { limit: 12, value: (t) => t.errors, label: (v, t) => `${v} of ${t.calls}` })}
-        <h2>Sessions with the most failures</h2>
-        ${worst.length ? `<table><thead><tr><th>Last activity</th><th>Project</th><th>Session</th>
+    const mostFailures = worst.length ? `<table><thead><tr><th>Last activity</th><th>Project</th><th>Session</th>
           <th class="num">Failed</th><th class="num opt2">Requests</th><th class="num">Spend</th></tr></thead>
           <tbody>${worst.map((s) => `<tr><td>${esc(fmtDateTime(s.end))}</td><td>${esc(s.project)}</td>
             <td class="wrap">${esc(s.title || s.id)}</td><td class="num">${s.errors}</td>
             <td class="num opt2">${s.msgs}</td><td class="num">${esc(fmtCost(s.cost))}</td></tr>`).join('')}
-          </tbody></table>` : '<p class="empty">No failed tool calls recorded.</p>'}
+          </tbody></table>` : '<p class="empty">No failed tool calls recorded.</p>';
+
+    return `<section class="tab" data-tab="friction" hidden>
+        ${tiles(
+        tile('Failed tool calls', String(f.toolErrors || 0), ''),
+        tile('Denied', String(Object.values(f.denials || {}).reduce((a, n) => a + n, 0)), 'refused before running'),
+        tile('Compactions', String(compactions), `${tok(f.droppedTokens || 0)} of context dropped`),
+        tile('Cut off', String(f.shutdowns || 0), 'by the client going away'),
+    )}
+        <div class="pair">
+          ${panel('Why a call was refused', barList(denials, { limit: 8, label: (v) => String(v) }), {
+        note: 'What the spend ran into. None of it is priced separately — a rejected call still cost the tokens that proposed it, and those are already counted as spend.',
+    })}
+          ${panel('What triggered a compaction', barList(compactRows, { limit: 6, label: (v) => String(v) }), {
+        note: f.compactMs > 0 ? `Compacting took ${esc(fmtDur(f.compactMs))} of wall-clock in total.` : '',
+    })}
+        </div>
+        ${panel('Tools that failed', barList(toolErrors, { limit: 12, value: (t) => t.errors, label: (v, t) => `${v} of ${t.calls}` }))}
+        ${panel('Sessions with the most failures', mostFailures, { flush: worst.length > 0 })}
     </section>`;
 }
 
@@ -929,26 +937,30 @@ function limitsTab(history, nowMs = Date.now()) {
     }));
     const last = rows[rows.length - 1];
 
-    const cards = last ? '<div class="tiles">'
-        + tile('Weekly window', `${last.weekly}%`, `resets ${fmtDateTime(last.reset * 1000)}`)
-        + (typeof last.session === 'number' ? tile('Session window', `${last.session}%`, 'the rolling 5 hours') : '')
-        + tile('Readings kept', String(rows.length), `since ${fmtDateTime(rows[0].at)}`)
-        + '</div>' : '';
+    const cards = last ? tiles(
+        tile('Weekly window', `${last.weekly}%`, `resets ${fmtDateTime(last.reset * 1000)}`, last.weekly),
+        typeof last.session === 'number'
+            ? tile('Session window', `${last.session}%`, 'the rolling 5 hours', last.session) : '',
+        tile('Readings kept', String(rows.length), `since ${fmtDateTime(rows[0].at)}`),
+    ) : '';
 
     const models = last && last.models ? Object.entries(last.models).sort((a, b) => b[1] - a[1]) : [];
 
+    const overlaid = lineChart(series)
+        + `<div class="legend">${series.map((s, i) =>
+        `<span class="chip"><i style="background:${modelColor(s.label, i)}"></i>${esc(s.label)}<span class="dim">· ${s.current ? 'resets' : 'ended'} ${esc(fmtDateTime(s.reset * 1000))}</span></span>`).join('')}</div>`
+        + (series.length === 1 ? '<p class="note">Only one window has been recorded so far, so there is nothing to compare it against yet — the older lines appear as resets go by.</p>' : '');
+
     return `<section class="tab" data-tab="limits" hidden>
-        <p class="note">The usage endpoint answers only for right now, so this is a local log: one row whenever a percentage moves, kept in the extension's own storage. It starts empty and fills in as the extension runs.</p>
         ${cards}
-        <h2>Weekly windows, overlaid</h2>
-        <p class="note">One line per weekly window, each drawn from its own beginning: across is days since that window opened, up is how much of the weekly limit was gone by then. Stacking the weeks on one pair of axes compares the pace rather than the dates — the same day of two different weeks sits at the same place. The dashed diagonal is a window spent evenly; a line above it runs out before the reset, a line below leaves quota unused.</p>
-        ${lineChart(series)}
-        <div class="legend">${series.map((s, i) =>
-        `<span class="chip"><i style="background:${modelColor(s.label, i)}"></i>${esc(s.label)}<span class="dim">· ${s.current ? 'resets' : 'ended'} ${esc(fmtDateTime(s.reset * 1000))}</span></span>`).join('')}</div>
-        ${series.length === 1 ? '<p class="note">Only one window has been recorded so far, so there is nothing to compare it against yet — the older lines appear as resets go by.</p>' : ''}
-        ${models.length ? `<h2>Per-model windows, latest reading</h2>${barList(
+        ${panel('Weekly windows, overlaid', overlaid, {
+        note: 'One line per weekly window, each drawn from its own beginning: across is days since that window opened, up is how much of the weekly limit was gone by then. Stacking the weeks on one pair of axes compares the pace rather than the dates — the same day of two different weeks sits at the same place. The dashed diagonal is a window spent evenly; a line above it runs out before the reset, a line below leaves quota unused.',
+    })}
+        ${models.length ? panel('Per-model windows, latest reading', barList(
         models.map(([name, p]) => [name, { cost: p, msgs: p }]),
-        { limit: 8, label: (v) => `${v}%` })}` : ''}
+        { limit: 8, label: (v) => `${v}%` }), {
+        note: "The usage endpoint answers only for right now, so this is a local log: one row whenever a percentage moves, kept in the extension's own storage. It starts empty and fills in as the extension runs.",
+    }) : ''}
     </section>`;
 }
 
