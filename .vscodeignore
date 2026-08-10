@@ -9,3 +9,13 @@ test/**
 .superpowers/**
 docs/**
 CLAUDE.md
+
+# Repository furniture and the screenshot harness: they belong on GitHub, not in
+# an installed extension.
+.github/**
+tools/**
+
+# The marketplace listing pulls its screenshots from raw.githubusercontent, so
+# the images live in git and stay out of the package — only the icon has to ship.
+media/**
+!media/icon.png

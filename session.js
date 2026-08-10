@@ -48,6 +48,10 @@ function listSessions() {
 // sessions on a machine, and only those are of interest — not the whole tree.
 function parentsOf(pids) {
     if (pids.length === 0) return new Map();
+    // `ps` with these flags is POSIX. On Windows the call would throw on every
+    // tick and land in the catch below anyway — this only spares the spawn, and
+    // the caller already has fallbacks for "no parent map".
+    if (process.platform === 'win32') return new Map();
     let out;
     try {
         out = execFileSync('ps', ['-o', 'pid=,ppid=', '-p', pids.join(',')],

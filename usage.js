@@ -32,8 +32,14 @@ function parseToken(raw) {
 }
 
 // Same places statusline.sh looks: Keychain first, then the credentials file.
+// The Keychain half is macOS-only — everywhere else Claude Code keeps the token
+// in the file, and spawning `security` there is a guaranteed failure once a
+// minute.
 function readToken() {
     return new Promise((resolve) => {
+        if (process.platform !== 'darwin') {
+            try { return resolve(parseToken(fs.readFileSync(CREDS, 'utf8'))); } catch { return resolve(null); }
+        }
         execFile('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
             { timeout: 5000 }, (err, stdout) => {
                 if (!err) {

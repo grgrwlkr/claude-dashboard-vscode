@@ -564,10 +564,19 @@ function machineCounters(needs) {
     return out;
 }
 
+// The single request this extension makes is opt-out. `fetchLimits: false` means
+// the OAuth token is never read and api.anthropic.com is never called; limits
+// then come from the cache `statusline.sh` may have written, or not at all.
+// Absent rather than false is treated as on, so a stub or an older settings file
+// keeps the default behaviour.
+function limitsWanted() {
+    return vscode.workspace.getConfiguration('claudeStatusline').get('fetchLimits') !== false;
+}
+
 // The heavy work — the network call for limits and the full transcript pass for
 // spend — lives here and runs on the minute tick, not on every draw.
 function slowTick(state) {
-    if (u.stampExpired(Math.floor(Date.now() / 1000))) {
+    if (limitsWanted() && u.stampExpired(Math.floor(Date.now() / 1000))) {
         u.touchStamp();
         u.refreshUsage().then(() => { collectSlow(state); render(state); }, () => { /* draw from cache */ });
     }
@@ -946,8 +955,12 @@ function activate(context) {
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
         vscode.commands.registerCommand('claudeStatusline.refresh', async () => {
-            u.touchStamp();
-            await u.refreshUsage();
+            // "Refresh now" is still not a way around the setting: with limits
+            // switched off this re-reads the disk and redraws, nothing more.
+            if (limitsWanted()) {
+                u.touchStamp();
+                await u.refreshUsage();
+            }
             slowTick(state);
         }),
         vscode.commands.registerCommand('claudeStatusline.placeholders', () => showPlaceholders(state)),

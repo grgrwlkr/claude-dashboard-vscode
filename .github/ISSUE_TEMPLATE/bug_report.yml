@@ -1,0 +1,52 @@
+name: Bug report
+description: A number is wrong, an item is missing, something threw
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The formats this extension reads are private to Claude Code and change
+        without notice, so the versions below are usually what explains a bug.
+        Please do not paste transcript contents — a screenshot of the bar or the
+        dashboard tab is enough, with project names blurred if they are private.
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: macOS and Linux are supported; Windows is not, and known to degrade.
+      placeholder: macOS 15.6 (Apple Silicon) / Ubuntu 24.04
+    validations: { required: true }
+  - type: input
+    id: vscode
+    attributes:
+      label: VS Code (or Cursor / VSCodium / Windsurf) version
+      placeholder: VS Code 1.104.2
+    validations: { required: true }
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      description: "`claude --version`"
+      placeholder: 2.1.224
+    validations: { required: true }
+  - type: input
+    id: extension
+    attributes:
+      label: Extension version
+      placeholder: 0.19.0
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations: { required: true }
+  - type: textarea
+    id: segments
+    attributes:
+      label: Your claudeStatusline.segments, if you changed them
+      render: json
+  - type: textarea
+    id: errors
+    attributes:
+      label: Anything in Help → Toggle Developer Tools → Console
+      render: text

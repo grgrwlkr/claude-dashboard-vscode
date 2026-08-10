@@ -31,10 +31,10 @@ const wf = require('../workflows');
 const db = require('../dashboard');
 const u = require('../usage');
 
-function activate({ segments, workspace = '' } = {}) {
+function activate({ segments, workspace = '', settings = {} } = {}) {
     vscode.__reset();
     vscode.__setSettings({
-        segments, alignment: 'right', priority: 100, refreshInterval: 3600,
+        segments, alignment: 'right', priority: 100, refreshInterval: 3600, ...settings,
     });
     vscode.__setWorkspace(workspace);
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-ext-'));
@@ -62,6 +62,43 @@ test('activate creates one status-bar item per configured segment', () => {
         assert.deepEqual(vscode.__items.map((i) => i.priority), [100, 99, 98]);
         assert.ok(vscode.__items.every((i) => i.command === 'claudeStatusline.dashboard'));
     } finally { run.dispose(); }
+});
+
+// The one request this extension makes carries the user's OAuth token, so the
+// switch that turns it off has to be worth the promise printed next to it: not
+// "the bar stops updating" but "nothing is read and nothing is sent", including
+// through the command that exists to force a refresh.
+test('fetchLimits false leaves the token unread and the network untouched', async () => {
+    const real = { refreshUsage: u.refreshUsage, touchStamp: u.touchStamp, readToken: u.readToken };
+    let requests = 0;
+    let tokenReads = 0;
+    u.refreshUsage = async () => { requests++; return false; };
+    u.touchStamp = () => { requests++; return true; };
+    u.readToken = async () => { tokenReads++; return null; };
+    const run = activate({ segments: ['✻ {weekly}'], settings: { fetchLimits: false } });
+    try {
+        await vscode.__commands.get('claudeStatusline.refresh')();
+        assert.equal(requests, 0);
+        assert.equal(tokenReads, 0);
+    } finally {
+        Object.assign(u, real);
+        run.dispose();
+    }
+});
+
+test('left at its default the refresh command does ask for limits', async () => {
+    const real = { refreshUsage: u.refreshUsage, touchStamp: u.touchStamp };
+    let requests = 0;
+    u.refreshUsage = async () => { requests++; return false; };
+    u.touchStamp = () => true;
+    const run = activate({ segments: ['✻ {weekly}'] });
+    try {
+        await vscode.__commands.get('claudeStatusline.refresh')();
+        assert.equal(requests, 1);
+    } finally {
+        Object.assign(u, real);
+        run.dispose();
+    }
 });
 
 test('with no segments configured the bar falls back to the built-in four', () => {

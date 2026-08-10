@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: node --test 'test/*.test.js'
+
+      # VS Code's own convention: an odd minor is a pre-release channel, an even
+      # one is stable. The flag has to be set at packaging time too — pre-release
+      # is a property of the package, not just of the upload.
+      - name: decide the channel
+        run: |
+          MINOR=$(node -p "require('./package.json').version.split('.')[1]")
+          if [ $((MINOR % 2)) -eq 1 ]; then echo "FLAG=--pre-release" >> "$GITHUB_ENV"; else echo "FLAG=" >> "$GITHUB_ENV"; fi
+
+      - name: the tag must match the manifest
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # A tag that disagrees with package.json publishes a version nobody can
+          # check out later — fail here rather than explain it afterwards.
+          [ "$TAG" = "v$VERSION" ] || { echo "tag $TAG != package.json $VERSION"; exit 1; }
+
+      - run: npx @vscode/vsce package --no-dependencies $FLAG -o extension.vsix
+
+      - name: publish to the VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx @vscode/vsce publish $FLAG --packagePath extension.vsix --skip-duplicate
+
+      - name: publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx ovsx publish extension.vsix $FLAG --skip-duplicate -p "$OVSX_PAT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: extension.vsix
+          generate_release_notes: true
+          prerelease: ${{ env.FLAG != '' }}

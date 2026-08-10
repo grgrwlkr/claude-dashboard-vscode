@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    # Both supported platforms run the suite: the token path and the process
+    # walk differ between them, and a macOS-only run would never notice.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test 'test/*.test.js'
+
+  package:
+    # Packaging catches what tests cannot: a manifest that no longer parses, a
+    # missing icon, and files that should never have entered the .vsix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx @vscode/vsce package --no-dependencies -o extension.vsix
+      - name: what went into the package
+        run: npx @vscode/vsce ls --no-dependencies
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: extension.vsix
