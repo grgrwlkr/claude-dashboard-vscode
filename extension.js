@@ -875,6 +875,31 @@ function activate(context) {
             slowTick(state);
         }),
         vscode.commands.registerCommand('claudeStatusline.placeholders', () => showPlaceholders(state)),
+        vscode.commands.registerCommand('claudeStatusline.copyRunId', async (node) => {
+            const run = node && node.run;
+            if (!run) return;
+            // Both halves of what a replay needs: the id goes into resumeFromRunId,
+            // the path into scriptPath, and typing either by hand is how a replay
+            // ends up pointed at the wrong run.
+            const text = run.scriptPath ? `${run.runId}\n${run.scriptPath}` : run.runId;
+            await vscode.env.clipboard.writeText(text);
+            vscode.window.showInformationMessage(`${run.runId} copied`);
+        }),
+        vscode.commands.registerCommand('claudeStatusline.openWorkflowScript', async (node) => {
+            const run = node && node.run;
+            // A run with no script is ordinary: the script sits next to the run
+            // directory, and the directory is what the client cleans up first.
+            if (!run || !run.scriptPath) {
+                vscode.window.showWarningMessage('This run kept no script on disk.');
+                return;
+            }
+            try {
+                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(run.scriptPath));
+                await vscode.window.showTextDocument(doc, { preview: true });
+            } catch {
+                vscode.window.showWarningMessage(`Cannot open ${run.scriptPath}`);
+            }
+        }),
     );
 }
 

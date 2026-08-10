@@ -2,6 +2,8 @@
 // `node --test`. Only what extension.js touches is implemented; anything it
 // starts using and this does not have will fail loudly rather than silently.
 
+const fs = require('node:fs');
+
 const items = [];
 const commands = new Map();
 const views = new Map();
@@ -65,7 +67,13 @@ const vscode = {
         workspaceFolders: undefined,
         getConfiguration: () => ({ get: (key) => settings[key] }),
         onDidChangeConfiguration(cb) { listeners.config.push(cb); return disposable(); },
-        openTextDocument: async (uri) => ({ uri }),
+        // The real one rejects on a file that is not there, and a caller that
+        // does not expect it ends the command in an unhandled rejection. A stub
+        // that opens anything would let that ship.
+        openTextDocument: async (uri) => {
+            if (!fs.existsSync(uri.fsPath)) throw new Error(`Unable to resolve non-existing file '${uri.fsPath}'`);
+            return { uri };
+        },
     },
     commands: {
         registerCommand(id, fn) { commands.set(id, fn); return disposable(); },

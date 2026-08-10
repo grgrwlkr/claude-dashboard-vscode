@@ -304,6 +304,42 @@ test('the workflow view draws the runs the collector filled', () => {
     } finally { run.dispose(); }
 });
 
+// The two things a replay of a failed stage needs — the script to edit and the
+// id to resume from — live in the run record and nowhere a user can reach.
+test('the run commands are registered and act on a tree node', async () => {
+    const run = activate({ segments: ['✻ {weekly}'] });
+    const clipboard = vscode.env.clipboard.writeText;
+    const show = vscode.window.showTextDocument;
+    try {
+        const node = { kind: 'run', run: { runId: 'wf_x-1', scriptPath: '/tmp/demo-wf_x-1.js' } };
+
+        assert.ok(vscode.__commands.has('claudeStatusline.copyRunId'));
+        assert.ok(vscode.__commands.has('claudeStatusline.openWorkflowScript'));
+
+        let copied = '';
+        vscode.env.clipboard.writeText = async (text) => { copied = text; };
+        await vscode.__commands.get('claudeStatusline.copyRunId')(node);
+        assert.match(copied, /wf_x-1/);
+        assert.match(copied, /demo-wf_x-1\.js/);
+
+        const script = path.join(EMPTY_TREE, 'demo-wf_open-1.js');
+        fs.writeFileSync(script, 'export const meta = {};\n');
+        let shown = '';
+        vscode.window.showTextDocument = async (doc) => { shown = doc.uri.fsPath; };
+        await vscode.__commands.get('claudeStatusline.openWorkflowScript')({ kind: 'run', run: { runId: 'wf_open-1', scriptPath: script } });
+        assert.equal(shown, script, 'the row opens its own script');
+
+        // A run whose script is gone must not throw — the panel outlives the files.
+        await vscode.__commands.get('claudeStatusline.openWorkflowScript')({ kind: 'run', run: { runId: 'wf_y', scriptPath: '' } });
+        // Neither does one whose path was recorded and has since been deleted.
+        await vscode.__commands.get('claudeStatusline.openWorkflowScript')(node);
+    } finally {
+        vscode.env.clipboard.writeText = clipboard;
+        vscode.window.showTextDocument = show;
+        run.dispose();
+    }
+});
+
 // The fast tick draws six times a minute and the run list is refilled once, so
 // five of those draws would rebuild a tree nobody asked for. Both collectors
 // replace state.data.workflows wholesale, which is the signal.

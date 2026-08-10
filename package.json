@@ -40,8 +40,29 @@
       {
         "command": "claudeStatusline.placeholders",
         "title": "Claude Statusline: List status-bar placeholders"
+      },
+      {
+        "command": "claudeStatusline.openWorkflowScript",
+        "title": "Claude: Open the workflow script"
+      },
+      {
+        "command": "claudeStatusline.copyRunId",
+        "title": "Claude: Copy the workflow run id"
       }
     ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "claudeStatusline.openWorkflowScript",
+          "when": "view == claudeStatusline.workflows && viewItem == run",
+          "group": "inline"
+        },
+        {
+          "command": "claudeStatusline.copyRunId",
+          "when": "view == claudeStatusline.workflows && viewItem == run"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
