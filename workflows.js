@@ -342,8 +342,13 @@ function readLive(runDir, { known = null } = {}) {
     const done = new Set();
     for (const r of parsedLines(readChunk(path.join(runDir, 'journal.jsonl'), { length: JOURNAL_BYTES }))) {
         if (!r.agentId) continue;
-        if (r.type === 'started' && !started.includes(r.agentId)) started.push(r.agentId);
-        if (r.type === 'result') done.add(r.agentId);
+        // Read as a string wherever it came from, exactly as agentOf reads the
+        // snapshot's: this roster is matched against ids taken out of file names,
+        // and everything downstream slices it to make a label. A number here
+        // would list one agent twice and throw the moment a row was drawn for it.
+        const id = String(r.agentId);
+        if (r.type === 'started' && !started.includes(id)) started.push(id);
+        if (r.type === 'result') done.add(id);
     }
     // A transcript can exist for an agent the journal has not recorded yet.
     for (const entry of entries) {
@@ -406,9 +411,10 @@ function nameFromScriptPath(scriptPath) {
 }
 
 /**
- * Has the run that was going written its snapshot yet? A running run has no
- * jsonPath — that field is filled by the scan, and the scan is exactly what the
- * fast tick must not do — so the file is looked for instead of being asked for.
+ * Where the snapshot of a run that was going is, or '' while it has none. A
+ * running run has no jsonPath — that field is filled by the scan, and the scan
+ * is exactly what the fast tick must not do — so the file is looked for instead
+ * of being asked for.
  *
  * Every session of the project is asked, not the run's own: five runs on this
  * machine keep their directory under one session and their snapshot under
@@ -417,16 +423,72 @@ function nameFromScriptPath(scriptPath) {
  * one readdir and at most 37 stats — the widest project here — against the whole
  * tree the full scan walks.
  */
-function snapshotArrived(run) {
-    if (run.jsonPath) return Boolean(statOf(run.jsonPath));
-    if (!run.runDir) return false;
+function snapshotPath(run) {
+    if (run.jsonPath) return statOf(run.jsonPath) ? run.jsonPath : '';
+    if (!run.runDir) return '';
     // <slug>/<session>/subagents/workflows/<runId>: four levels up is the project.
     const slugRoot = path.dirname(path.dirname(path.dirname(path.dirname(run.runDir))));
     for (const entry of listDir(slugRoot)) {
         if (!entry.isDirectory()) continue;
-        if (statOf(path.join(slugRoot, entry.name, 'workflows', `${run.runId}.json`))) return true;
+        const file = path.join(slugRoot, entry.name, 'workflows', `${run.runId}.json`);
+        if (statOf(file)) return file;
     }
-    return false;
+    return '';
+}
+
+/**
+ * The run as its own snapshot describes it, for a caller that has just noticed
+ * that snapshot appear. Null when there is none yet or it cannot be read at all,
+ * and then the run is left exactly as it was — still going, for the next full
+ * scan to classify by the same rule as any other unreadable snapshot.
+ *
+ * The status is read here rather than left for that scan because the file the
+ * status lives in is the same file whose existence proves the run is over: a
+ * record marked finished with no status is a run nobody can say anything about,
+ * and up to a minute of "how did it end" is exactly what a panel is watched for.
+ * The phases, the real agent labels and the duration come along for free.
+ *
+ * What the run has cost rides across agent by agent. Money comes from `usage`
+ * records and is settled by whoever prices runs; the snapshot carries no figure
+ * that may become dollars, so dropping what was already priced would empty the
+ * money columns until the next pricing pass.
+ */
+function finishRun(run) {
+    const jsonPath = snapshotPath(run);
+    const final = jsonPath ? readFinal(jsonPath) : null;
+    if (!final) return null;
+
+    const priced = new Map((run.agents || []).map((a) => [a.agentId, a]));
+    const agents = final.agents.map((agent) => {
+        const was = priced.get(agent.agentId);
+        return was ? { ...agent, cost: was.cost || 0, tokens: was.tokens || 0 } : agent;
+    });
+    const endedAt = statOf(jsonPath)?.mtimeMs || 0;
+    const totals = run.totals || {};
+    return {
+        ...run,
+        state: 'finished',
+        jsonPath,
+        endedAt,
+        lastActivity: Math.max(run.lastActivity || 0, endedAt),
+        // A live run is named after its script file; the snapshot's own name is
+        // the authority once there is one, and an empty one changes nothing.
+        name: final.name || run.name,
+        status: final.status,
+        durationMs: final.durationMs,
+        phases: final.phases,
+        agents,
+        totals: {
+            ...totals,
+            ...final.totals,
+            done: settledCount(agents, 'finished'),
+            // The snapshot's own totals are context sizes and counts, never
+            // money — so the two priced figures stay at what the last pricing
+            // pass found instead of being reset to the zeros readFinal ships.
+            cost: totals.cost || 0,
+            tokens: totals.tokens || 0,
+        },
+    };
 }
 
 // How long a run directory may sit untouched before it stops counting as live.
@@ -894,8 +956,14 @@ function withCost(runs, { index = null, live = false, carried = new Map() } = {}
  * How a run ended, as the word to print and the outcome to draw it with. The
  * word is the client's own — "completed" is what a clean run writes — and a run
  * that never wrote a snapshot has none at all, so it says what it is doing or
- * only that nobody recorded an end for it. Anything other than "completed" is a
+ * only that nobody recorded an end for it. Any other word the client writes is a
  * failure rather than a word guessed into success.
+ *
+ * No word at all is a different thing from a bad one, and it gets the question
+ * mark: every field of a snapshot is optional, and a run whose end was noticed
+ * before its status could be read has none yet either. Reading that silence as a
+ * crash is the one lie this function can tell — it paints a clean run red — and
+ * "degrade, never guess" cuts the other way here: unknown, not failed.
  *
  * The outcome is the same five-word vocabulary `outcomeOf` answers an agent in,
  * which is what lets one icon table and one set of colours serve a run and its
@@ -905,7 +973,8 @@ function withCost(runs, { index = null, live = false, carried = new Map() } = {}
 function verdictOf(run) {
     if (run.state === 'running') return { word: 'running', outcome: 'running' };
     if (run.state === 'abandoned') return { word: 'no snapshot', outcome: 'stopped' };
-    return { word: run.status || '', outcome: run.status === 'completed' ? 'done' : 'failed' };
+    if (!run.status) return { word: '', outcome: 'unknown' };
+    return { word: run.status, outcome: run.status === 'completed' ? 'done' : 'failed' };
 }
 
 // Read through outcomeOf and verdictOf, never off a raw word. The client writes
@@ -976,11 +1045,21 @@ function tokenLabel(n) {
 // holding it.
 const runKey = (run) => `${run.slug || ''}/${run.sessionId || ''}/${run.runId}`;
 
+// How many finished runs the tree draws, from the design: "the last 50 finished
+// are shown, abandoned ones always". The panel is for what is happening and what
+// just happened, while the finished half of the list is the history of the
+// machine and only grows — the 74 runs here would be 1513 rows uncapped, and
+// nothing ever takes a run off the disk. Running and abandoned runs are never
+// cut: the first is the point of the panel, and the second is a handful worth
+// knowing about.
+const TREE_FINISHED = 50;
+
 /**
  * The run list as a three-level tree: run → phase → agent. Runs with no phases
  * carry their agents directly, because an empty grouping level is a click that
  * buys nothing — and no run has phases until either its snapshot or its script
- * has been read.
+ * has been read. Only the newest TREE_FINISHED finished runs reach the tree;
+ * everything still going and everything abandoned does.
  *
  * Nothing here touches disk or vscode: a node is a plain object, and the icon is
  * a name rather than an object, so every decision the panel makes is testable
@@ -995,7 +1074,16 @@ function treeNodes(runs) {
         return (b.lastActivity || 0) - (a.lastActivity || 0);
     });
 
-    return ordered.map((run) => {
+    // The cut is taken after the sort, so the fifty that survive are the fifty
+    // most recent rather than the fifty the scan happened to walk first.
+    const shown = [];
+    let finished = 0;
+    for (const run of ordered) {
+        if (run.state === 'finished' && ++finished > TREE_FINISHED) continue;
+        shown.push(run);
+    }
+
+    return shown.map((run) => {
         const key = runKey(run);
         // Read once and guarded once: this is exported, so a caller may hand it
         // a record the scan did not build. The field is always filled by
@@ -1071,9 +1159,41 @@ function treeNodes(runs) {
     });
 }
 
+/**
+ * Everything the tree would draw, flattened into one string, so a caller can
+ * tell a reading that changed something from one that changed nothing. A
+ * collector that rebuilds its list every minute hands out a new object each time
+ * whether or not anything moved, and comparing objects then means redrawing
+ * hundreds of rows for nothing.
+ *
+ * Taken from the nodes rather than from the runs on purpose: a fingerprint of
+ * the inputs would have to be kept in step with every rule about what a row
+ * says, and the first rule that changed without it would freeze the panel on
+ * stale text. The agent previews are in it because they are what a row's hover
+ * shows — the one part of a node that is not already in its own fields.
+ */
+function treeStamp(runs) {
+    const parts = [];
+    const walk = (nodes) => {
+        for (const node of nodes) {
+            parts.push(node.id, node.label, node.description, node.icon,
+                node.agent ? `${node.agent.promptPreview || ''} → ${node.agent.resultPreview || ''}` : '');
+            walk(node.children);
+        }
+    };
+    walk(treeNodes(runs || []));
+    // Joined on a separator rather than concatenated: two fields sliding into
+    // one another would let two different trees stamp the same.
+    return parts.join(' | ');
+}
+
 module.exports = {
-    readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotArrived,
-    costIndex, withCost, accrue, treeNodes, tokenLabel, PROJECTS, RUN_STALE_MS,
+    readFinal, phasesFromScript, readLive, scanRuns, outcomeOf, snapshotPath, finishRun,
+    costIndex, withCost, accrue, treeNodes, treeStamp, tokenLabel, PROJECTS, RUN_STALE_MS,
+    // The vocabulary itself, so a test can hold the three tables that draw an
+    // outcome — this one, the hover's and the dashboard's stylesheet — against
+    // each other: a word added here and nowhere else draws as nothing at all.
+    OUTCOME_ICONS, TREE_FINISHED,
     // Read by the dashboard as well as by the tree: one rule about a run cannot
     // live in two files, and dashboard.js may not require vscode, so it lives on
     // this side of that line.

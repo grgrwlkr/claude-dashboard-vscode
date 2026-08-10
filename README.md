@@ -198,8 +198,14 @@ with a regular expression. That script is never evaluated.
 
 A running agent has no label. The label is computed in the runtime and reaches
 the disk only with the final snapshot, so until a run ends its agents are named
-by the first line of the prompt they were given; the real labels take over when
-the snapshot lands.
+by the first line of the prompt they were given; the real labels take over as
+soon as the snapshot lands, which the panel notices within ten seconds and reads
+the run's verdict, phases and duration out of at the same moment.
+
+The tree draws the fifty newest finished runs. Runs still going and runs nobody
+ever finished are always drawn: the first is what the panel is for, the second is
+a handful worth knowing about, while the finished half only grows — nothing ever
+takes a run off the disk.
 
 **Money is read only from `usage` records** — the same arithmetic as everywhere
 else here, applied to the workflow's own agents: from the index for an agent

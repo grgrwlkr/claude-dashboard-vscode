@@ -477,6 +477,23 @@ test('scanRuns fills a running workflow with its live agents', () => tree((t) =>
 // The other direction of the same race: the transcript file exists before the
 // journal has written the line that started it. This is the branch the roster
 // walks the directory for, and nothing on real data exercises it.
+// Every field of the journal is another program's, and `agentOf` already reads
+// the snapshot's id through String() — the live side has to agree. A number here
+// would list one agent twice, since the roster is matched against ids taken out
+// of file names, and would throw the moment anything sliced it for a label.
+test('readLive reads an agent id the journal wrote as a number', () => tree((t) => {
+    runFixture(t, 'wf_numid-1', {
+        journal: [{ type: 'started', agentId: 12345 }, { type: 'result', agentId: 12345 }],
+        agents: { 12345: AGENT_LINES('12345') },
+    });
+    const live = wf.readLive(path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_numid-1'));
+
+    assert.equal(live.total, 1, 'the journal id and the file name are one agent, not two');
+    assert.equal(live.done, 1);
+    assert.equal(typeof live.agents[0].agentId, 'string');
+    assert.equal(wf.agentLabel({ ...live.agents[0], promptPreview: '' }), '12345');
+}));
+
 test('readLive counts an agent whose transcript beat the journal', () => tree((t) => {
     runFixture(t, 'wf_live-5', {
         journal: [{ type: 'started', agentId: 'a1' }],
@@ -507,24 +524,89 @@ test('totals.done counts the settled agents of a finished run, crashes included'
     assert.equal(run.totals.done, 2);
 }));
 
-test('snapshotArrived notices a run that just finished', () => tree((t) => {
+test('snapshotPath notices a run that just finished', () => tree((t) => {
     runFixture(t, 'wf_fin-1', { journal: [{ type: 'started', agentId: 'a1' }] });
     const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
-    assert.equal(wf.snapshotArrived(run), false);
-    t.write('workflows/wf_fin-1.json', { ...FINAL, runId: 'wf_fin-1' });
-    assert.equal(wf.snapshotArrived(run), true);
+    assert.equal(wf.snapshotPath(run), '');
+    const file = t.write('workflows/wf_fin-1.json', { ...FINAL, runId: 'wf_fin-1' });
+    assert.equal(wf.snapshotPath(run), file);
 }));
 
 // Five runs on this machine write their snapshot into a session other than the
 // one holding the run directory. While the run is going that session does not
 // exist yet, so no path derived from the run can name it — every session of the
 // project has to be asked.
-test('snapshotArrived finds a snapshot that landed in a sibling session', () => tree((t) => {
+test('snapshotPath finds a snapshot that landed in a sibling session', () => tree((t) => {
     runFixture(t, 'wf_sib-1', { journal: [{ type: 'started', agentId: 'a1' }] });
     const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
-    assert.equal(wf.snapshotArrived(run), false);
-    writeAt(t, SECOND, 'workflows/wf_sib-1.json', { ...FINAL, runId: 'wf_sib-1' });
-    assert.equal(wf.snapshotArrived(run), true);
+    assert.equal(wf.snapshotPath(run), '');
+    const file = writeAt(t, SECOND, 'workflows/wf_sib-1.json', { ...FINAL, runId: 'wf_sib-1' });
+    assert.equal(wf.snapshotPath(run), file);
+}));
+
+// The whole point of reading the snapshot the moment it is noticed rather than
+// only marking the run over: a run that finished cleanly says so at once. Marked
+// finished with an empty status it would draw as a failure — the verdict rule
+// has no other reading of a run that did not say "completed" — so what is
+// asserted here is the verdict, not the state.
+test('finishRun takes the verdict from the snapshot it just found', () => tree((t) => {
+    runFixture(t, 'wf_flip-1', {
+        journal: [{ type: 'started', agentId: 'a1' }],
+        agents: { a1: AGENT_LINES('a1') },
+    });
+    const [going] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    assert.equal(going.state, 'running');
+    assert.equal(wf.finishRun(going), null, 'no snapshot, no verdict');
+
+    // What the pricing pass found, which the snapshot has no figure for.
+    const priced = {
+        ...going,
+        agents: going.agents.map((a) => ({ ...a, cost: 1.25, tokens: 5000 })),
+        totals: { ...going.totals, cost: 1.25, tokens: 5000, unlisted: 0.5 },
+    };
+    t.write('workflows/wf_flip-1.json', {
+        ...FINAL,
+        runId: 'wf_flip-1',
+        workflowProgress: [
+            { type: 'workflow_phase', index: 1, title: 'Review' },
+            {
+                type: 'workflow_agent', label: 'review:bugs', phaseTitle: 'Review',
+                agentId: 'a1', model: 'claude-opus-5', state: 'done',
+            },
+        ],
+    });
+    const done = wf.finishRun(priced);
+
+    assert.equal(done.state, 'finished');
+    assert.deepEqual(wf.verdictOf(done), { word: 'completed', outcome: 'done' });
+    assert.equal(wf.treeNodes([done])[0].icon, 'check', 'and the row it draws is not a red cross');
+    assert.equal(done.name, 'review-changes', 'the snapshot names the run');
+    assert.equal(done.durationMs, FINAL.durationMs);
+    assert.deepEqual(done.phases, [{ title: 'Review', detail: 'one agent per dimension' }]);
+    assert.equal(done.agents[0].label, 'review:bugs', 'and the real label replaces the prompt');
+    assert.equal(done.totals.done, 1);
+    assert.equal(done.agents[0].cost, 1.25, 'what was already priced rides across');
+    assert.equal(done.totals.cost, 1.25);
+    assert.equal(done.totals.tokens, 5000, 'and is not reset to the zero readFinal ships');
+    assert.equal(done.totals.unlisted, 0.5);
+}));
+
+// Both ways a snapshot can say nothing. Unreadable, the run is left exactly as
+// it was for the next full scan to classify by its own rule; readable but
+// without a status, the run is over and how it went is simply not known — which
+// is a question mark, never a cross.
+test('finishRun refuses to invent a verdict', () => tree((t) => {
+    runFixture(t, 'wf_mute-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    const [going] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+
+    t.write('workflows/wf_mute-1.json', '{"runId": "wf_mute');
+    assert.equal(wf.finishRun(going), null, 'a snapshot nobody can parse is not an ending');
+
+    t.write('workflows/wf_mute-1.json', {});
+    const done = wf.finishRun(going);
+    assert.equal(done.state, 'finished');
+    assert.deepEqual(wf.verdictOf(done), { word: '', outcome: 'unknown' });
+    assert.equal(wf.treeNodes([done])[0].icon, 'question');
 }));
 
 // The index the join reads, built over the fixture tree. Its storage goes in a
@@ -1091,15 +1173,59 @@ test('verdictOf reads a run the way its icon does', () => {
     assert.deepEqual(wf.verdictOf({ state: 'abandoned' }), { word: 'no snapshot', outcome: 'stopped' });
     assert.deepEqual(wf.verdictOf({ state: 'finished', status: 'completed' }), { word: 'completed', outcome: 'done' });
     assert.deepEqual(wf.verdictOf({ state: 'finished', status: 'killed' }), { word: 'killed', outcome: 'failed' });
-    // A snapshot that carried no status gets no verdict invented for it, and the
-    // icon stays the one a run that did not say "completed" has always had.
-    assert.deepEqual(wf.verdictOf({ state: 'finished', status: '' }), { word: '', outcome: 'failed' });
+    // A snapshot that carried no status says nothing about how the run went, and
+    // silence is not a crash: every field of that file is optional, and a run
+    // whose end was noticed before its status could be read has none yet either.
+    // Reading it as a failure paints a clean run red, which is the one thing
+    // "degrade, never guess" forbids here.
+    assert.deepEqual(wf.verdictOf({ state: 'finished', status: '' }), { word: '', outcome: 'unknown' });
     const [a, b, c] = wf.treeNodes([
         { runId: 'wf_a', state: 'running', phases: [], agents: [], totals: {}, lastActivity: 3 },
         { runId: 'wf_b', state: 'finished', status: '', phases: [], agents: [], totals: {}, lastActivity: 2 },
         { runId: 'wf_c', state: 'abandoned', phases: [], agents: [], totals: {}, lastActivity: 1 },
     ]);
-    assert.deepEqual([a.icon, b.icon, c.icon], ['sync~spin', 'error', 'circle-slash']);
+    assert.deepEqual([a.icon, b.icon, c.icon], ['sync~spin', 'question', 'circle-slash']);
+});
+
+// From the design: "the last 50 finished are shown, abandoned ones always". The
+// finished half of the list only grows — nothing ever removes a run from disk —
+// while the two states worth watching are a handful.
+test('treeNodes draws the newest fifty finished runs and every other one', () => {
+    const finished = Array.from({ length: 60 }, (_, i) => ({
+        runId: `wf_old-${i}`, name: `old-${i}`, state: 'finished', status: 'completed',
+        lastActivity: 1000 + i, phases: [], agents: [], totals: {},
+    }));
+    const nodes = wf.treeNodes([
+        ...finished,
+        { runId: 'wf_dead', name: 'dead', state: 'abandoned', lastActivity: 1, phases: [], agents: [], totals: {} },
+        { runId: 'wf_now', name: 'now', state: 'running', lastActivity: 2, phases: [], agents: [], totals: {} },
+    ]);
+    const names = nodes.map((n) => n.label);
+
+    assert.equal(names.length, wf.TREE_FINISHED + 2);
+    assert.equal(names[0], 'now', 'what is happening stays on top');
+    assert.ok(names.includes('dead'), 'an abandoned run is one of the few worth knowing about');
+    assert.ok(names.includes('old-59'), 'the newest finished run is drawn');
+    assert.ok(!names.includes('old-9'), 'and the oldest ones are the ones cut');
+});
+
+// The tree is rebuilt from a fresh object every minute whether or not anything
+// moved, so "did this change" cannot be asked of the object. It is asked of what
+// would be drawn, which is why the stamp is taken from the nodes.
+test('treeStamp changes when a row would change and not otherwise', () => {
+    const run = (extra) => ({
+        runId: 'wf_stamp-1', slug: '-p', sessionId: 'sess-1', name: 'stamp', state: 'running',
+        lastActivity: 5, phases: [], totals: { agents: 1, done: 0 },
+        agents: [{ agentId: 'a1', label: '', model: 'claude-opus-5', state: 'running', promptPreview: 'что-то', tokens: 0 }],
+        ...extra,
+    });
+    const base = wf.treeStamp([run()]);
+
+    assert.equal(base, wf.treeStamp([run()]), 'the same reading in a new object stamps the same');
+    assert.notEqual(base, wf.treeStamp([run({ state: 'finished', status: 'completed' })]), 'the icon moved');
+    assert.notEqual(base, wf.treeStamp([run({ totals: { agents: 2, done: 1 } })]), 'the count moved');
+    assert.notEqual(base, wf.treeStamp([]), 'the run is gone');
+    assert.equal(wf.treeStamp([]), wf.treeStamp(null), 'and nothing to draw is not a throw');
 });
 
 test('agentLabel names an agent that has no label yet by what it was told', () => {

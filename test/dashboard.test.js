@@ -395,6 +395,25 @@ function demoRun(over = {}) {
     };
 }
 
+// The notes beside the table are the only description of the two surfaces a
+// reader cannot see from here — the run still going, and the tree in the
+// sidebar — so they are held to what the code does rather than to what it did
+// when they were written.
+test('the notes describe the tab and the tree that exist', () => {
+    const wide = (i) => demoRun({
+        runId: `wf_wide-${i}`, lastActivity: 1000 - i,
+        totals: { agents: 100, reported: 0, cost: 1, tokens: 0, unlisted: 0, done: 100 },
+        agents: Array.from({ length: 100 }, (_, k) => demoAgent({ agentId: `a${i}-${k}` })),
+    });
+    const html = db.agentsTab(ix.summarize(demoIndex()), Array.from({ length: 6 }, (_, i) => wide(i)));
+
+    assert.doesNotMatch(html, /carries no verdict/,
+        'a run still going says "running" — the chip is drawn and tested above');
+    assert.doesNotMatch(html, /no such limit/, 'the tree caps its finished runs like everything else');
+    assert.match(html, new RegExp(`${wf.TREE_FINISHED} newest finished runs`),
+        'and the note names the cap the tree actually applies');
+});
+
 test('the workflow table names the run, its status and its phases', () => {
     const runs = [demoRun()];
     const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0, workflows: runs });

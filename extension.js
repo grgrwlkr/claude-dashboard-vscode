@@ -153,14 +153,13 @@ function moneyTooltip(state) {
     return md.value;
 }
 
-// The bar needs the model, not the full id: "claude-opus-5" → "opus 5".
-function short(model) {
-    return (model || '')
-        .replace(/^claude-/, '')
-        .replace(/\[[^\]]*\]$/, '')
-        .replace(/-(\d)-(\d)$/, ' $1.$2')
-        .replace(/-(\d)$/, ' $1');
-}
+// The bar needs the model, not the full id: "claude-opus-5" → "opus 5". The rule
+// itself lives in dashboard.js, which draws the same model ids in its tables and
+// may not require vscode — so, like tokenLabel above, it sits on the other side
+// of that line and is borrowed from here. Only the empty case differs: a page
+// prints "unknown" where there is no model, while a bar segment with nothing to
+// say has to stay empty so it can hide itself.
+const short = (model) => (model ? dashboard.shortModel(model) : '');
 
 function workTooltip(state) {
     const { peers, todo } = state.data;
@@ -189,18 +188,19 @@ const AGENT_ICON = {
     unknown: '$(question)',
 };
 
-// A table cell holds one line and no pipes, and an agent's prompt is whatever
-// someone typed — a newline in it would end the row and a pipe would split it.
-function cell(text) {
-    return String(text || '').replace(/\s+/g, ' ').replace(/\|/g, '\\|');
-}
-
-// The same rule where the hover is not a table: an agent's prompt is prose out
-// of someone else's file — hashes, backticks, asterisks, dashes — and a
-// MarkdownString renders every one of them as markup. The escaped set is the one
-// VS Code escapes in MarkdownString.appendText; the escaping is spelled out here
-// because the value is assembled in one string rather than appended.
+// Borrowed text on its way into a hover: an agent's prompt, a workflow's name, a
+// model id read out of a transcript — prose from someone else's file, full of
+// hashes, backticks, asterisks and dashes that a MarkdownString renders as
+// markup. The escaped set is the one VS Code escapes in
+// MarkdownString.appendText; the escaping is spelled out here because the value
+// is assembled in one string rather than appended.
 const prose = (text) => String(text || '').replace(/[\\`*_{}[\]()#+\-!~>]/g, '\\$&');
+
+// The same, for text going into a table cell, which has two rules of its own: it
+// holds one line — a newline would end the row — and no bare pipe, which would
+// split it. The pipe is escaped after the markdown pass, or the backslash that
+// escapes it would itself be escaped.
+const cell = (text) => prose(String(text || '').replace(/\s+/g, ' ')).replace(/\|/g, '\\|');
 
 // How many agents of one run a hover shows. A run here has reached 208 of them,
 // and a table that long is a wall rather than a hint — the tree and the dashboard
@@ -240,13 +240,15 @@ function workflowTooltip(state) {
         }
         for (const [phase, agents] of byPhase) {
             // The blank line is what ends the table above: a heading written
-            // straight after the last row is read as part of it.
-            if (phase) md.appendMarkdown(`\n**${phase}**\n\n`);
+            // straight after the last row is read as part of it. The title is a
+            // phase someone wrote in a script, so it is borrowed text too.
+            if (phase) md.appendMarkdown(`\n**${prose(phase)}**\n\n`);
             md.appendMarkdown(table(agents.map((a) => [
                 AGENT_ICON[wfm.outcomeOf(a.state, run.state)] || AGENT_ICON.unknown,
-                // A live agent has no label — it exists only in the runtime — so
-                // the first thing it was told stands in for one.
-                cell(a.label || (a.promptPreview || '').slice(0, 40) || a.agentId.slice(0, 8)),
+                // How an agent is named is one rule, and it lives beside the
+                // tree that names them the same way: a live agent has no label
+                // of its own, so the first line of what it was told stands in.
+                cell(wfm.agentLabel(a)),
                 // The model is read out of a transcript, so it is borrowed text
                 // too, however unlikely a pipe in a model id is.
                 cell(short(a.model)),
@@ -298,20 +300,26 @@ class WorkflowTree {
         this.state = state;
         this.emitter = new vscode.EventEmitter();
         this.onDidChangeTreeData = this.emitter.event;
-        // The reading the tree was last drawn from, so a draw that changed
-        // nothing does not ask for one.
+        // The reading the tree was last drawn from, and what that reading would
+        // have drawn, so a draw that changed nothing does not ask for one.
         this.drawn = null;
+        this.stamp = '';
     }
 
-    // Only when the reading actually changed. Both collectors replace
-    // state.data.workflows wholesale rather than editing it, so the object
-    // itself is the signal — and without this the fast tick rebuilds the same
-    // 1500 nodes five times a minute for nothing, since only the slow tick
-    // refills the list of finished runs.
+    // Only when the reading actually changed — and what counts as a change is
+    // whether the tree would draw something different, not whether a collector
+    // built a fresh object. Both of them replace state.data.workflows wholesale,
+    // and the slow one does it every minute whether or not anything moved, so
+    // the object is a fast "certainly unchanged" test and nothing more: the
+    // stamp is taken from the nodes themselves, which is the only thing that
+    // cannot disagree with what a redraw would produce.
     refresh() {
         const data = this.state.data.workflows || null;
         if (data === this.drawn) return;
         this.drawn = data;
+        const stamp = wfm.treeStamp((data && data.runs) || []);
+        if (stamp === this.stamp) return;
+        this.stamp = stamp;
         this.emitter.fire();
     }
 
@@ -347,30 +355,55 @@ class WorkflowTree {
     }
 }
 
-function render(state) {
-    const registry = state.registry;
-    state.items.forEach((item, i) => {
-        const template = state.segments[i];
-        const out = seg.renderSegment(template, state.data, registry);
-        if (!out.visible) { item.hide(); return; }
+// One section per topic the segment carries. A builder that throws on the record
+// it was handed costs its own section and nothing else — every workflow field
+// comes out of another program's files, and a hover is worth less than the
+// number beside it. A topic with no builder at all is a bug in this file rather
+// than bad data, so that one is left to fail: the item hides, and the test that
+// walks every topic sees it.
+function tooltipSections(state, topics) {
+    return topics.map((topic) => {
+        const build = TOOLTIPS[topic];
+        if (typeof build !== 'function') throw new TypeError(`no tooltip builder for topic ${topic}`);
+        try { return build(state); } catch { return ''; }
+    }).filter(Boolean);
+}
 
-        item.text = out.text;
-        const sections = out.topics.map((topic) => TOOLTIPS[topic](state)).filter(Boolean);
-        if (sections.length) {
-            const md = new vscode.MarkdownString(sections.join('\n\n---\n\n'), true);
-            item.tooltip = md;
-        } else {
-            item.tooltip = 'Claude — click for the usage dashboard';
+function drawItem(state, item, i) {
+    const out = seg.renderSegment(state.segments[i], state.data, state.registry);
+    if (!out.visible) { item.hide(); return; }
+
+    item.text = out.text;
+    const sections = tooltipSections(state, out.topics);
+    item.tooltip = sections.length
+        ? new vscode.MarkdownString(sections.join('\n\n---\n\n'), true)
+        : 'Claude — click for the usage dashboard';
+    const worst = Math.max(-1, ...out.topics.map((topic) => COLOUR_BY[topic](state.data)));
+    item.backgroundColor = background(worst);
+    item.show();
+}
+
+function render(state) {
+    state.items.forEach((item, i) => {
+        try {
+            drawItem(state, item, i);
+        } catch {
+            // This runs from an interval, so a throw here is not one bad draw:
+            // it would leave every later item frozen on its old text and skip
+            // the tree below, on every tick, until the record that caused it
+            // left the state — which the collector would keep putting back. A
+            // segment that cannot be drawn hides, the way an unreadable field
+            // hides its row everywhere else in this extension.
+            item.hide();
         }
-        const worst = Math.max(-1, ...out.topics.map((topic) => COLOUR_BY[topic](state.data)));
-        item.backgroundColor = background(worst);
-        item.show();
     });
 
     // The panel draws from the same state as the bar, so one draw refreshes
     // both. A test that fills a state by hand has no tree, and the bar is not
-    // held hostage to one.
-    if (state.tree) state.tree.refresh();
+    // held hostage to one — nor the other way round.
+    if (state.tree) {
+        try { state.tree.refresh(); } catch { /* the bar is drawn; the tree waits for the next tick */ }
+    }
 }
 
 // Fields whose value comes out of the single expensive pass over the whole
@@ -519,9 +552,16 @@ function collectWorkflowsFast(state) {
     try {
         const next = runs.map((run) => {
             if (run.state !== 'running' || !run.runDir) return run;
-            // A snapshot appearing is how a run announces it is over. Looking for
-            // it lives in workflows.js, so this file keeps its hands off the disk.
-            if (wfm.snapshotArrived(run)) return { ...run, state: 'finished' };
+            // A snapshot appearing is how a run announces it is over, and how it
+            // went is written in that same file — so the run is read from it
+            // rather than marked finished with nothing to say for the up to a
+            // minute until the next sweep. That is one bounded read, once, since
+            // a finished run never comes back down this path. Finding it and
+            // reading it live in workflows.js, so this file keeps its hands off
+            // the disk; a snapshot too broken to read returns nothing and the
+            // run stays as it was, for the sweep to classify.
+            const done = wfm.finishRun(run);
+            if (done) return done;
             // What the last look learned goes back in: readLive skips the head
             // and the tail of every transcript that has not been written to
             // since, which on a wide run is most of them on most ticks.
@@ -941,4 +981,14 @@ function deactivate() {}
 // The draw step and the fast collector on their own: a test can fill the state
 // by hand and check what reaches the bar, or drive one refresh of a running
 // workflow, without waiting out a ten-second interval.
-module.exports = { activate, deactivate, __render: render, __collectWorkflowsFast: collectWorkflowsFast };
+module.exports = {
+    activate,
+    deactivate,
+    __render: render,
+    __collectWorkflowsFast: collectWorkflowsFast,
+    // The hover's own outcome table, exported for the one test that holds the
+    // three of them — this, OUTCOME_ICONS and the stylesheet's `.o-*` rules —
+    // against each other. They are three legitimate representations of one
+    // vocabulary, and nothing but a test can keep them from drifting apart.
+    __AGENT_ICON: AGENT_ICON,
+};

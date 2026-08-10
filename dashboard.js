@@ -525,12 +525,12 @@ function agentsTab(total, runs = []) {
         </tbody></table>
         <p class="note">Multiply the median by the fleet size for the usual case, and the p90 for the bad one.</p>` : ''}
         <h2>Workflow runs</h2>
-        ${runs.length ? `<p class="note">Newest first, capped at ${RUN_LIMIT} rows of ${runs.length}. Each run as its own snapshot describes it — the name, how it ended, the phases it was written in. A run still going has written no snapshot yet, so its row comes from the journal and carries no verdict. Open one to see its agents: what each was told, what it answered and what it cost. A run's price is the sum over the agents its snapshot lists; money spent in the same directory by transcripts no snapshot names is added beside that figure rather than folded into it.</p>
+        ${runs.length ? `<p class="note">Newest first, capped at ${RUN_LIMIT} rows of ${runs.length}. Each run as its own snapshot describes it — the name, how it ended, the phases it was written in. A run still going has written no snapshot yet, so its row is assembled from the journal instead and says what it is doing rather than how it ended. Open one to see its agents: what each was told, what it answered and what it cost. A run's price is the sum over the agents its snapshot lists; money spent in the same directory by transcripts no snapshot names is added beside that figure rather than folded into it.</p>
         <table><thead><tr><th>Last activity</th><th class="opt">Project</th><th>Workflow</th>
           <th>Status</th><th class="opt2">Phases</th><th class="num">Agents</th>
           <th class="num opt2">Duration</th><th class="num">Spend</th></tr></thead>
           <tbody>${table.rows}</tbody></table>
-        ${table.carded < table.shown ? `<p class="note">Agents are drawn only for the ${table.carded} newest runs of the ${table.shown} above. A fan-out of hundreds carries every prompt and every result into the page, so the rest keep their row without them — the tree in the sidebar has no such limit.</p>` : ''}`
+        ${table.carded < table.shown ? `<p class="note">Agents are drawn only for the ${table.carded} newest runs of the ${table.shown} above. A fan-out of hundreds carries every prompt and every result into the page, so the rest keep their row without them — the tree in the sidebar draws the agents of every run it lists, and it lists the ${wfm.TREE_FINISHED} newest finished runs beside everything still going or abandoned.</p>` : ''}`
         : '<p class="empty">No workflow runs recorded.</p>'}
     </section>`;
 }
@@ -1729,4 +1729,9 @@ module.exports = {
     agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
     limitsTab, weekLabel,
     shortModel, tok, bytes, fmtDur, esc,
+    // The stylesheet, for the one test that holds this page's `.o-*` rules
+    // against the two outcome tables the tree and the hover keep: a word the
+    // vocabulary gains and the CSS does not draws as unstyled text here, and
+    // nothing else would notice.
+    STYLE,
 };
