@@ -224,6 +224,14 @@ const PRESETS = [
         segments: DEFAULT_SEGMENTS,
     },
     {
+        id: 'default-forecast',
+        name: 'Default + forecast',
+        about: 'The default bar with the forecast date always on it. `{dry}` warns only when running out comes before the reset; `{dryAt}` names the day either way, so the date is there even when you are not going to reach it.',
+        // Built from the default rather than copied, so the four lines below the
+        // first one cannot drift away from it.
+        segments: ['✻ 7d {weekly}[ {drift}] {weeklyBar}[ dry {dryAt}]', ...DEFAULT_SEGMENTS.slice(1)],
+    },
+    {
         id: 'minimal',
         name: 'Minimal',
         about: 'One item, three numbers. Everything else lives in the tooltip.',

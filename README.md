@@ -72,9 +72,9 @@ palette of every placeholder with the value it has this minute — clicking one
 inserts it at the caret. Saving writes the same settings keys, into your own
 settings or the workspace's, and the bar redraws immediately.
 
-It opens with ten ready-made bars, each shown with what it would say on this
-machine right now — **Default**, **Minimal** (one item, three numbers), **Pace
-watcher** (how far ahead of an even burn you are and when the window runs out),
+It opens with eleven ready-made bars, each shown with what it would say on this
+machine right now — **Default**, **Default + forecast** (the same bar with the
+date always on it), **Minimal** (one item, three numbers), **Pace watcher** (how far ahead of an even burn you are and when the window runs out),
 **Limits, in full** (every window plus the forecast date whether or not you
 would reach it), **Spend**, **Session** (model, effort, context, compaction),
 **Whole machine** (every session, not this one), **Workflows**, **The works**
@@ -84,7 +84,8 @@ fills the editor; nothing is written until you press Save.
 Two placeholders answer "when do I run out", and the difference matters:
 `{dry}` is silent when the forecast lands after the reset — running out then
 never happens — while `{dryAt}` names the date either way. The default bar
-carries `{dry}`; the **Limits, in full** preset carries `{dryAt}`.
+carries `{dry}`; **Default + forecast** is that same bar with `{dryAt}` in its
+place, and **Limits, in full** carries it too.
 
 Outside the dashboard, **Claude Statusline: List status-bar placeholders** shows
 the same list in a quick pick and copies whichever you choose.
@@ -107,7 +108,7 @@ A few worked examples:
 ["7d {weekly} ({drift})[ · opus {scoped:Opus}]", "resets {resetLeft}"]
 
 // Machine-wide rather than session-scoped
-["$(server) {sessions} sessions[ · {jobs} jobs][ · {openTasks} open]", "today ~{today}"]
+["$(server) {sessions}[ · {jobs} running][ · {openTasks} open]", "today ~{today}"]
 ```
 
 Tooltips are not configurable and do not need to be: each segment gets the full

@@ -152,6 +152,24 @@ test('the default preset is the default bar, not a copy that can drift', () => {
     assert.equal(first.segments, seg.DEFAULT_SEGMENTS);
 });
 
+// It is the default bar with one placeholder swapped, and the four lines it
+// does not touch are the default's own array — so a change to the default
+// reaches it instead of leaving a stale copy behind.
+test('Default + forecast differs from the default in exactly one line', () => {
+    const preset = seg.PRESETS.find((p) => p.id === 'default-forecast');
+    assert.equal(preset.segments.length, seg.DEFAULT_SEGMENTS.length);
+    assert.deepEqual(preset.segments.slice(1), seg.DEFAULT_SEGMENTS.slice(1));
+    assert.notEqual(preset.segments[0], seg.DEFAULT_SEGMENTS[0]);
+    assert.ok(preset.segments[0].includes('{dryAt}'), 'the forecast is the unconditional one');
+    assert.ok(!preset.segments[0].includes('{dry}') || preset.segments[0].includes('{dryAt}'));
+
+    // With a forecast that lands after the reset, the default says nothing and
+    // this one still names the day — the whole reason it exists.
+    const afterReset = { ...data, pace: { plan: 60, dry: null, dryAt: NOW + 5 * 86400 } };
+    assert.ok(!seg.renderSegment(seg.DEFAULT_SEGMENTS[0], afterReset, registry).text.includes('dry'));
+    assert.ok(seg.renderSegment(preset.segments[0], afterReset, registry).text.includes('dry'));
+});
+
 test('a preset says something on a machine with data, and nothing on an empty one', () => {
     for (const preset of seg.PRESETS) {
         const shown = preset.segments
