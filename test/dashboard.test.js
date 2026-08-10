@@ -753,3 +753,27 @@ test('every hideable column hides its header and its cells together', () => {
         }
     }
 });
+
+// A state word is read through outcomeOf, never off the raw string: the client
+// writes `progress` and `queued` for a working agent as well as `running`, and
+// a row that tested for one spelling drew every other one as finished.
+test('a live agent is counted as working whichever word the client used', () => {
+    const run = (state) => ({
+        runId: 'wf_v', name: 'vocab', state: 'running', project: 'p',
+        totals: { agents: 1, done: 0, cost: 0 },
+        agents: [{
+            agentId: 'a1234567890', label: '', phase: '', model: 'claude-opus-5',
+            effort: 'xhigh', state, lastToolName: '', promptPreview: 'go',
+        }],
+    });
+    const sections = [{ id: 'money', title: 'spend', blocks: [{ kind: 'table', rows: [['today', '~$0']] }] }];
+
+    for (const word of ['running', 'progress', 'queued', 'start']) {
+        const html = db.nowTab(sections, [run(word)], {});
+        assert.match(html, /o-running/, `${word} was not drawn as working`);
+        assert.ok(!/have returned|finished, not listed/.test(html), `${word} was counted as settled`);
+    }
+    // And one that really has finished is not listed among them.
+    const done = db.nowTab(sections, [run('success')], {});
+    assert.match(done, /all 1 have returned/);
+});

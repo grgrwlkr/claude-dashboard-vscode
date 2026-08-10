@@ -1072,7 +1072,7 @@ function settingsList(settings) {
     const rows = Object.entries(settings.values || {});
     if (rows.length === 0) return '<p class="empty">No settings found.</p>';
     return `<table class="kv"><tbody>${rows.map(([key, v]) =>
-        `<tr><th scope="row">${esc(key)}</th><td>${esc(String(v.value))}</td>
+        `<tr><th scope="row"><span>${esc(key)}</span></th><td>${esc(String(v.value))}</td>
          <td class="dim opt">${esc(v.from)}</td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -1122,7 +1122,7 @@ function healthTab(total, sys) {
     const settingsBody = settingsList(sys.settings || {})
         + (Object.keys((sys.settings || {}).env || {}).length
             ? `<h3 class="now-sub">Environment</h3><table class="kv"><tbody>${Object.entries(sys.settings.env).map(([k, val]) =>
-        `<tr><th scope="row">${esc(k)}</th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : '');
+        `<tr><th scope="row"><span>${esc(k)}</span></th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : '');
 
     const mcpBody = `<table><thead><tr><th>Server</th><th>Scope</th><th class="opt2">Via</th><th>Used</th></tr></thead><tbody>
             ${mcpRows.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.scope)}${m.project ? ` <span class="dim">${esc(m.project)}</span>` : ''}</td>
@@ -1499,36 +1499,59 @@ function statusBlocks(blocks) {
  * here in full.
  */
 /**
- * The agents of one run that is still going. The Now tab is about this minute,
- * and while a fan-out is in flight the question is not how much it cost but
- * which of them are still thinking and on what — a dispatch that named no model
- * or no effort inherited the session's, and this is where that shows.
+ * Every workflow still going, as one table: a run is a row, and the agents it
+ * has in flight are the rows under it. Several runs stack in the same table
+ * rather than each taking a panel of its own.
+ *
+ * Only the agents still working are drawn. A fan-out of forty settles thirty of
+ * them within the hour, and thirty rows of "done" is the history of the run,
+ * not its state — which is the question this tab exists to answer. The count is
+ * in the run's own row, and every agent it ever had is under Work → Agents &
+ * workflows.
  */
-function liveAgents(run) {
-    const agents = run.agents || [];
-    if (agents.length === 0) return '<p class="empty">No agent has written anything yet.</p>';
-    // Working first: a finished agent is a fact, a running one is a question.
-    const order = [...agents].sort((a, b) => Number(b.state === 'running') - Number(a.state === 'running'));
-    // A run read off disk has no phases yet — the journal names the agents, the
-    // snapshot names their phases, and the snapshot is written when the run
-    // ends. So the column appears only once there is something in it.
-    const phased = agents.some((a) => a.phase);
-    return `<table><thead><tr><th>Agent</th><th class="opt2">Told to</th>${phased ? '<th class="opt">Phase</th>' : ''}<th>Model</th>
-        <th>Effort</th><th class="opt2">Doing</th><th>State</th></tr></thead><tbody>
-      ${order.map((a) => {
-        const outcome = wfm.outcomeOf(a.state, run.state);
-        // The id leads: two agents of one fan-out are often told nearly the
-        // same thing, so a truncated prompt does not tell their rows apart —
-        // and the id is what the journal and the transcript file are named by.
-        return `<tr><td class="mono nowrap">${esc(a.agentId.slice(0, 8))}</td>
-          <td class="wrap opt2" title="${esc(a.promptPreview || a.agentId)}">${esc(wfm.agentLabel(a))}</td>
-          ${phased ? `<td class="dim opt">${esc(a.phase || '—')}</td>` : ''}
-          <td>${a.model ? esc(shortModel(a.model)) : '<span class="dim">—</span>'}</td>
-          <td>${a.effort ? `<span class="kind">${esc(a.effort)}</span>` : '<span class="dim">—</span>'}</td>
-          <td class="dim opt2">${esc(a.lastToolName || '')}</td>
-          <td><span class="kind o-${esc(outcome)}">${esc(outcome)}</span></td></tr>`;
-    }).join('')}
-    </tbody></table>`;
+function liveRuns(runs) {
+    const body = runs.map((run) => {
+        const agents = run.agents || [];
+        // Through outcomeOf, not off the raw word: the client writes `progress`
+        // and `queued` too, and a row that tested for one spelling drew every
+        // other one as finished.
+        const working = agents.filter((a) => wfm.outcomeOf(a.state, run.state) === 'running');
+        const settled = agents.length - working.length;
+
+        const facts = [
+            run.project,
+            wfm.countLabel(run, { always: true }) ? `${wfm.countLabel(run, { always: true })} settled` : '',
+            run.elapsed ? `going ${run.elapsed}` : '',
+            run.cost > 0 ? `~${fmtCost(run.cost)}` : '',
+        ].filter(Boolean).join(' · ');
+
+        const head = `<tr class="run-head"><th colspan="6">${esc(run.name || run.runId)}
+            <span class="dim">${esc(facts)}</span></th></tr>`;
+
+        const rows = working.map((a) => `<tr class="run-agent">
+            <td class="mono nowrap">${esc(a.agentId.slice(0, 8))}</td>
+            <td class="wrap opt2" title="${esc(a.promptPreview || a.agentId)}">${esc(wfm.agentLabel(a))}</td>
+            <td>${a.model ? esc(shortModel(a.model)) : '<span class="dim">—</span>'}</td>
+            <td>${a.effort ? `<span class="kind">${esc(a.effort)}</span>` : '<span class="dim">—</span>'}</td>
+            <td class="dim opt">${esc(a.lastToolName || '')}</td>
+            <td><span class="kind o-${esc(wfm.outcomeOf(a.state, run.state))}">${esc(wfm.outcomeOf(a.state, run.state))}</span></td></tr>`).join('');
+
+        // An empty block would read as "nothing is happening" on a run that is
+        // simply between waves, so it says which of the two it is.
+        const tail = working.length === 0
+            ? `<tr class="run-agent"><td colspan="6" class="dim">${agents.length === 0
+                ? 'no agent has written anything yet'
+                : `all ${agents.length} have returned — the run is finishing`}</td></tr>`
+            : (settled > 0
+                ? `<tr class="run-agent"><td colspan="6" class="dim">${settled} finished, not listed here</td></tr>`
+                : '');
+
+        return head + rows + tail;
+    }).join('');
+
+    return `<table><thead><tr><th>Agent</th><th class="opt2">Told to</th><th>Model</th>
+        <th>Effort</th><th class="opt">Doing</th><th>State</th></tr></thead>
+      <tbody>${body}</tbody></table>`;
 }
 
 function nowTab(sections, workflows, metrics) {
@@ -1570,13 +1593,10 @@ function nowTab(sections, workflows, metrics) {
         <div class="cols">
           ${rows.map((section) => panel(section.title, statusBlocks(section.blocks), { id: section.id })).join('')}
         </div>
-        ${active.map((run) => panel(run.name || run.runId, liveAgents(run), {
+        ${active.length ? panel('Running right now', liveRuns(active), {
         flush: true,
-        note: `${esc(run.project || '')}${run.elapsed ? ` · going ${esc(run.elapsed)}` : ''}`
-            + `${run.cost > 0 ? ` · ~${esc(fmtCost(run.cost))} so far` : ''}`
-            + ` · ${esc(wfm.countLabel(run, { always: true }))} agents settled`
-            + '. What each was told and what it answered is under Work → Agents &amp; workflows.',
-    })).join('')}
+        note: 'One block per workflow still going, and under it the agents it has in flight — the model and the effort each was dispatched at. What every agent was told and what it answered, finished ones included, is under Work → Agents &amp; workflows.',
+    }) : ''}
     </section>`;
 }
 
@@ -1717,6 +1737,19 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 14px; margin-bottom: 14px; }
 .pair > .panel { margin: 0; }
+
+/* A workflow is a row and its agents are the rows beneath it, so several runs
+   stack in one table instead of each taking a panel. The run's row is a heading
+   inside the table body — heavier, with a rule above it — and its agents are
+   indented under it. */
+.run-head > th { padding-top: 14px; font-size: 12.5px; font-weight: 600;
+  text-transform: none !important; letter-spacing: 0; opacity: 1;
+  border-top: 1px solid var(--vscode-panel-border); }
+.run-head:first-child > th { padding-top: 4px; border-top: none; }
+.run-head .dim { font-weight: 400; font-size: 11.5px; margin-left: 8px; }
+.run-agent > td { border-bottom: none; }
+.run-agent > td:first-child { padding-left: 16px; }
+.run-agent > td[colspan] { padding-left: 16px; font-size: 11.5px; padding-bottom: 6px; }
 
 /* A share drawn under the number rather than beside it: it costs no column, and
    a rule under the figure cannot fight the figure. A block behind the text was
@@ -1872,9 +1905,22 @@ code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity
 .kv { width: 100%; }
 /* The key column stays as narrow as its content allows but may wrap: an env
    var name is forty characters, which on one line was wider than the panel it
-   sits in on a split editor. */
+   sits in on a split editor.
+
+   break-word rather than the anywhere every other cell gets, and the difference
+   is the whole rule: only anywhere lets a break count towards the min-content
+   width, and a shrink-to-fit column whose min-content is one character
+   collapses to one character — which is what "model" rendered as, stacked down
+   the page a letter at a time. */
 .kv th[scope="row"] { text-transform: none; letter-spacing: 0; font-size: inherit;
   font-weight: 500; opacity: .75; width: 1%; padding-right: 14px; }
+/* The clamp is on a span, because a max-width on a table cell is advisory under
+   the default auto layout — the same trap the bar lists fell into. Inside it,
+   break-word rather than the anywhere every other cell gets: only anywhere lets
+   a break count towards min-content, and a shrink-to-fit column whose
+   min-content is one character collapses to one character, which is what
+   "model" rendered as — stacked down the page a letter at a time. */
+.kv th[scope="row"] span { display: block; max-width: 26ch; overflow-wrap: break-word; }
 .kv td { font-variant-numeric: tabular-nums; }
 /* Right-aligned, but allowed to wrap: the last cell of a .kv table is a figure
    on some tabs and a file path on others, and kept on one line the path was
