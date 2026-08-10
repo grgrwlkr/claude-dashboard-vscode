@@ -1,10 +1,18 @@
-// Render the dashboard from the real index, wrap it with VS Code's theme
+// Render the dashboard outside the editor, wrap it with VS Code's theme
 // variables, and emit one file per tab plus an overflow probe.
+//
+//   node tools/preview.js <store-dir> <out.html> [dark|light] [--demo]
+//
+// Without `--demo` it reads the real index of this machine, which is what the
+// overflow probe wants: the awkward widths are the ones real data produces.
+// With it, the page is rendered from tools/demo-index.js instead — invented
+// projects and invented money, which is the only thing that may be photographed
+// for a public listing.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const REPO = '/Users/x/Develop/claude-statusline-vscode';
+const REPO = path.resolve(__dirname, '..');
 const ix = require(`${REPO}/indexer`);
 const db = require(`${REPO}/dashboard`);
 const sys = require(`${REPO}/system`);
@@ -15,13 +23,20 @@ const sess = require(`${REPO}/session`);
 const { fmtCost } = require(`${REPO}/pricing`);
 const wfm = require(`${REPO}/workflows`);
 
-const store = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-prev-'));
-const out = process.argv[3] || path.join(os.tmpdir(), 'dashboard-preview.html');
+const args = process.argv.slice(2);
+const DEMO = args.includes('--demo');
+const positional = args.filter((a) => !a.startsWith('--'));
+const store = positional[0] || fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-prev-'));
+const out = positional[1] || path.join(os.tmpdir(), 'dashboard-preview.html');
+const THEME_NAME = positional[2] === 'light' ? 'light' : 'dark';
 const dir = path.dirname(out);
 
-const { index, stats } = ix.refreshIndex(store);
-const total = ix.summarize(index);
 const now = Date.now();
+const demo = DEMO ? require('./demo-index').demo(now) : null;
+const { index, stats } = demo
+    ? { index: demo.index, stats: { total: demo.meta.files } }
+    : ix.refreshIndex(store);
+const total = demo ? demo.total : ix.summarize(index);
 
 const sessionProjects = {};
 for (const entry of Object.values(index.files)) {
@@ -29,7 +44,10 @@ for (const entry of Object.values(index.files)) {
         if (row.kind === 'main' && row.id) sessionProjects[row.id] = row.project;
     }
 }
-const snap = sys.snapshot({ workspace: REPO, projects: [REPO], sessionProjects });
+// The Setup section reads the installation itself, and there is no invented
+// version of that — in demo mode those tabs draw their own empty states rather
+// than photographing this machine's plugins, jobs and disk.
+const snap = demo ? null : sys.snapshot({ workspace: REPO, projects: [REPO], sessionProjects });
 
 // A couple of synthetic weeks so the Limits chart has a shape before the
 // extension has collected real ones.
@@ -39,11 +57,18 @@ for (let d = 0; d <= 4; d += 0.25) {
     rows.push({ at: reset * 1000 - 7 * 86400000 + d * 86400000, weekly: Math.round(d * 11), session: 5, reset, models: { Opus: Math.round(d * 9) } });
 }
 
-const html = db.render(index, total, {
+// The runs the Agents tab draws. In demo mode they are invented; otherwise they
+// are this machine's, priced from the index the same way the extension does it.
+const workflowRuns = demo ? demo.meta.workflows : (() => {
+    try { return wfm.withCost(wfm.scanRuns({ now }), wfm.costIndex(index)); } catch { return []; }
+})();
+
+const html = db.render(index, total, demo ? { ...demo.meta, system: snap } : {
     files: stats.total,
     lastRun: now,
     history: rows,
     system: snap,
+    workflows: workflowRuns,
     metrics: (() => {
         const nowS = Math.floor(Date.now() / 1000);
         const lim = u.limitsOf(u.readCache(nowS) || {});
@@ -80,14 +105,36 @@ const html = db.render(index, total, {
     },
 });
 
-const THEME = `:root{
+// Outside a webview nothing supplies the `--vscode-*` variables, so the two
+// stock themes are written out by hand — Dark Modern and Light Modern, the
+// defaults a screenshot should be taken against.
+const THEMES = {
+    dark: `:root{
   --vscode-font-family: -apple-system, system-ui, sans-serif;
   --vscode-editor-font-family: ui-monospace, Menlo, monospace;
   --vscode-foreground:#cccccc; --vscode-editor-background:#1f1f1f;
   --vscode-editorWidget-background:#252526; --vscode-panel-border:#3c3c3c;
   --vscode-focusBorder:#0078d4; --vscode-list-hoverBackground:#2a2d2e;
-  --vscode-charts-blue:#3794ff;
-}`;
+  --vscode-button-background:#0078d4; --vscode-button-foreground:#ffffff;
+  --vscode-button-secondaryBackground:#313131; --vscode-button-secondaryForeground:#cccccc;
+  --vscode-input-background:#313131; --vscode-input-foreground:#cccccc; --vscode-input-border:#3c3c3c;
+  --vscode-charts-blue:#3794ff; --vscode-charts-green:#89d185; --vscode-charts-purple:#b180d7;
+  --vscode-charts-red:#f14c4c; --vscode-charts-yellow:#cca700;
+}`,
+    light: `:root{
+  --vscode-font-family: -apple-system, system-ui, sans-serif;
+  --vscode-editor-font-family: ui-monospace, Menlo, monospace;
+  --vscode-foreground:#3b3b3b; --vscode-editor-background:#ffffff;
+  --vscode-editorWidget-background:#f8f8f8; --vscode-panel-border:#e5e5e5;
+  --vscode-focusBorder:#005fb8; --vscode-list-hoverBackground:#f0f0f0;
+  --vscode-button-background:#005fb8; --vscode-button-foreground:#ffffff;
+  --vscode-button-secondaryBackground:#e5e5e5; --vscode-button-secondaryForeground:#3b3b3b;
+  --vscode-input-background:#ffffff; --vscode-input-foreground:#3b3b3b; --vscode-input-border:#cecece;
+  --vscode-charts-blue:#1a85ff; --vscode-charts-green:#388a34; --vscode-charts-purple:#652d90;
+  --vscode-charts-red:#e51400; --vscode-charts-yellow:#bf8803;
+}`,
+};
+const THEME = THEMES[THEME_NAME];
 
 const wrap = (open, extra = '') => html
     .replace('</head>', `<style>${THEME}</style></head>`)

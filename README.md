@@ -18,7 +18,11 @@ extension covers the part that does not need the CLI.
 ```
 
 Four independent items — each one colours and hides on its own — plus a fifth
-that appears only while a workflow is running.
+that appears only while a workflow is running. Click any of them for the
+dashboard behind it:
+
+![The Now tab: both limit windows, the week as a track, context, spend and the
+running workflow](media/screenshots/now-dark.png)
 
 **Limits.** `7d` is the share of the weekly limit. The bar shows spend against a
 linear plan for the window: `▓` are cells ahead of plan, `·` are plan cells not
@@ -95,6 +99,13 @@ would reach it), **Spend**, **Session** (model, effort, context, compaction),
 **Whole machine** (every session, not this one), **Workflows**, **The works**
 (every number there is, in ten items), and **Everything, one line**. Picking one
 fills the editor; nothing is written until you press Save.
+
+![The settings editor: ready-made bars, a field per segment with a live preview,
+and the placeholder palette](media/screenshots/settings-dark.png)
+
+Every screenshot here is the dark theme; the page is drawn entirely from
+`--vscode-*` variables, so it follows whichever theme the editor is in —
+[the same tab in Light Modern](media/screenshots/settings-light.png).
 
 Two placeholders answer "when do I run out", and the difference matters:
 `{dry}` is silent when the forecast lands after the reset — running out then
@@ -183,6 +194,9 @@ half-typed segments. Press **Reindex** for an immediate rebuild.
 | Projects | which repository the money went to |
 | Branches | spend per git branch, accumulated across sessions |
 
+![The Overview tab: spend all-time, per model per day, and a calendar of the
+last six months](media/screenshots/overview-dark.png)
+
 **Work** — what it was spent on:
 
 | Tab | What it answers |
@@ -192,6 +206,9 @@ half-typed segments. Press **Reindex** for an immediate rebuild.
 | Files | every file an edit or write touched, by edit count and by lines changed, plus the per-project numbers the client keeps for itself |
 | Skills | which skill was driving when the tokens burned, from the transcript's own `attributionSkill` |
 | Content | prompt counts, length histogram, where prompts came from, the words you use, and the client's own prompt log in aggregate |
+
+![The Agents & workflows tab: main against subagent and workflow spend, what one
+agent costs, and every run with its three states](media/screenshots/agents-dark.png)
 
 **Efficiency** — whether it was spent well:
 
