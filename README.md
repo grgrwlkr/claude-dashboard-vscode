@@ -13,7 +13,8 @@ extension covers the part that does not need the CLI.
 ✻ 7d 27% ▒▒░░░░ dry 12.08 ~13h    ▤ 29% 294k/1M    ~$114.29 $5.18/h    ⧉ 2 ▸ 3/6
 ```
 
-Four independent items — each one colours and hides on its own.
+Four independent items — each one colours and hides on its own — plus a fifth
+that appears only while a workflow is running.
 
 **Limits.** `7d` is the share of the weekly limit. The bar shows spend against a
 linear plan for the window: `▓` are cells ahead of plan, `·` are plan cells not
@@ -35,9 +36,13 @@ and the lines added and removed during the session.
 **Work.** `⧉` counts other live sessions in this repository (busy ones in
 parentheses), `▸` tracks the current session's task list.
 
+**Workflow.** While a workflow runs anywhere on the machine, this names it and
+counts the agents that have settled against the ones it dispatched, with how
+long it has been going. Between runs it has nothing to say and is not drawn.
+
 ## Configuring the bar
 
-The four items above are just the default value of `claudeStatusline.segments`.
+The items above are just the default value of `claudeStatusline.segments`.
 One string is one status-bar item, left to right:
 
 ```jsonc
@@ -45,7 +50,8 @@ One string is one status-bar item, left to right:
   "✻ 7d {weekly} {weeklyBar}[ dry {dry}]",
   "▤ {ctx} {ctxTokens}/{ctxWindow}",
   "[~{cost}][ {burn}/h]",
-  "[⧉ {peers}][ ▸ {todo}]"
+  "[⧉ {peers}][ ▸ {todo}]",
+  "[$(gear) {wfName}][ {wfAgents}][ {wfElapsed}][ ×{wfRuns}]"
 ]
 ```
 
@@ -54,8 +60,10 @@ choose — including VS Code's own `$(flame)` codicons. Square brackets mark an
 **optional group**: it disappears whole when a placeholder inside it has nothing
 to say, which is how `[ dry {dry}]` stays silent for the first half hour of a
 window and appears by itself once a forecast exists. A segment whose
-placeholders are *all* empty hides itself; a segment of pure text always shows.
-A backslash escapes `{`, `}`, `[` and `]`.
+placeholders are *all* empty hides itself — which is the whole of the last line
+above: every part of it is optional, so it stays invisible until a workflow
+starts. A segment of pure text always shows. A backslash escapes `{`, `}`, `[`
+and `]`.
 
 Run **Claude Statusline: List status-bar placeholders** to see every name
 alongside the value it has on this machine right now, and copy one.
@@ -66,6 +74,7 @@ alongside the value it has on this machine right now, and copy one.
 | Session | `{ctx}` `{ctxTokens}` `{ctxWindow}` `{ctxCache}` `{compact}` `{model}` `{effort}` `{advisor}` `{thinking}` `{outputStyle}` `{branch}` `{version}` `{update}` |
 | Spend | `{cost}` `{burn}` `{today}` `{requests}` `{duration}` `{apiShare}` `{added}` `{removed}` |
 | Work | `{peers}` `{peersBusy}` `{todo}` `{todoActive}` `{jobs}` `{sessions}` `{openTasks}` |
+| Workflow | `{wfName}` `{wfAgents}` `{wfElapsed}` `{wfCost}` `{wfRuns}` |
 
 A few worked examples:
 
@@ -107,7 +116,7 @@ one that reads the installation itself.
 
 | Tab | What it answers |
 | --- | --- |
-| Agents & workflows | main vs subagent vs workflow spend, what one agent costs (median, p90, max output tokens), agents per workflow run |
+| Agents & workflows | main vs subagent vs workflow spend, what one agent costs (median, p90, max output tokens), agents per workflow run, and every run on the machine — its name, how it ended, its phases and its spend, with the prompt and the answer of each of its agents one click away |
 | Tools & MCP | which tools were called and how often, which of them fail, which MCP servers earn their place in the config, how many advisor consultations there were |
 | Files | every file an edit or write touched, by edit count and by lines changed, plus the per-project numbers the client keeps for itself |
 | Skills | which skill was driving when the tokens burned, from the transcript's own `attributionSkill` |
@@ -162,6 +171,72 @@ and word tallies. Words shorter than five letters are ignored, and anything
 appearing in most sessions is dropped as filler, which works in any language
 without a stop-word list. Nothing leaves the machine.
 
+## Workflow runs
+
+The `/workflows` progress tree lives in the terminal and dies with it. What
+survives is on disk, and this extension reads it into three surfaces: a
+**Workflow runs** tree in the Activity Bar (run → phase → agent), the runs table
+on the dashboard's *Agents & workflows* tab, and the placeholders above. On the
+machine this was built on that is 74 runs and 1297 agents, walked in about 25 ms.
+
+A run is in one of three states:
+
+- **running** — no final snapshot yet, the session that owns the run is alive,
+  and something in the run's directory was written in the last ten minutes;
+- **finished** — the client wrote its final snapshot, the one `.json` file the
+  run leaves under `workflows/`;
+- **abandoned** — everything else.
+
+The third state is not theoretical, and it exists because of the first fact
+about this data: **the snapshot is written once, at the end.** A client that
+dies never writes one, and without a third state such a run would spin in the
+panel forever. It also means the snapshot cannot describe a run in flight — a
+running one is assembled instead from the roll-call journal the runtime keeps
+for `resumeFromRunId` and from the agents' transcripts as they grow, and its
+phase titles are pulled out of the copy of the workflow script saved beside it
+with a regular expression. That script is never evaluated.
+
+A running agent has no label. The label is computed in the runtime and reaches
+the disk only with the final snapshot, so until a run ends its agents are named
+by the first line of the prompt they were given; the real labels take over when
+the snapshot lands.
+
+**Money is read only from `usage` records** — the same arithmetic as everywhere
+else here, applied to the workflow's own agents: from the index for an agent
+that has stopped, and straight from the transcript for one still writing, re-read
+incrementally so each look costs the few kilobytes that appeared since the last
+one. The totals the snapshot carries — `totalTokens`, and `tokens` on every
+agent in it — are never turned into dollars. They are context sizes, not spend:
+what each agent was holding on its last reply, counted once. Across the runs on
+this machine that is 86.1M against the 2476.1M actually billed for the same
+agents, about thirty times apart, so pricing that field would understate every
+run by roughly that factor. It is shown as a token count and nothing else.
+
+A run's price is the sum over the agents its own snapshot lists. A run directory
+can also hold transcripts that no snapshot names — 175 of them here, ~$120
+across 10 runs — and that money is shown beside the run rather than folded into
+a total whose meaning is "the agents you can see".
+
+One run can also arrive in two halves: a background workflow puts its directory
+under one session of a project and its snapshot under another session of the
+same project. The two are joined into a single record, but only when they
+complement each other — two directories, or two snapshots, under one run id stay
+two records rather than becoming one number nobody can check.
+
+Right-click a run to open the workflow script it was launched from, or to copy
+its `runId` together with that path — what `resumeFromRunId` needs to replay a
+stage that failed. There is deliberately no way to kill a run from here: the
+panel observes, and a click that ends the work of somebody else's live session
+is not worth having.
+
+The reads are split the way the rest of the extension splits them. The walk
+across every project is on the minute tick; a run already known to be going is
+refreshed every ten seconds from its journal and the tails of its agents'
+transcripts, which is bounded by the number of live agents rather than by the
+history of the machine. A workflow that has just started therefore shows up to a
+minute late, while one already being watched moves immediately. None of this
+writes to `~/.claude`.
+
 ## Where the data comes from
 
 Nothing is asked of the CLI — it has no channel to ask.
@@ -181,6 +256,12 @@ Nothing is asked of the CLI — it has no channel to ask.
   Context is `input + cache_read + cache_creation` of the latest record, read
   from a 256 KB tail in about 2 ms; the full pass for cost, duration and edits
   takes about 20 ms and runs on the minute tick.
+- **Workflow runs** — `~/.claude/projects/<slug>/<sessionId>/workflows/<runId>.json`
+  once a run has ended, and while it has not:
+  `<sessionId>/subagents/workflows/<runId>/journal.jsonl` with the agent
+  transcripts beside it, plus the copy of the script under `workflows/scripts/`
+  for the phase titles. All of it is undocumented internal state, so every field
+  is optional and a read that fails hides a row instead of filling it in.
 - **Spend** — computed from public per-million-token rates in `pricing.js`
   (checked 2026-08-08). It is an **estimate, not a bill**: the real figure
   depends on plan and discounts. An unrecognised model is priced at Opus rates

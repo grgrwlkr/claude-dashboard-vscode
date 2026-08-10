@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 A VS Code extension that reads Claude Code's own on-disk state (`~/.claude/**`) and the OAuth usage
-endpoint, and renders four status-bar items plus a usage dashboard. `README.md` documents the
+endpoint, and renders five status-bar items, a workflow tree and a usage dashboard. `README.md` documents the
 user-facing behaviour and every data source in detail — read it before changing what a number means.
 
 ## Commands
@@ -24,8 +24,11 @@ other Claude sessions may be alive in it.
 ## Architecture
 
 `extension.js` is the **only** module allowed to `require('vscode')`. `usage.js`, `session.js`,
-`indexer.js`, `pricing.js`, `history.js`, `system.js`, `segments.js` and `dashboard.js` are deliberately vscode-free
-so `node --test` can cover them without a harness — put new logic there, not in `extension.js`.
+`indexer.js`, `pricing.js`, `history.js`, `system.js`, `segments.js`, `workflows.js` and `dashboard.js` are
+deliberately vscode-free so `node --test` can cover them without a harness — put new logic there, not in
+`extension.js`. `workflows.js` owns everything about a workflow run — the walk, the three states, the money,
+the tree nodes and the words on a row — because the tree, the dashboard tab and the bar fields must not
+disagree about the same run.
 
 **Two trees are read, and only one is ours.** `indexer.js` and `system.js` read `~/.claude`, which
 belongs to Claude Code: never write there. Anything of ours — the index, the limit history — goes in
@@ -64,6 +67,10 @@ a policy, not an accident — no charting library.
 - **Degrade, never guess.** The transcript and session-registry formats are private to Claude Code.
   Every read is wrapped so a parse failure yields a dash or a hidden item, never a wrong number. The
   pervasive `try/catch → null` is the design, not defensive clutter.
+- **Workflow money comes from `usage` records only** — the index for an agent that has stopped, a direct
+  count over the growing transcript for one still running. `totalTokens` and `workflowProgress[].tokens`
+  from the final snapshot are never priced: they are context sizes, not spend, and the two differ by ~29x
+  on this machine (86.1M vs 2476.1M over the same agents).
 - **A new model needs two edits**: a rate in `RATES` (`pricing.js`) and a context window in
   `windowFor` (`session.js`). Unknown models are priced at Opus rates and flagged as estimated.
 - Every user-visible estimate carries a tilde: spend, burn rate, `dry`, the api-wait share.
