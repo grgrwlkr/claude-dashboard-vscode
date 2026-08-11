@@ -1592,16 +1592,16 @@ function tasksTab(sys) {
     </section>`;
 }
 
-// How many releases the page carries, and how many of the older ones it shows
-// before asking. The upstream file is half a megabyte and hundreds of releases
-// deep; the page carries a bounded slice and says how much it left behind
-// rather than pretending that is all there was.
-const CHANGELOG_LIMIT = 80;
+// How many of the older releases are open before the button is pressed. There
+// is no second number: the page carries every release the source had, and the
+// only thing that ends the list is the source running out. A cap here read as
+// "that is all there was" — the upstream file is 361 releases deep and the page
+// stopped at eighty with nothing on screen to say so.
 const CHANGELOG_SHOWN = 15;
 
 function changelogTab(sys, cfg = {}) {
     const all = (sys && sys.changelog) || [];
-    const releases = all.slice(0, CHANGELOG_LIMIT);
+    const releases = all;
     const v = (sys && sys.versions) || {};
     const fetched = Boolean(cfg.fetchChangelog);
     // Anything newer than the version running is the answer and stays open;
@@ -1625,7 +1625,7 @@ function changelogTab(sys, cfg = {}) {
         'Fetch the full changelog from Anthropic', fetched,
         'One public file, no credentials, at most once an hour. Off, the tab reads the copy the client keeps in ~/.claude/cache, which covers only a little history and lags a release by up to a day.'), {
         note: fetched
-            ? `Fetched from <code>raw.githubusercontent.com/anthropics/claude-code</code> and kept in the extension's own storage, so this still reads offline. ${all.length} release${all.length === 1 ? '' : 's'} known${all.length > CHANGELOG_LIMIT ? `, of which the newest ${CHANGELOG_LIMIT} are drawn` : ''}.`
+            ? `Fetched from <code>raw.githubusercontent.com/anthropics/claude-code</code> and kept in the extension's own storage, so this still reads offline. All ${all.length} release${all.length === 1 ? '' : 's'} it had are on this page.`
             : "Reading <code>~/.claude/cache/changelog.md</code>, the client's own copy. It is written when the client feels like it, which is why a version can be unpacked here before its notes are.",
     })}
         ${releases.length

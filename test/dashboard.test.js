@@ -853,6 +853,20 @@ test('the changelog names its source and carries its own switch', () => {
     assert.match(remote, /Show 65 older releases/);
 });
 
+// The list used to stop at eighty with nothing on screen saying so, which reads
+// as "that is all there was" — and the upstream file is 361 releases deep. The
+// only thing allowed to end this list is the source running out.
+test('every release the source had reaches the page', () => {
+    const all = Array.from({ length: 361 }, (_, i) => ({ version: `2.1.${361 - i}`, entries: ['x'] }));
+    const html = db.changelogTab({ changelog: all, versions: { current: '2.1.361', installed: [] } },
+        { fetchChangelog: true });
+    // The fixture runs its own newest release, so nothing is ahead and all 361
+    // are history — one row each.
+    assert.equal((html.match(/class="mem-name"/g) || []).length, 361, 'every release the source had is a row');
+    assert.match(html, /All 361 releases it had are on this page/);
+    assert.ok(html.includes('2.1.1<'), 'the oldest release is drawn, not cut off');
+});
+
 // The switch promised a check and, for one release, performed none: the label
 // said the extension "may ask". A panel that says a thing was checked has to
 // have checked it.

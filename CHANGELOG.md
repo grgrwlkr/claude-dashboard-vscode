@@ -9,6 +9,19 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.22.2] — 2026-08-12
+
+### Fixed
+
+- **The Changelog tab stops at the end of the changelog, and nowhere else.** It
+  drew the newest 80 releases and said nothing about the rest, so the list ended
+  at an arbitrary version and read as though that was all there was. With the
+  full file fetched that hid 281 of 361 releases. Every release the source had
+  is now on the page.
+- **The links in the README's table of contents work on the listing pages.**
+  They were written in GitHub's anchor style, which no marketplace shares, so
+  every one of them was dead anywhere but GitHub.
+
 ## [0.22.1] — 2026-08-12
 
 **The first version on Open VSX** — the registry Cursor, Windsurf, VSCodium and
