@@ -62,7 +62,7 @@ write yourself**, and **a dashboard** over every transcript on the machine.
 
 ![The Now tab: both limit windows, the week as a track, context, spend, tasks and the agents of a running workflow](media/screenshots/now-dark.png)
 
-<a id="what-you-get"></a>
+<a name="what-you-get"></a>
 
 ## ✨ What you get
 
@@ -75,7 +75,7 @@ write yourself**, and **a dashboard** over every transcript on the machine.
 | **🎛️ A bar you write yourself** | The bar is a template, not a layout: 45 placeholders, optional groups that vanish when empty, 11 ready-made bars, and an editor with a live preview. |
 | **🔒 Local by default** | Everything is read from your own disk. One request leaves the machine — the limits, and it has a switch — plus two opt-ins that are off until you turn them on. No telemetry, ever. See [Privacy](#privacy). |
 
-<a id="dark-and-light"></a>
+<a name="dark-and-light"></a>
 
 ## 🌗 Dark and light
 
@@ -89,7 +89,7 @@ editor rather than fighting it.
 | ![Agents and workflows, dark](media/screenshots/agents-dark.png) | ![Agents and workflows, light](media/screenshots/agents-light.png) |
 | ![The settings editor, dark](media/screenshots/settings-dark.png) | ![The settings editor, light](media/screenshots/settings-light.png) |
 
-<a id="install"></a>
+<a name="install"></a>
 
 ## 🚀 Install
 
@@ -128,7 +128,7 @@ dashboard works either way: **Claude: Open dashboard**.
   POSIX `ps`. On Windows the extension degrades quietly — items stay hidden
   rather than showing wrong numbers — but that is tolerance, not support.
 
-<a id="configuring-the-bar"></a>
+<a name="configuring-the-bar"></a>
 
 ## 🎛️ Configuring the bar
 
@@ -207,7 +207,7 @@ context fill turns yellow past 50 % and red past 80 %. Reading is lazy: a field 
 segment mentions is never collected, so a bar without `{today}` does not pay for
 the walk across every project it needs.
 
-<a id="the-dashboard"></a>
+<a name="the-dashboard"></a>
 
 ## 📊 The dashboard
 
@@ -292,7 +292,7 @@ milliseconds. Only a fraction of the lines are parsed: a line is JSON-decoded on
 if it carries a marker that matters. The index lives in the extension's own
 storage, holds only aggregates, and never stores prompt text.
 
-<a id="workflow-runs"></a>
+<a name="workflow-runs"></a>
 
 ## 🧵 Workflow runs
 
@@ -318,7 +318,7 @@ Right-click a run to open the workflow script it was launched from, or to copy i
 that failed. There is deliberately no way to kill a run from here: the panel
 observes, and a click that ends somebody else's live session is not worth having.
 
-<a id="privacy"></a>
+<a name="privacy"></a>
 
 ## 🔒 Privacy
 
@@ -339,7 +339,7 @@ request can leave the machine, and it is optional.**
 The **Content** tab never stores prompt text — only counts, a length histogram and
 word tallies, computed and discarded in the same pass.
 
-<a id="settings-and-commands"></a>
+<a name="settings-and-commands"></a>
 
 ## ⚙️ Settings and commands
 
@@ -361,7 +361,7 @@ All of these apply the moment they change — none needs a window reload.
 CSV or JSON · Refresh now · List status-bar placeholders · and, from a row of the
 workflow view, Open the workflow script and Copy the workflow run id.
 
-<a id="where-the-data-comes-from"></a>
+<a name="where-the-data-comes-from"></a>
 
 ## 🧭 Where the data comes from
 
@@ -392,7 +392,7 @@ Nothing is asked of the CLI — it has no channel to ask.
   storage whenever a percentage moves, plus a heartbeat every six hours so a quiet
   stretch is distinguishable from a closed laptop.
 
-<a id="known-issues-and-limits"></a>
+<a name="known-issues-and-limits"></a>
 
 ## ⚠️ Known issues and limits
 
@@ -409,7 +409,7 @@ Written down rather than discovered by you.
 | **The first index takes a moment** | It reads every transcript on the machine behind a progress notification (~1.1 GB and 4–5 s here). After that a file whose size and mtime are unchanged is reused, so refreshes cost tens of milliseconds. |
 | **An empty status bar is not a bug** | Every item hides itself when it has nothing true to say — see [Install](#install) for the three ordinary reasons. |
 
-<a id="contributing"></a>
+<a name="contributing"></a>
 
 ## 🤝 Contributing
 
