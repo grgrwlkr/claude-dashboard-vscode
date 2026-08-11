@@ -14,7 +14,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Same generation as the extension host of current VS Code, so the
+          # suite that guards a publish runs where the code will run.
+          node-version: 24
 
       - run: node --test test/*.test.js
 
