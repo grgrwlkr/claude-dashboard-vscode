@@ -15,6 +15,12 @@ CLAUDE.md
 .github/**
 tools/**
 
+# Inside a .vsix everything lives under `extension/`, so unzipping one into the
+# repository leaves a directory of that name — and the next `vsce package` packs
+# it back in, shipping a second copy of whatever was in it. Caught once at 190 KB
+# against the usual 143.
+extension/**
+
 # The marketplace listing pulls its screenshots from raw.githubusercontent, so
 # the images live in git and stay out of the package — only the icon has to ship.
 media/**
