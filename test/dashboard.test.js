@@ -915,3 +915,16 @@ test('every plugin row says where its update would come from', () => {
     assert.match(off, /the marketplace — not checked/);
     assert.ok(!/and it has moved|which is current/.test(off));
 });
+
+// A note is a div because notes carry lists. Inside a <p> the parser closes the
+// paragraph before the <ul>, and every sentence after the list becomes a
+// sibling of the panel — outdented, and no longer a note.
+test('a panel note can hold a list without falling out of the panel', () => {
+    const html = db.panel('t', '<i>body</i>', { note: 'before<ul><li>x</li></ul>after' });
+    assert.match(html, /<div class="panel-note">before<ul>/);
+    assert.ok(!/<p class="panel-note">/.test(html));
+
+    // And nowhere on the real page is a note a paragraph either.
+    const page = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
+    assert.ok(!/<p class="panel-note">/.test(page));
+});

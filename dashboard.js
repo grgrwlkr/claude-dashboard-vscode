@@ -488,7 +488,7 @@ const tiles = (...items) => `<div class="tiles">${items.filter(Boolean).join('')
  */
 const panel = (title, body, { note, flush, id } = {}) => `<section class="panel${flush ? ' panel-flush' : ''}"${id ? ` data-panel="${esc(id)}"` : ''}>
     ${title ? `<h2 class="panel-title">${esc(title)}</h2>` : ''}
-    ${note ? `<p class="panel-note">${note}</p>` : ''}
+    ${note ? `<div class="panel-note">${note}</div>` : ''}
     <div class="panel-body">${body}</div>
 </section>`;
 
@@ -2014,7 +2014,11 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
   border: 1px solid var(--vscode-panel-border); border-radius: 6px;
   padding: 13px 15px 15px; margin: 0 0 14px; }
 .panel-title { font-size: 13px; font-weight: 600; margin: 0 0 2px; opacity: .85; }
+/* A div, not a p: a note carries lists and sentences after them, and a <ul>
+   inside a <p> is closed by the parser before the list — everything after it
+   stopped being the note and lost its indent with it. */
 .panel-note { opacity: .6; margin: 4px 0 10px; max-width: 78ch; line-height: 1.5; font-size: 12px; }
+.panel-note ul { margin: 6px 0; padding-left: 18px; }
 .panel-title + .panel-body, .panel-note + .panel-body { margin-top: 9px; }
 .panel-body > :first-child { margin-top: 0; }
 .panel-body > :last-child { margin-bottom: 0; }
