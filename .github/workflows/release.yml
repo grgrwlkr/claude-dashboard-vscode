@@ -18,8 +18,11 @@ jobs:
 
       - run: node --test 'test/*.test.js'
 
-      # VS Code's own convention: an odd minor is a pre-release channel, an even
-      # one is stable. The flag has to be set at packaging time too — pre-release
+      # The channel is decided by the --pre-release flag, not by the number: an
+      # odd version published without it lands in stable. Odd-minor-means-
+      # pre-release is VS Code's recommended convention, and this step is the
+      # only thing that makes it true here. The flag has to be set at packaging
+      # time too — pre-release
       # is a property of the package, not just of the upload.
       - name: decide the channel
         run: |
