@@ -9,6 +9,27 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.22.3] — 2026-08-12
+
+Found by reading the code rather than by using it — two sessions reviewing each
+other's half of the modules.
+
+### Fixed
+
+- **"Refresh on a timer", switched off, now switches off the work it names.** It
+  only stopped the dashboard from redrawing: the full transcript pass, the spend
+  across every project and the request for limits carried on every minute. The
+  setting offers itself for use on battery, so that was the opposite of what it
+  promised.
+- **A new refresh interval takes effect when you set it.** The timer read the
+  interval once, when the window opened, so moving the slider on the Settings tab
+  did nothing until the window was reloaded.
+- **"Releases ahead" counts what is ahead.** It counted every release on the
+  page, so a client running the newest version was told it had hundreds waiting.
+- The "Across all requests" figure on the Context tab reads the Opus rate from
+  the one file that holds rates, instead of a copy of the number that would have
+  gone stale on the day it changed.
+
 ## [0.22.2] — 2026-08-12
 
 ### Fixed

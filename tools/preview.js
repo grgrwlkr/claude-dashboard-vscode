@@ -61,7 +61,9 @@ for (let d = 0; d <= 4; d += 0.25) {
 // The runs the Agents tab draws. In demo mode they are invented; otherwise they
 // are this machine's, priced from the index the same way the extension does it.
 const workflowRuns = demo ? demo.meta.workflows : (() => {
-    try { return wfm.withCost(wfm.scanRuns({ now }), wfm.costIndex(index)); } catch { return []; }
+    // withCost takes options, not the cost index itself: passing the Map made
+    // every agent free, and the probe then measured a Spend column of dashes.
+    try { return wfm.withCost(wfm.scanRuns({ now }), { index }); } catch { return []; }
 })();
 
 const html = db.render(index, total, demo ? { ...demo.meta, system: snap } : {

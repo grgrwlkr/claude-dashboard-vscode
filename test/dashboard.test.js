@@ -865,6 +865,11 @@ test('every release the source had reaches the page', () => {
     assert.equal((html.match(/class="mem-name"/g) || []).length, 361, 'every release the source had is a row');
     assert.match(html, /All 361 releases it had are on this page/);
     assert.ok(html.includes('2.1.1<'), 'the oldest release is drawn, not cut off');
+    // The tile is named for what is in front of the running version. It counted
+    // every release on the page instead, so a fully up-to-date client was told
+    // it had hundreds of releases ahead of it.
+    assert.match(html, /Releases ahead[\s\S]{0,200}>0</, 'nothing is ahead of the newest release');
+    assert.match(html, /nothing new/);
 });
 
 // The switch promised a check and, for one release, performed none: the label

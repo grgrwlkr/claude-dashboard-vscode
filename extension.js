@@ -1164,19 +1164,37 @@ function activate(context) {
     state.tree = new WorkflowTree(state);
     slowTick(state);
 
-    const slow = setInterval(() => {
-        slowTick(state);
-        // The open dashboard follows the same interval: the numbers on it come
-        // from the reading that just happened.
-        refreshDashboard(context);
-    }, Math.max(15, cfg.get('refreshInterval')) * 1000);
+    // The timer is what `autoRefresh` is named for — "Refresh on a timer" — so
+    // it is checked here rather than only inside refreshDashboard. Off, the
+    // setting promises that the expensive pass, the spend across every project
+    // and the limits request wait to be asked for; gating the redraw alone left
+    // every one of them running on the minute, which is the opposite of what the
+    // description offers anyone turning it off on battery.
+    //
+    // Re-armed on a settings change, because the interval is read once when the
+    // timer is created: without this, a new refreshInterval — editable right on
+    // the Settings tab — did nothing until the window was reloaded.
+    let slow = null;
+    const armSlow = () => {
+        if (slow) clearInterval(slow);
+        const every = Math.max(15, vscode.workspace.getConfiguration('claudeStatusline').get('refreshInterval') || 60);
+        slow = setInterval(() => {
+            if (vscode.workspace.getConfiguration('claudeStatusline').get('autoRefresh') === false) return;
+            slowTick(state);
+            // The open dashboard follows the same interval: the numbers on it come
+            // from the reading that just happened.
+            refreshDashboard(context);
+        }, every * 1000);
+    };
+    armSlow();
     const fast = setInterval(() => fastTick(state), CONTEXT_TICK * 1000);
 
     context.subscriptions.push(
-        { dispose: () => { clearInterval(slow); clearInterval(fast); for (const i of state.items) i.dispose(); } },
+        { dispose: () => { if (slow) clearInterval(slow); clearInterval(fast); for (const i of state.items) i.dispose(); } },
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (!e.affectsConfiguration('claudeStatusline')) return;
             applyConfig(state);
+            armSlow();
             slowTick(state);
         }),
         // Focus returning to the window is the only sensible "the user is looking

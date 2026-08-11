@@ -8,7 +8,7 @@
 // Colours come from VS Code theme variables, so the page follows light, dark and
 // high-contrast themes without a palette of its own.
 
-const { fmtCost } = require('./pricing');
+const { fmtCost, ratesFor } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
 const wfm = require('./workflows');
@@ -1532,7 +1532,10 @@ function contextTab(total, sys) {
     const c = (sys && sys.context) || { files: [], globalTokens: 0 };
     const msgs = sumOf(total.models, 'msgs');
     const perRequest = c.globalTokens;
-    const lifetime = (perRequest * msgs) / 1e6 * 5;
+    // The rate comes from pricing.js rather than a number written here: the file
+    // is the one place a rate changes, and a copy of it would keep this tile —
+    // and its "at Opus input rates" caption — on the old figure for ever.
+    const lifetime = (perRequest * msgs) / 1e6 * ratesFor('claude-opus-5').rates.in;
     const files = c.files || [];
     const totalTokens = files.reduce((a, f) => a + f.tokens, 0);
 
@@ -1619,7 +1622,9 @@ function changelogTab(sys, cfg = {}) {
     return `<section class="tab" data-tab="changelog" hidden>
         ${tiles(
         tile('Running', v.current || '—', v.waiting ? `${v.latest} is unpacked and waiting` : 'up to date'),
-        tile('Releases ahead', String(releases.length), releases.length ? 'not yet running' : 'nothing new'),
+        // `ahead`, not `releases`: the tile is named for what is in front of the
+        // running version, and the page carries the whole history behind it.
+        tile('Releases ahead', String(ahead.length), ahead.length ? 'not yet running' : 'nothing new'),
     )}
         ${panel('Where these notes come from', toggle('fetchChangelog',
         'Fetch the full changelog from Anthropic', fetched,
