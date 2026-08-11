@@ -207,3 +207,21 @@ test('with no registry it still answers the one question it can', () => {
     assert.deepEqual(out.unset, []);
     assert.equal(out.counts.documented, 0);
 });
+
+// The masking rule reached three lines without one test calling it directly —
+// everything went through clientSettings(). Both directions matter here, and the
+// second one more: a rule that hides everything passes any test that only checks
+// that secrets are hidden, and turns this tab into a wall of dots.
+test('a credential is caught by the shape of its value, by its name, or not at all', () => {
+    // By shape, under a name that says nothing.
+    assert.equal(cs.renderValue('DEPLOY', `ghp_${'a'.repeat(36)}`).masked, true);
+    assert.equal(cs.renderValue('DEPLOY', `sk-ant-${'b'.repeat(40)}`).masked, true);
+    // By name, where the value gives nothing away.
+    assert.equal(cs.renderValue('GH_PAT', 'true').masked, true);
+    assert.equal(cs.renderValue('SLACK_WEBHOOK', 'https://hooks.slack.com/services/T/B/x').masked, true);
+    // Neither: the ordinary case, and the one that keeps the page worth opening.
+    assert.equal(cs.renderValue('DEPLOY', 'true').masked, false);
+    assert.equal(cs.renderValue('CLAUDE_CODE_EXECPATH', '/opt/homebrew/bin/claude').masked, false);
+    assert.equal(cs.renderValue('MAX_THINKING_TOKENS', '31999').masked, false);
+    assert.equal(cs.renderValue('CLAUDE_CODE_SESSION_ID', '99ed2bbb-112f-4486-b479-96ce294db365').masked, false);
+});

@@ -155,3 +155,38 @@ test('fmtWhen names the weekday, so a date days out needs no arithmetic', () => 
     assert.equal(u.fmtWhen(ts), 'Sat 15.08, ~06h');
     assert.equal(u.fmtWhen(0), '—');
 });
+
+// The one figure here that is money rather than an estimate from public rates,
+// and the only one that was covered by its rendering alone: status.js has a
+// fixture for the credits object, and nothing called the function that digs it
+// out of the endpoint's answer.
+test('creditsOf reads minor units by the exponent the API states', () => {
+    const payload = {
+        limits: [],
+        spend: {
+            used: { amount_minor: 10367, exponent: 2 },
+            limit: { amount_minor: 20000, exponent: 2 },
+            percent: 51.8,
+            enabled: false,
+            disabled_reason: 'out_of_credits',
+        },
+    };
+    const c = u.creditsOf(payload);
+    assert.equal(c.used, 103.67);
+    assert.equal(c.limit, 200);
+    assert.equal(c.pct, 51);
+    assert.equal(c.enabled, false);
+    assert.equal(c.reason, 'out_of_credits');
+});
+
+// Money already spent stays spent when the account runs out of credits, so a
+// disabled block with a used figure is exactly the state worth reporting — and
+// the state this machine was in when the field was first read.
+test('credits already spent survive the switch being off', () => {
+    const spent = u.creditsOf({ spend: { used: { amount_minor: 10367, exponent: 2 }, enabled: false } });
+    assert.equal(spent.used, 103.67);
+    assert.equal(spent.pct, 0, 'no limit, so a percentage would be of nothing');
+
+    assert.equal(u.creditsOf({}), null, 'no spend block at all is not a zero, it is an absence');
+    assert.equal(u.creditsOf({ spend: { enabled: true } }), null, 'enabled with nothing spent has nothing to say');
+});

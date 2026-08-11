@@ -974,3 +974,17 @@ test('pausing the timer from the header is the same setting as the switch', () =
     assert.match(on, /input\[data-set="autoRefresh"\]/);
     assert.match(on, /<input[^>]*data-set="autoRefresh"/);
 });
+
+// The 50/80 thresholds are a port of `color_for` in statusline.sh, and CLAUDE.md
+// asks both sides to keep producing the same answer. Nothing held them: the
+// shell was read by hand today, and a hand-read leaves no trace that fails when
+// one of the two drifts. Boundaries on both sides of each step, because an
+// off-by-one here is exactly what a `>` for a `>=` produces.
+test('the meter thresholds are the ones statusline.sh colours by', () => {
+    assert.equal(db.meterTone(0), 'cool');
+    assert.equal(db.meterTone(49), 'cool');
+    assert.equal(db.meterTone(50), 'warm', '50 is the first warm value, as in color_for');
+    assert.equal(db.meterTone(79), 'warm');
+    assert.equal(db.meterTone(80), 'hot', '80 is the first hot value, as in color_for');
+    assert.equal(db.meterTone(100), 'hot');
+});
