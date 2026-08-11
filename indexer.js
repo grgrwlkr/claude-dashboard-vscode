@@ -21,7 +21,10 @@ const PROJECTS = path.join(HOME, '.claude', 'projects');
 // reused forever and the new fields stay empty for everything already indexed.
 // 4: skill buckets carry `last`, the newest reply attributed to them. A stored
 // aggregate of shape 3 has no such field and would read as "never used".
-const INDEX_VERSION = 4;
+// 5: word tallies count prompts rather than occurrences, drop paths and
+// identifiers, and keep sixty per file rather than thirty — a stored tally of
+// shape 4 is a different measurement wearing the same field name.
+const INDEX_VERSION = 5;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only
@@ -84,7 +87,7 @@ function lenBucket(n) {
 }
 
 const WORD_RE = /\p{L}{5,}/gu;
-const TOP_WORDS_PER_FILE = 30;
+const TOP_WORDS_PER_FILE = 60;
 
 // Text of a user turn, whether the content is a bare string or a block array.
 function promptText(message) {
@@ -99,10 +102,24 @@ function promptText(message) {
 // Words of five letters or more, counted case-insensitively. No stop-word list:
 // a list would have to be per-language, and the dashboard drops words that occur
 // in nearly every session anyway, which removes filler in any language.
+// Once per prompt, not once per occurrence. A pasted file carries `const` four
+// hundred times and a typed sentence carries a word once, so counting every
+// occurrence answered "what did you paste" — 220k Latin occurrences against 12k
+// Cyrillic on this machine, in prompts that are written in Russian. Counting
+// prompts instead is the question the panel actually asks: in how many of the
+// things you wrote does this word appear.
+// What is not a word you used: a path, a tool-use id, a snake_case identifier.
+// These arrive inside prompts by the hundred — a screenshot injects its own
+// path, a tool result its id — and each of them beat prose to the per-file top
+// thirty, which is why a machine driven in Russian showed an English cloud with
+// `users`, `develop`, `x` and `toolu` in it.
+const NOT_PROSE = /(?:\[image #\d+\])|(?:[\w.-]*\/[\w./-]+)|(?:\btoolu_\w+)|(?:\b\w*_\w+\b)|(?:\b[0-9a-f]{8,}\b)/gi;
+
 function tallyWords(text, into) {
-    const seen = text.toLowerCase().match(WORD_RE);
+    const seen = text.toLowerCase().replace(NOT_PROSE, ' ').match(WORD_RE);
     if (!seen) return;
-    for (const w of seen) into[w] = (into[w] || 0) + 1;
+    // Once per prompt, not once per occurrence — see above.
+    for (const w of new Set(seen)) into[w] = (into[w] || 0) + 1;
 }
 
 // Only the head of the tally survives into the index — the tail is noise and
@@ -299,7 +316,13 @@ function indexFile(file, root = PROJECTS) {
                 const h = String(new Date(at).getHours());
                 p.byHour[h] = (p.byHour[h] || 0) + 1;
             }
-            tallyWords(body, rawWords);
+            // Only what a person typed. `sdk` is a program driving Claude,
+            // `system` is the client's own text, `queued` and
+            // `suggestion_accepted` are neither typed nor prose — and together
+            // they are more than half the prompts on this machine, which is why
+            // the cloud was full of words like `notification` and `summary`
+            // that nobody has ever written.
+            if (r.promptSource === 'typed') tallyWords(body, rawWords);
         }
 
         const usage = r.message && r.message.usage;

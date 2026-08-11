@@ -819,7 +819,7 @@ function contentTab(total, sys) {
     ))}
         </div>` : ''}
         ${panel('Words you use', cloud, {
-        note: 'Five letters or more, with anything appearing in most sessions dropped as filler. Pasted code counts too — that is why identifiers show up.',
+        note: 'Five letters or more, from prompts you typed — not from what a program sent, what the client injected, or a suggestion you accepted, which together are more than half of them. Paths, tool ids and snake_case identifiers are stripped first, and a word counts once per prompt rather than once per occurrence, so a pasted file cannot outvote a sentence.',
     })}
     </section>`;
 }

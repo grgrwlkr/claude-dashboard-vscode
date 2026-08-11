@@ -285,3 +285,40 @@ test('freshIndex parses index.json again only when the file has moved', () => tr
     second.__mark = 'again';
     assert.equal(ix.freshIndex(store).__mark, 'again');
 }));
+
+// The word cloud answers "what do you write", and on a machine driven in
+// Russian it answered with `users`, `develop` and `toolu`. Three separate
+// causes, one test: machine turns are not typed, a path is not a word, and a
+// pasted file must not outvote a sentence by repetition.
+test('the word tally counts typed prose, once per prompt', () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const turn = (source, text) => JSON.stringify({
+        type: 'user', promptSource: source, timestamp: '2026-08-11T00:00:00Z',
+        message: { content: [{ type: 'text', text }] },
+    });
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-words-'));
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-store-'));
+    try {
+        fs.mkdirSync(path.join(dir, 'proj'));
+        fs.writeFileSync(path.join(dir, 'proj', 's.jsonl'), [
+            turn('typed', 'сделай пожалуйста таблицу сегодня'),
+            turn('sdk', 'notification summary completed background'),
+            turn('typed', '/Users/x/Develop/project/file.md толькотекст'),
+            turn('typed', 'const const const const const прозаслово'),
+        ].join('\n'));
+
+        const { index } = ix.refreshIndex(store, { root: dir });
+        const words = ix.summarize(index).prompts.words || {};
+        assert.equal(words.notification, undefined, 'a program is not you');
+        assert.equal(words.develop, undefined, 'a path segment is not a word');
+        assert.equal(words.const, 1, 'five repetitions in one prompt are one prompt');
+        assert.equal(words['пожалуйста'], 1);
+        assert.equal(words['толькотекст'], 1);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+        fs.rmSync(store, { recursive: true, force: true });
+    }
+});
