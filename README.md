@@ -196,7 +196,7 @@ the walk across every project it needs.
 
 ## 📊 The dashboard
 
-Click any status-bar item, or run **Claude: Open dashboard**. Twenty-two tabs in
+Click any status-bar item, or run **Claude: Open dashboard**. Twenty-three tabs in
 five sections: one for the state of Claude right now, three drawn from an index of
 every transcript on the machine, and one that reads the installation itself.
 
@@ -262,6 +262,7 @@ cannot fall behind the hover.
 | Task lists | todo lists left behind by sessions, and what is still open in them |
 | Disk | every directory under `~/.claude` by size, with the leftovers named |
 | Memory & context | the files loaded into every prompt — `CLAUDE.md`, `rules/`, project memory — sized in tokens and priced across every request made |
+| Claude Code | what you have set, what you could set, and what you moved away from the default — settings files in the order the client resolves them, with the file that won each key named and the ones it shadowed counted |
 | Changelog | the client's own changelog, cut at the version currently running |
 
 Nothing in this section writes to `~/.claude`, and there is no delete button
@@ -311,7 +312,8 @@ request can leave the machine, and it is optional.**
 | **What is written** | Only inside the extension's own storage: the aggregate index and the limit history. Neither holds prompt text. |
 | **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint Claude Code's own `/usage` screen reads — carrying the OAuth token Claude Code already stores. At most once a minute per machine, however many windows are open — and shared with a terminal `statusline.sh` through the same cache file if you run one. |
 | **What happens to the token** | Read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and put into one `Authorization` header. Never logged, never cached, never written, never sent anywhere else. |
-| **Two things that could, and do not** | `claudeStatusline.checkPluginUpdates` asks each plugin's marketplace whether a newer version exists; `claudeStatusline.fetchChangelog` fetches Claude Code's public changelog from GitHub — one file, no credentials. **Both are off by default**, and off means those requests are never made. |
+| **Two things that could, and do not** | `claudeStatusline.checkPluginUpdates` asks each plugin's marketplace whether a newer version exists; `claudeStatusline.fetchChangelog` refreshes Anthropic's own published documentation and changelog — public files, no credentials, at most once an hour, cached in the extension's storage. **Both are off by default**, and off means those requests are never made: the settings reference then comes from the copy packaged with the extension, which says how old it is. |
+| **Credentials are hidden even from you** | Anything in the settings whose name looks like a key, token, secret or password renders as `•••`, at any depth inside an object — a plain number is left readable, because `MAX_THINKING_TOKENS` is a budget. A test plants a token in the settings and asserts it never reaches the rendered page. |
 | **Telemetry** | None. No analytics, no crash reporting, no phoning home. |
 | **How to switch it all off** | `"claudeStatusline.fetchLimits": false`. Off means the token is not read at all — and with the two opt-ins above left alone, the extension then makes no network request whatsoever. |
 
@@ -327,7 +329,7 @@ All of these apply the moment they change — none needs a window reload.
 | `claudeStatusline.segments` | five templates | One status-bar item per string; see [Configuring the bar](#%EF%B8%8F-configuring-the-bar) |
 | `claudeStatusline.fetchLimits` | `true` | Ask Anthropic for the account's limits; `false` keeps the token unread and the network untouched |
 | `claudeStatusline.autoRefresh` | `true` | Redraw on a timer. Off, the cheap ten-second read still runs and the expensive pass happens only on **Reindex** or **Refresh now** — useful on battery |
-| `claudeStatusline.fetchChangelog` | `false` | Fetch Claude Code's own changelog for the Changelog tab. Off means that request is never made |
+| `claudeStatusline.fetchChangelog` | `false` | Refresh Anthropic's published changelog and settings reference. Off means those requests are never made and the packaged copy is used, dated |
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |

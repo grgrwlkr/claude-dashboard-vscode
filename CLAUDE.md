@@ -138,7 +138,7 @@ dead script still looks right, a `max-width` on a table cell is silently ignored
 in the surface colour is invisible only on the surface it sits on. Every one of those shipped and was
 caught by a screenshot. `tools/preview.js` renders the page outside the editor — `--demo` renders it
 from `tools/demo-index.js`, which is the only data that may be photographed for a listing — and
-writes an overflow probe beside it: it walks all 22 tabs and compares each element's
+writes an overflow probe beside it: it walks every tab and compares each element's
 `getBoundingClientRect` against the panel it lives in and against the window, exempting containers
 that actually scroll. Run it at 1500/1280/1000/910/800/700/620/520 px and screenshot both themes
 before calling a change done.

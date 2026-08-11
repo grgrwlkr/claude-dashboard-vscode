@@ -9,6 +9,17 @@ Everything below 0.19.19 was built and installed on one machine — the extensio
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.19.21] — 2026-08-11
+
+### Changed
+
+- The listing counts the tabs again — twenty-three, not twenty-two — and says
+  what the Claude Code tab answers.
+- Privacy names the credential masking as a promise rather than leaving it as an
+  implementation detail, and describes the optional refresh by what it fetches
+  (Anthropic's published documentation and changelog, public files, no
+  credentials) rather than by counting URLs that keep changing.
+
 ## [0.19.20] — 2026-08-11
 
 ### Added
