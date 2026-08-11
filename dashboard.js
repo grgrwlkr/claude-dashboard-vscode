@@ -433,6 +433,24 @@ const VERSION = (() => {
     try { return require('./package.json').version || ''; } catch { return ''; }
 })();
 
+// The extension's icon, redrawn as inline SVG for the page header. It is a copy
+// of media/icon.svg rather than a read of it: the file ships in the .vsix but a
+// webview cannot reach it without asWebviewUri and an img-src exception, and the
+// two are four rectangles and two circles apart. The gradient id is prefixed
+// because this markup lands in a document that draws its own gradients.
+const MARK = `<svg width="26" height="26" viewBox="0 0 128 128" aria-hidden="true">
+  <defs><linearGradient id="mark-g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2DD4BF"/><stop offset="1" stop-color="#4F46E5"/>
+  </linearGradient></defs>
+  <rect width="128" height="128" rx="28" fill="url(#mark-g)"/>
+  <circle cx="64" cy="64" r="42" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="11"/>
+  <circle cx="64" cy="64" r="42" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"
+          stroke-dasharray="158 264" transform="rotate(-90 64 64)"/>
+  <rect x="47" y="66" width="10" height="19" rx="4" fill="#fff"/>
+  <rect x="59" y="53" width="10" height="32" rx="4" fill="#fff"/>
+  <rect x="71" y="43" width="10" height="42" rx="4" fill="#fff"/>
+</svg>`;
+
 // --- tabs -------------------------------------------------------------------
 
 /**
@@ -1950,6 +1968,11 @@ body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vsc
   background: var(--vscode-editor-background); margin: 0; padding: 16px 20px 40px;
   overflow-x: hidden; }
 h1 { font-size: 18px; margin: 0 0 2px; font-weight: 600; }
+/* The extension's own mark, inline rather than an <img>: a webview image would
+   need asWebviewUri plumbed through and img-src opened in the CSP, for one
+   26-pixel glyph that is four shapes. */
+.mark { display: flex; align-items: center; gap: 9px; }
+.mark svg { display: block; flex: none; border-radius: 6px; }
 .ver { font-size: 11.5px; font-weight: 500; opacity: .45; letter-spacing: .02em;
   font-family: var(--vscode-editor-font-family); vertical-align: 2px; }
 h2 { font-size: 13px; margin: 22px 0 8px; font-weight: 600; opacity: .85; }
@@ -2769,7 +2792,7 @@ function render(index, total, meta) {
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>Claude Dashboard</title><style>${STYLE}</style></head><body>
-<h1>Claude Dashboard <span class="ver">v${esc(VERSION)}</span></h1>
+<div class="mark">${MARK}<h1>Claude Dashboard <span class="ver">v${esc(VERSION)}</span></h1></div>
 <p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
  · <button id="refresh" class="link">Reindex</button>${(meta.config || {}).autoRefresh === false
         ? ' <span class="dim" id="next">auto-refresh off</span>'
