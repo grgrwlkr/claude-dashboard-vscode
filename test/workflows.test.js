@@ -286,10 +286,13 @@ test('scanRuns separates a finished run from a live one and a dead one', () => t
     runFixture(t, 'wf_dead-1', { journal: [{ type: 'started', agentId: 'a1' }] });
 
     // The abandoned one has not been touched in an hour; the live one just was.
-    const old = new Date(Date.now() - 3600 * 1000);
+    // Only the files are aged, deliberately: a directory's birth time cannot be
+    // moved back on Linux, and a fixture that leaned on it passed here and
+    // failed on CI. Ageing the contents is also the truthful shape — that is
+    // what an abandoned run looks like on disk.
+    const old = new Date(Date.now() - 3600 * 1000 - 60 * 1000);
     const dead = path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_dead-1');
     for (const f of fs.readdirSync(dead)) fs.utimesSync(path.join(dead, f), old, old);
-    fs.utimesSync(dead, old, old);
 
     const runs = wf.scanRuns({
         root: t.root,
@@ -305,6 +308,22 @@ test('scanRuns separates a finished run from a live one and a dead one', () => t
     assert.equal(by['wf_dead-1'].state, 'abandoned');
     assert.equal(by['wf_live-1'].project, 'demo');
     assert.equal(by['wf_live-1'].sessionId, t.session);
+}));
+
+// The directory's own birth time is not a record of the run. A checkout, a copy
+// or a restore stamps it with "just now" over contents that are hours old, and
+// reading the maximum of the two called an abandoned run live. This is that
+// case with nothing platform-specific about it: the files are aged, the
+// directory is not touched at all, and its birth stays this second on every
+// filesystem.
+test('a run is as old as its files, not as its directory', () => tree((t) => {
+    runFixture(t, 'wf_stale-1', { journal: [{ type: 'started', agentId: 'a1' }] });
+    const dir = path.join(t.root, t.slug, t.session, 'subagents/workflows/wf_stale-1');
+    const old = new Date(Date.now() - 2 * 3600 * 1000);
+    for (const f of fs.readdirSync(dir)) fs.utimesSync(path.join(dir, f), old, old);
+
+    const [run] = wf.scanRuns({ root: t.root, liveSessions: new Set([t.session]), now: Date.now() });
+    assert.equal(run.state, 'abandoned', 'a fresh directory over two-hour-old files read as live');
 }));
 
 test('outcomeOf reads the states the client actually writes', () => {

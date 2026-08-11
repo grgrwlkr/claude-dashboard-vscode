@@ -9,6 +9,16 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.21.0] — 2026-08-11
+
+### Fixed
+
+- **A run is as old as its files, not as its directory.** Liveness took the
+  newest of the run directory's own creation time and its contents, so a
+  directory stamped "just now" over hours-old files — a checkout, a copy, a
+  restore — read as a live workflow. Creation time now answers only for a run
+  that has not written its first line yet.
+
 ## [0.20.0] — 2026-08-11
 
 **First public release.** Even minor, so this is the stable channel: the Install

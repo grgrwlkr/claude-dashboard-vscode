@@ -527,13 +527,23 @@ function birthOf(file) {
 // The newest mtime anywhere in the run directory: the journal grows on every
 // agent boundary, the transcripts on every reply, so the maximum of the two is
 // "when this run last did anything".
+//
+// Creation time answers only for a directory with nothing in it yet — a run
+// that has been made and has not written its first line. Once there are files,
+// they are the record and the directory's own birth is not: a run copied,
+// restored or unpacked gets a birth of "just now" over contents that are hours
+// old, and reading the maximum of the two called it live. That is not a
+// hypothetical — it is what CI does to a checkout, and it is why this passed on
+// macOS and failed on Linux for a year's worth of reasons that had nothing to
+// do with either: macOS drags birthtime back when mtime is set earlier, so the
+// aged fixture looked aged there and brand-new everywhere else.
 function lastTouch(dir) {
-    let newest = birthOf(dir);
+    let newest = 0;
     for (const entry of listDir(dir)) {
         const st = statOf(path.join(dir, entry.name));
         if (st && st.mtimeMs > newest) newest = st.mtimeMs;
     }
-    return newest;
+    return newest || birthOf(dir);
 }
 
 // The client's own word for what an agent is doing, mapped to the three things
