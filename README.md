@@ -11,10 +11,12 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard"><img src="https://vsmarketplacebadges.dev/version-short/grgrwlkr.claude-dashboard.svg" alt="VS Marketplace version" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard"><img src="https://vsmarketplacebadges.dev/installs-short/grgrwlkr.claude-dashboard.svg" alt="Installs" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard&ssr=false#review-details"><img src="https://vsmarketplacebadges.dev/rating-star/grgrwlkr.claude-dashboard.svg" alt="Rating" /></a>
-  <a href="https://open-vsx.org/extension/grgrwlkr/claude-dashboard"><img src="https://img.shields.io/open-vsx/v/grgrwlkr/claude-dashboard?label=Open%20VSX&color=a60ee5" alt="Open VSX version" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard"><img src="https://badgen.net/vs-marketplace/v/grgrwlkr.claude-dashboard?label=VS%20Marketplace&color=blue" alt="VS Marketplace version" /></a>
+  <!-- Installs and rating are deliberately absent: the badge services answer 500
+       for an extension with no statistics yet, and a broken image reads worse
+       than a missing one. Add them back once the first installs land:
+       badgen.net/vs-marketplace/i/... and /rating/... The same goes for the Open
+       VSX badge, which says "extension not found" until we publish there. -->
   <a href="https://github.com/grgrwlkr/claude-dashboard-vscode"><img src="https://img.shields.io/github/stars/grgrwlkr/claude-dashboard-vscode?style=flat&logo=github&color=444" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/grgrwlkr/claude-dashboard-vscode?color=blue" alt="MIT licence" /></a>
 </p>
