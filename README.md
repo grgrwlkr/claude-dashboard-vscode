@@ -25,18 +25,18 @@
 </p>
 
 <p align="center">
-  <a href="#-what-you-get"><b>Features</b></a> ·
-  <a href="#-dark-and-light"><b>Screenshots</b></a> ·
-  <a href="#-install"><b>Install</b></a> ·
-  <a href="#%EF%B8%8F-configuring-the-bar"><b>Configure the bar</b></a> ·
-  <a href="#-the-dashboard"><b>Dashboard</b></a> ·
-  <a href="#-workflow-runs"><b>Workflows</b></a>
+  <a href="#what-you-get"><b>Features</b></a> ·
+  <a href="#dark-and-light"><b>Screenshots</b></a> ·
+  <a href="#install"><b>Install</b></a> ·
+  <a href="#configuring-the-bar"><b>Configure the bar</b></a> ·
+  <a href="#the-dashboard"><b>Dashboard</b></a> ·
+  <a href="#workflow-runs"><b>Workflows</b></a>
   <br/>
-  <a href="#-privacy"><b>Privacy</b></a> ·
-  <a href="#%EF%B8%8F-settings-and-commands"><b>Settings</b></a> ·
-  <a href="#-where-the-data-comes-from"><b>Data sources</b></a> ·
-  <a href="#%EF%B8%8F-known-issues-and-limits"><b>Known issues</b></a> ·
-  <a href="#-contributing"><b>Contributing</b></a> ·
+  <a href="#privacy"><b>Privacy</b></a> ·
+  <a href="#settings-and-commands"><b>Settings</b></a> ·
+  <a href="#where-the-data-comes-from"><b>Data sources</b></a> ·
+  <a href="#known-issues-and-limits"><b>Known issues</b></a> ·
+  <a href="#contributing"><b>Contributing</b></a> ·
   <a href="https://github.com/grgrwlkr/claude-dashboard-vscode/issues"><b>Report a bug</b></a>
 </p>
 
@@ -62,6 +62,8 @@ write yourself**, and **a dashboard** over every transcript on the machine.
 
 ![The Now tab: both limit windows, the week as a track, context, spend, tasks and the agents of a running workflow](media/screenshots/now-dark.png)
 
+<a id="what-you-get"></a>
+
 ## ✨ What you get
 
 |  |  |
@@ -71,7 +73,9 @@ write yourself**, and **a dashboard** over every transcript on the machine.
 | **💸 What it actually costs** | Session spend with a burn rate, today across every project, and a dashboard that breaks it down by day, model, project, branch, tool and skill. Estimated from public rates — the one figure that is real money, usage credits, is labelled as such. |
 | **🤖 The agents nobody else shows** | Subagents and workflow agents write their own transcripts, so on a machine that runs fan-outs their spend is the larger half — and it is invisible in the terminal statusline, which only ever sees one session. Here they get a tree, a table and a live row each. |
 | **🎛️ A bar you write yourself** | The bar is a template, not a layout: 45 placeholders, optional groups that vanish when empty, 11 ready-made bars, and an editor with a live preview. |
-| **🔒 Local by default** | Everything is read from your own disk. One request leaves the machine — the limits, and it has a switch — plus two opt-ins that are off until you turn them on. No telemetry, ever. See [Privacy](#-privacy). |
+| **🔒 Local by default** | Everything is read from your own disk. One request leaves the machine — the limits, and it has a switch — plus two opt-ins that are off until you turn them on. No telemetry, ever. See [Privacy](#privacy). |
+
+<a id="dark-and-light"></a>
 
 ## 🌗 Dark and light
 
@@ -84,6 +88,8 @@ editor rather than fighting it.
 | ![Spend overview, dark](media/screenshots/overview-dark.png) | ![Spend overview, light](media/screenshots/overview-light.png) |
 | ![Agents and workflows, dark](media/screenshots/agents-dark.png) | ![Agents and workflows, light](media/screenshots/agents-light.png) |
 | ![The settings editor, dark](media/screenshots/settings-dark.png) | ![The settings editor, light](media/screenshots/settings-light.png) |
+
+<a id="install"></a>
 
 ## 🚀 Install
 
@@ -121,6 +127,8 @@ dashboard works either way: **Claude: Open dashboard**.
   Keychain or in the credentials file, and session ownership is resolved with
   POSIX `ps`. On Windows the extension degrades quietly — items stay hidden
   rather than showing wrong numbers — but that is tolerance, not support.
+
+<a id="configuring-the-bar"></a>
 
 ## 🎛️ Configuring the bar
 
@@ -198,6 +206,8 @@ it from the hover. Colour follows the same rule — a segment carrying a limit o
 context fill turns yellow past 50 % and red past 80 %. Reading is lazy: a field no
 segment mentions is never collected, so a bar without `{today}` does not pay for
 the walk across every project it needs.
+
+<a id="the-dashboard"></a>
 
 ## 📊 The dashboard
 
@@ -282,6 +292,8 @@ milliseconds. Only a fraction of the lines are parsed: a line is JSON-decoded on
 if it carries a marker that matters. The index lives in the extension's own
 storage, holds only aggregates, and never stores prompt text.
 
+<a id="workflow-runs"></a>
+
 ## 🧵 Workflow runs
 
 The `/workflows` progress tree lives in the terminal and dies with it. What
@@ -306,6 +318,8 @@ Right-click a run to open the workflow script it was launched from, or to copy i
 that failed. There is deliberately no way to kill a run from here: the panel
 observes, and a click that ends somebody else's live session is not worth having.
 
+<a id="privacy"></a>
+
 ## 🔒 Privacy
 
 Everything on the dashboard and in the bar is read from your own disk. **One
@@ -325,13 +339,15 @@ request can leave the machine, and it is optional.**
 The **Content** tab never stores prompt text — only counts, a length histogram and
 word tallies, computed and discarded in the same pass.
 
+<a id="settings-and-commands"></a>
+
 ## ⚙️ Settings and commands
 
 All of these apply the moment they change — none needs a window reload.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `claudeStatusline.segments` | five templates | One status-bar item per string; see [Configuring the bar](#%EF%B8%8F-configuring-the-bar) |
+| `claudeStatusline.segments` | five templates | One status-bar item per string; see [Configuring the bar](#configuring-the-bar) |
 | `claudeStatusline.fetchLimits` | `true` | Ask Anthropic for the account's limits; `false` keeps the token unread and the network untouched |
 | `claudeStatusline.autoRefresh` | `true` | Redraw on a timer. Off, the cheap ten-second read still runs and the expensive pass happens only on **Reindex** or **Refresh now** — useful on battery, and for reading a list without the page rebuilding under you. Pause it from the page header or from the Settings tab; both move the same switch |
 | `claudeStatusline.fetchChangelog` | `false` | Refresh Anthropic's published changelog and settings reference. Off means those requests are never made and the packaged copy is used, dated |
@@ -344,6 +360,8 @@ All of these apply the moment they change — none needs a window reload.
 **Commands:** Claude: Open dashboard · Rebuild the usage index · Export usage as
 CSV or JSON · Refresh now · List status-bar placeholders · and, from a row of the
 workflow view, Open the workflow script and Copy the workflow run id.
+
+<a id="where-the-data-comes-from"></a>
 
 ## 🧭 Where the data comes from
 
@@ -374,6 +392,8 @@ Nothing is asked of the CLI — it has no channel to ask.
   storage whenever a percentage moves, plus a heartbeat every six hours so a quiet
   stretch is distinguishable from a closed laptop.
 
+<a id="known-issues-and-limits"></a>
+
 ## ⚠️ Known issues and limits
 
 Written down rather than discovered by you.
@@ -387,7 +407,9 @@ Written down rather than discovered by you.
 | **Spend is an estimate, not a bill** | Computed from public per-million-token rates; the real figure depends on plan and discounts. Every estimated figure carries a `~`. The one exception is usage credits, which are read as billed money and shown without one. |
 | **Limits can go quiet** | They come from the account endpoint with the token Claude Code stores. If a request fails — network, an expired token, or Anthropic tightening what non-official clients may call — the limit fields empty out and everything read from local transcripts keeps working. |
 | **The first index takes a moment** | It reads every transcript on the machine behind a progress notification (~1.1 GB and 4–5 s here). After that a file whose size and mtime are unchanged is reused, so refreshes cost tens of milliseconds. |
-| **An empty status bar is not a bug** | Every item hides itself when it has nothing true to say — see [Install](#-install) for the three ordinary reasons. |
+| **An empty status bar is not a bug** | Every item hides itself when it has nothing true to say — see [Install](#install) for the three ordinary reasons. |
+
+<a id="contributing"></a>
 
 ## 🤝 Contributing
 
