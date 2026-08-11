@@ -53,6 +53,25 @@ function activate({ segments, workspace = '', settings = {} } = {}) {
     };
 }
 
+// A pinned limits cache. `u.readCache` reads ~/.claude/statusline-usage.json,
+// which exists only where Claude Code has run — so the two tests below were
+// asserting that this machine had used Claude Code today, and on a runner that
+// has never seen it they failed on their own guard clauses. The guards were
+// right; what they guarded was the wrong thing. Pinned, both tests are about
+// what they name: that the page and the tooltip are cut from one list, and that
+// a frozen context still gets the numbers through.
+function pinLimits() {
+    const real = u.readCache;
+    const at = (secs) => new Date((Math.floor(Date.now() / 1000) + secs) * 1000).toISOString();
+    u.readCache = () => ({
+        limits: [
+            { kind: 'session', percent: 12, resets_at: at(3600) },
+            { kind: 'weekly_all', percent: 47, resets_at: at(3 * 86400) },
+        ],
+    });
+    return () => { u.readCache = real; };
+}
+
 test('activate creates one status-bar item per configured segment', () => {
     const run = activate({ segments: ['claude', 'second one', 'third'] });
     try {
@@ -724,6 +743,7 @@ test('asking for the defaults returns the built-in bar, not the current one', as
 // wording used to live in extension.js alone; a tab that copied it would have
 // been free to drift the moment either side changed.
 test('the Now tab and the tooltips are cut from the same sections', async () => {
+    const unpin = pinLimits();
     const run = activate({ segments: ['{weekly}'], workspace: '' });
     let panel;
     try {
@@ -755,7 +775,7 @@ test('the Now tab and the tooltips are cut from the same sections', async () => 
                 }
             }
         }
-    } finally { if (panel) panel.dispose(); run.dispose(); }
+    } finally { if (panel) panel.dispose(); run.dispose(); unpin(); }
 });
 
 // The page is rebuilt on the same interval as the bar, and a rebuild throws away
@@ -804,6 +824,7 @@ test('the dashboard reads live numbers even when the context refuses new propert
     vscode.__setSettings({ segments: ['{weekly}'], alignment: 'right', priority: 100, refreshInterval: 3600 });
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-frozen-'));
     const context = Object.freeze({ subscriptions: [], globalStorageUri: { fsPath: storage } });
+    const unpin = pinLimits();
 
     let panel;
     try {
@@ -822,6 +843,7 @@ test('the dashboard reads live numbers even when the context refuses new propert
         if (panel) panel.dispose();
         for (const d of context.subscriptions) d.dispose();
         fs.rmSync(storage, { recursive: true, force: true });
+        unpin();
     }
 });
 
