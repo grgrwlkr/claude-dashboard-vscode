@@ -5,9 +5,24 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
-Everything below 0.19.19 was built and installed on one machine — the extension
+Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
+
+## [0.20.0] — 2026-08-11
+
+**First public release.** Even minor, so this is the stable channel: the Install
+button on the page works for everyone, without picking a pre-release from a
+dropdown.
+
+What it is, in one line each — a status bar you write yourself out of 45
+placeholders, and a 23-tab dashboard over every Claude Code transcript on the
+machine: limits with a pace forecast, spend by day, model, project and branch,
+subagents and workflow runs with what each agent cost, cache and friction, and a
+Setup section that reads the installation itself. Everything is read locally;
+one request leaves the machine and it has a switch.
+
+The full feature history is below, from 0.5.0 onwards.
 
 ## [0.19.24] — 2026-08-11
 
