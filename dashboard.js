@@ -2019,13 +2019,20 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
    clipped get it, so it never covers a name that was already whole. */
 [data-clipped] { position: relative; }
 [data-clipped]:hover::after {
-  content: attr(title); position: absolute; left: 0; top: calc(100% + 2px); z-index: 20;
+  content: attr(title); position: absolute; left: 0; top: calc(100% + 2px); z-index: 40;
   padding: 3px 8px; border-radius: 4px; white-space: nowrap; font-size: 11.5px;
   font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 1;
-  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
-  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-foreground);
+  /* Two layers, and the first one is the point: a hover widget colour a webview
+     was never given leaves the box transparent, and a transparent tooltip is
+     the row underneath read through the row above it. The editor background is
+     always defined and always opaque, so it goes underneath whatever the theme
+     does or does not provide. */
+  background-color: var(--vscode-editor-background);
+  background-image: linear-gradient(var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background)),
+    var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background)));
   border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border));
-  box-shadow: 0 2px 8px rgb(0 0 0 / .35); pointer-events: none; }
+  box-shadow: 0 2px 10px rgb(0 0 0 / .45); pointer-events: none; }
 
 /* A share drawn under the number rather than beside it: it costs no column, and
    a rule under the figure cannot fight the figure. A block behind the text was

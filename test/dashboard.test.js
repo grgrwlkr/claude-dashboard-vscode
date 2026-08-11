@@ -879,3 +879,13 @@ test('with update checking on, each marketplace reports what the network said', 
     assert.match(off, /Nothing is asked of the network/);
     assert.ok(!/the copy is behind|the copy is current/.test(off));
 });
+
+// A tooltip painted only from a theme variable a webview may never have been
+// given is a transparent tooltip, and a transparent tooltip is the row
+// underneath read through the row above. The opaque base is not decoration.
+test('the hover panel has an opaque base under whatever the theme provides', () => {
+    const rule = db.STYLE.split('[data-clipped]:hover::after')[1].split('}')[0];
+    assert.match(rule, /background-color:\s*var\(--vscode-editor-background\)/);
+    // And the theme's own colour rides on top rather than replacing it.
+    assert.match(rule, /background-image:\s*linear-gradient\(var\(--vscode-editorHoverWidget-background/);
+});
