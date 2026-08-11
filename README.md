@@ -20,11 +20,19 @@
 </p>
 
 <p align="center">
+  <a href="#-what-you-get"><b>Features</b></a> ·
+  <a href="#-dark-and-light"><b>Screenshots</b></a> ·
   <a href="#-install"><b>Install</b></a> ·
+  <a href="#%EF%B8%8F-configuring-the-bar"><b>Configure the bar</b></a> ·
   <a href="#-the-dashboard"><b>Dashboard</b></a> ·
-  <a href="#-configuring-the-bar"><b>Configure</b></a> ·
+  <a href="#-workflow-runs"><b>Workflows</b></a>
+  <br/>
   <a href="#-privacy"><b>Privacy</b></a> ·
-  <a href="https://github.com/grgrwlkr/claude-dashboard-vscode/issues"><b>Issues</b></a>
+  <a href="#%EF%B8%8F-settings-and-commands"><b>Settings</b></a> ·
+  <a href="#-where-the-data-comes-from"><b>Data sources</b></a> ·
+  <a href="#%EF%B8%8F-known-issues-and-limits"><b>Known issues</b></a> ·
+  <a href="#-contributing"><b>Contributing</b></a> ·
+  <a href="https://github.com/grgrwlkr/claude-dashboard-vscode/issues"><b>Report a bug</b></a>
 </p>
 
 > ⚠️ **Unofficial.** Not affiliated with, endorsed by or sponsored by Anthropic, PBC.
@@ -58,7 +66,7 @@ write yourself**, and **a dashboard** over every transcript on the machine.
 | **💸 What it actually costs** | Session spend with a burn rate, today across every project, and a dashboard that breaks it down by day, model, project, branch, tool and skill. Estimated from public rates — the one figure that is real money, usage credits, is labelled as such. |
 | **🤖 The agents nobody else shows** | Subagents and workflow agents write their own transcripts, so on a machine that runs fan-outs their spend is the larger half — and it is invisible in the terminal statusline, which only ever sees one session. Here they get a tree, a table and a live row each. |
 | **🎛️ A bar you write yourself** | The bar is a template, not a layout: 45 placeholders, optional groups that vanish when empty, 11 ready-made bars, and an editor with a live preview. |
-| **🔒 Local by default** | Everything is read from your own disk. Exactly one request can leave the machine — and it has a switch. See [Privacy](#-privacy). |
+| **🔒 Local by default** | Everything is read from your own disk. One request leaves the machine — the limits, and it has a switch — plus two opt-ins that are off until you turn them on. No telemetry, ever. See [Privacy](#-privacy). |
 
 ## 🌗 Dark and light
 
@@ -316,7 +324,7 @@ All of these apply the moment they change — none needs a window reload.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `claudeStatusline.segments` | five templates | One status-bar item per string; see [Configuring the bar](#-configuring-the-bar) |
+| `claudeStatusline.segments` | five templates | One status-bar item per string; see [Configuring the bar](#%EF%B8%8F-configuring-the-bar) |
 | `claudeStatusline.fetchLimits` | `true` | Ask Anthropic for the account's limits; `false` keeps the token unread and the network untouched |
 | `claudeStatusline.autoRefresh` | `true` | Redraw on a timer. Off, the cheap ten-second read still runs and the expensive pass happens only on **Reindex** or **Refresh now** — useful on battery |
 | `claudeStatusline.fetchChangelog` | `false` | Fetch Claude Code's own changelog for the Changelog tab. Off means that request is never made |
@@ -373,7 +381,6 @@ Written down rather than discovered by you.
 | **Limits can go quiet** | They come from the account endpoint with the token Claude Code stores. If a request fails — network, an expired token, or Anthropic tightening what non-official clients may call — the limit fields empty out and everything read from local transcripts keeps working. |
 | **The first index takes a moment** | It reads every transcript on the machine behind a progress notification (~1.1 GB and 4–5 s here). After that a file whose size and mtime are unchanged is reused, so refreshes cost tens of milliseconds. |
 | **An empty status bar is not a bug** | Every item hides itself when it has nothing true to say — see [Install](#-install) for the three ordinary reasons. |
-| **Upgrading from a pre-release `.vsix`** | Early builds shipped under the id `claude-statusline`. VS Code treats that as a different extension, so uninstall it (`code --uninstall-extension grgrwlkr.claude-statusline`) before installing this one, or you get two of everything. |
 
 ## 🤝 Contributing
 
