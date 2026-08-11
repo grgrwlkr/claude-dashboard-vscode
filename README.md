@@ -1,11 +1,13 @@
 <p align="center">
-  <img src="media/icon.png" width="96" alt="Statusline for Claude Code" />
+  <img src="media/icon.png" width="96" alt="Dashboard & Statusline for Claude Code" />
 </p>
 
-<h1 align="center">Statusline for Claude Code</h1>
+<h1 align="center">Dashboard &amp; Statusline for Claude Code</h1>
 
 <p align="center">
-  <b>Your weekly limit, this session's context, what it costs and what your agents are doing —<br/>in the VS Code status bar, and on a dashboard behind it.</b>
+  <b>Two things in one extension.</b><br/>
+  A <b>dashboard</b> over every Claude Code transcript on the machine — spend, agents, workflows, limits, friction —<br/>
+  and a <b>status bar</b> you write yourself, for the four numbers you want in front of you all day.
 </p>
 
 <p align="center">
@@ -33,12 +35,17 @@
 ✻ 7d 27% ▒▒░░░░ dry 12.08 ~13h    ▤ 29% 294k/1M    ~$114.29 $5.18/h    ⧉ 2 ▸ 3/6
 ```
 
-Claude Code's own VS Code panel has no status line: it never runs the `statusLine`
-command from `~/.claude/settings.json`, and the upstream requests for parity with
+Claude Code writes a great deal to disk and shows you almost none of it. Its VS
+Code panel has no status line at all — the `statusLine` command from
+`~/.claude/settings.json` is never run, and the upstream requests for parity with
 the CLI were closed as stale
 ([#55643](https://github.com/anthropics/claude-code/issues/55643),
-[#21265](https://github.com/anthropics/claude-code/issues/21265)). This extension
-covers the part that does not need the CLI — and then keeps going.
+[#21265](https://github.com/anthropics/claude-code/issues/21265)) — and nothing
+anywhere adds up what your subagents and workflow runs actually cost, which on a
+machine that uses them is the larger half of the bill.
+
+This extension reads that state and gives it two surfaces: **a status bar you
+write yourself**, and **a dashboard** over every transcript on the machine.
 
 ![The Now tab: both limit windows, the week as a track, context, spend, tasks and the agents of a running workflow](media/screenshots/now-dark.png)
 
@@ -296,9 +303,9 @@ request can leave the machine, and it is optional.**
 | **What is written** | Only inside the extension's own storage: the aggregate index and the limit history. Neither holds prompt text. |
 | **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint Claude Code's own `/usage` screen reads — carrying the OAuth token Claude Code already stores. At most once a minute per machine, however many windows are open — and shared with a terminal `statusline.sh` through the same cache file if you run one. |
 | **What happens to the token** | Read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and put into one `Authorization` header. Never logged, never cached, never written, never sent anywhere else. |
-| **The only other thing that could** | `claudeStatusline.checkPluginUpdates` asks each plugin's marketplace whether a newer version exists. **Off by default**, and off means those requests are never made. |
+| **Two things that could, and do not** | `claudeStatusline.checkPluginUpdates` asks each plugin's marketplace whether a newer version exists; `claudeStatusline.fetchChangelog` fetches Claude Code's public changelog from GitHub — one file, no credentials. **Both are off by default**, and off means those requests are never made. |
 | **Telemetry** | None. No analytics, no crash reporting, no phoning home. |
-| **How to switch it all off** | `"claudeStatusline.fetchLimits": false`. Off means the token is not read at all. With `checkPluginUpdates` left alone, the extension then makes no network request whatsoever. |
+| **How to switch it all off** | `"claudeStatusline.fetchLimits": false`. Off means the token is not read at all — and with the two opt-ins above left alone, the extension then makes no network request whatsoever. |
 
 The **Content** tab never stores prompt text — only counts, a length histogram and
 word tallies, computed and discarded in the same pass.
@@ -311,6 +318,8 @@ All of these apply the moment they change — none needs a window reload.
 | --- | --- | --- |
 | `claudeStatusline.segments` | five templates | One status-bar item per string; see [Configuring the bar](#-configuring-the-bar) |
 | `claudeStatusline.fetchLimits` | `true` | Ask Anthropic for the account's limits; `false` keeps the token unread and the network untouched |
+| `claudeStatusline.autoRefresh` | `true` | Redraw on a timer. Off, the cheap ten-second read still runs and the expensive pass happens only on **Reindex** or **Refresh now** — useful on battery |
+| `claudeStatusline.fetchChangelog` | `false` | Fetch Claude Code's own changelog for the Changelog tab. Off means that request is never made |
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
@@ -349,6 +358,22 @@ Nothing is asked of the CLI — it has no channel to ask.
   answers only for the present moment. A row is appended to the extension's own
   storage whenever a percentage moves, plus a heartbeat every six hours so a quiet
   stretch is distinguishable from a closed laptop.
+
+## ⚠️ Known issues and limits
+
+Written down rather than discovered by you.
+
+| | |
+| --- | --- |
+| **Windows is not supported** | The OAuth token lives behind the macOS Keychain or in `~/.claude/.credentials.json`, and session ownership is resolved with POSIX `ps`. On Windows the extension degrades quietly — items stay hidden, numbers do not appear — instead of printing wrong ones. macOS and Linux are the supported pair; a Windows port is welcome as a PR. |
+| **Remote SSH, containers, WSL** | The extension runs wherever the extension host runs, and reads the `~/.claude` of *that* machine. If Claude Code runs on the remote and you open the folder over Remote SSH, that is exactly right; if Claude Code runs locally while the window is attached to a container, the extension looks at the container's empty home and shows nothing. *(Expected from how VS Code splits extension hosts — not something we have tested on every combination.)* |
+| **vscode.dev / github.dev** | Does not work at all: there is no filesystem and no process table to read. |
+| **The formats are private** | Transcripts and the session registry belong to Claude Code and are not a published contract. A release that changes them turns the affected item into a dash rather than a wrong number — that is the design, but it does mean a number can go quiet until the reader is updated. |
+| **Spend is an estimate, not a bill** | Computed from public per-million-token rates; the real figure depends on plan and discounts. Every estimated figure carries a `~`. The one exception is usage credits, which are read as billed money and shown without one. |
+| **Limits can go quiet** | They come from the account endpoint with the token Claude Code stores. If a request fails — network, an expired token, or Anthropic tightening what non-official clients may call — the limit fields empty out and everything read from local transcripts keeps working. |
+| **The first index takes a moment** | It reads every transcript on the machine behind a progress notification (~1.1 GB and 4–5 s here). After that a file whose size and mtime are unchanged is reused, so refreshes cost tens of milliseconds. |
+| **An empty status bar is not a bug** | Every item hides itself when it has nothing true to say — see [Install](#-install) for the three ordinary reasons. |
+| **Upgrading from a pre-release `.vsix`** | Early builds shipped under the id `claude-statusline`. VS Code treats that as a different extension, so uninstall it (`code --uninstall-extension grgrwlkr.claude-statusline`) before installing this one, or you get two of everything. |
 
 ## 🤝 Contributing
 

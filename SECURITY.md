@@ -21,7 +21,7 @@ There is no telemetry.
 
 ## Reporting a vulnerability
 
-Open a [security advisory](https://github.com/grgrwlkr/claude-statusline-vscode/security/advisories/new)
+Open a [security advisory](https://github.com/grgrwlkr/claude-dashboard-vscode/security/advisories/new)
 rather than a public issue, and give it a few days. This is a spare-time
 project: expect an answer, not an SLA.
 
