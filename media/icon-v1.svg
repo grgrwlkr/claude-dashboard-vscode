@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- The mark is the status bar's own gauge: three cells spent, two still
+       empty, over the week as a length. No Anthropic logo and no brand orange —
+       this extension is unofficial and its icon must not suggest otherwise.
+       The plan notch of the real bar is dropped here: at 32 px nobody sees it. -->
+  <rect width="128" height="128" rx="26" fill="#171A21"/>
+
+  <g>
+    <rect x="20" y="34" width="15" height="52" rx="3.5" fill="#4FB6A0"/>
+    <rect x="39" y="34" width="15" height="52" rx="3.5" fill="#4FB6A0"/>
+    <rect x="58" y="34" width="15" height="52" rx="3.5" fill="#8DEBD2"/>
+    <rect x="77" y="34" width="15" height="52" rx="3.5" fill="#333B49"/>
+    <rect x="96" y="34" width="15" height="52" rx="3.5" fill="#333B49"/>
+  </g>
+
+  <rect x="20" y="96" width="91" height="6" rx="3" fill="#333B49"/>
+  <rect x="20" y="96" width="53" height="6" rx="3" fill="#4FB6A0"/>
+</svg>
