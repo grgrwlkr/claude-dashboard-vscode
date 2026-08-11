@@ -148,9 +148,18 @@ above replaced one that compared `documentElement.scrollWidth` to `clientWidth` 
 on a page whose body carries `overflow-x: hidden`, so it returned "clean" at every width from the day
 it was written while content was visibly clipped. What is cut off by `overflow: hidden` does not scroll and does not
 widen the document; it disappears, and only geometry sees it. The replacement was not trusted for
-finding two overflows either: it was run against `git archive 79883c5` — the revision before the fix
-— where it reports 92 findings at 910 px and 40 at 800 px, and only then believed on a clean tree.
-"It found something" is not evidence that it finds everything.
+finding two overflows either: it was run against the revision before that fix, where it reports 92
+findings at 910 px and 40 at 800 px, and only then believed on a clean tree. "It found something" is
+not evidence that it finds everything.
+
+That revision is named here by its commit message rather than by a hash, and the difference is not
+pedantry — the hash this paragraph used to carry died when the history was rewritten before
+publication, taking the recipe with it:
+
+```bash
+BAD=$(git rev-parse --short "$(git log --format='%h %s' | rg -m1 'give the charts a scale' | cut -d' ' -f1)^")
+git show "$BAD:tools/preview.js" | rg -c scrollWidth   # 1 — the probe that could not fail
+```
 
 **No charting library — measured, not assumed (checked 2026-08-10).** The CSP is not the reason: it
 allows inline script, and `asWebviewUri` + `script-src ${cspSource}` is the documented path anyway.
