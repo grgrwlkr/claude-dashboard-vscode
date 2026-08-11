@@ -111,8 +111,8 @@ function promptText(message) {
 // What is not a word you used: a path, a tool-use id, a snake_case identifier.
 // These arrive inside prompts by the hundred — a screenshot injects its own
 // path, a tool result its id — and each of them beat prose to the per-file top
-// thirty, which is why a machine driven in Russian showed an English cloud with
-// `users`, `develop`, `x` and `toolu` in it.
+// thirty, which is why a machine driven in Russian showed an English cloud made
+// of `users`, `develop`, the account name and `toolu`.
 const NOT_PROSE = /(?:\[image #\d+\])|(?:[\w.-]*\/[\w./-]+)|(?:\btoolu_\w+)|(?:\b\w*_\w+\b)|(?:\b[0-9a-f]{8,}\b)/gi;
 
 function tallyWords(text, into) {

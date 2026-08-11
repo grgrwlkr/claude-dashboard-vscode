@@ -1,7 +1,8 @@
 // Four weeks that never happen at once, so the track can be seen in each of the
 // states it has to survive: forecast inside the window, a fresh week, an
 // overspent one, and a week with no forecast at all.
-const db = require('/Users/x/Develop/claude-statusline-vscode/dashboard');
+const path = require('path');
+const db = require(path.resolve(__dirname, '..', 'dashboard'));
 const cases = [
     ['forecast lands inside the window', { pct: 71, plan: 42, now: 0.42, dry: 0.66, beforeReset: true, resetIn: 4 * 86400 }],
     ['a week just opened', { pct: 2, plan: 3, now: 0.03, dry: null, beforeReset: false, resetIn: 6.8 * 86400 }],
