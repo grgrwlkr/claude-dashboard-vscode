@@ -42,10 +42,16 @@ jobs:
 
       - run: npx @vscode/vsce package --no-dependencies $FLAG -o extension.vsix
 
-      - name: publish to the VS Code Marketplace
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx @vscode/vsce publish $FLAG --packagePath extension.vsix --skip-duplicate
+      # The Marketplace upload is off for now. There is no VSCE_PAT in the
+      # repository secrets, and because that step ran before Open VSX, an
+      # unauthenticated `vsce publish` failed the job and took the other
+      # registry down with it — a release that reaches neither. Packaging above
+      # is untouched: both registries take the same .vsix. To turn it back on,
+      # add the secret and restore the step here:
+      #   - name: publish to the VS Code Marketplace
+      #     env:
+      #       VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      #     run: npx @vscode/vsce publish $FLAG --packagePath extension.vsix --skip-duplicate
 
       - name: publish to Open VSX
         env:

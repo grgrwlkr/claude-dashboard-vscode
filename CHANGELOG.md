@@ -9,6 +9,17 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.22.1] — 2026-08-12
+
+**The first version on Open VSX** — the registry Cursor, Windsurf, VSCodium and
+Gitpod install from, where this extension had no listing at all. The code is
+0.22.0 unchanged; what is new is where you can get it.
+
+The VS Code Marketplace stays on 0.22.0 for now. Its upload step ran before Open
+VSX, so a release that could not authenticate there reached neither registry;
+the step is off until the token is back, and the listing catches up with the
+next version after that.
+
 ## [0.22.0] — 2026-08-11
 
 **The first version actually published.** Even minor, so it lands in the stable
