@@ -167,6 +167,10 @@ const wrap = (open, extra = '') => page
     .replace('</body>', (open ? `<script>addEventListener('load',()=>{
         document.querySelector('nav.sections [data-section="${open.section}"]').click();
         document.querySelector('nav.tabs [data-tab="${open.tab}"]').click();
+        // The height of this tab, published where --dump-dom can read it: a
+        // screenshot taken at a fixed height pads short tabs with dead space,
+        // and dead space on a listing image reads as an empty product.
+        document.title = 'H' + Math.ceil(document.body.getBoundingClientRect().height);
       });</script>` : '') + extra + '</body>');
 
 fs.writeFileSync(out, wrap(null));
