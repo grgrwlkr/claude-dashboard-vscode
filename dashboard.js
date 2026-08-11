@@ -2786,7 +2786,13 @@ function dayModelMatrix(index) {
  */
 function clientTab(client, cfg = {}) {
     if (!client) {
-        return '<section class="tab" data-tab="client" hidden><p class="empty">No settings files could be read.</p></section>';
+        // Not a failure, and it must not read as one. The extension always has a
+        // chain to show — a file that is not there is a row saying so — so this
+        // branch is only reached where the settings were never collected: the
+        // preview tool in demo mode, which renders invented data and has no
+        // invented machine to read.
+        return '<section class="tab" data-tab="client" hidden><p class="empty">'
+            + 'This tab reads the settings of the machine it runs on, and there is none here.</p></section>';
     }
     const c = client.counts;
     const fetched = Boolean(cfg.fetchChangelog);

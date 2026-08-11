@@ -9,6 +9,14 @@ Everything below 0.19.19 was built and installed on one machine — the extensio
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.19.24] — 2026-08-11
+
+### Fixed
+
+- The Claude Code tab said "No settings files could be read" where it simply had
+  none to read — the wording turned an empty listing screenshot into a broken
+  one.
+
 ## [0.19.23] — 2026-08-11
 
 ### Changed
