@@ -114,3 +114,27 @@ test('sessionSeries ignores readings that carried no session limit', () => {
     ];
     assert.deepEqual(h.sessionSeries(rows), [{ at: T0, pct: 40 }]);
 });
+
+// The one path that rewrites the file whole, and the only one with nothing
+// covering it. On this machine's own data it first runs somewhere past day 94,
+// which is a bad moment for its first execution to be in production: it replaces
+// a history nobody can get back.
+test('past the threshold the file is rewritten to the newest MAX_ROWS', () => store((dir) => {
+    const over = Math.ceil(h.MAX_ROWS * 1.2) + 1;
+    // Written straight to disk: going through recordLimits would need one call
+    // per row, and what is under test is the trim, not the appending.
+    const rows = Array.from({ length: over }, (_, i) => (
+        { at: T0 + i * 60000, weekly: 10, session: 10, reset: RESET, models: {} }
+    ));
+    fs.writeFileSync(h.historyPath(dir), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    // A reading that differs, so it is recorded and the trim is reached.
+    assert.equal(h.recordLimits(dir, limits(99), T0 + over * 60000).written, true);
+
+    const kept = h.readHistory(dir);
+    assert.equal(kept.length, h.MAX_ROWS, 'the file is cut to MAX_ROWS, not left to grow');
+    assert.equal(kept[kept.length - 1].weekly, 99, 'the newest reading survives');
+    assert.equal(kept[0].at, T0 + (over + 1 - h.MAX_ROWS) * 60000, 'the oldest rows are the ones dropped');
+    // Rewritten via tmp+rename, so nothing of the temporary file is left behind.
+    assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
+}));

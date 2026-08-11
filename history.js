@@ -18,9 +18,14 @@ const FILE = 'limits-history.jsonl';
 // stretch and a closed laptop look identical on the chart.
 const HEARTBEAT_MS = 6 * 3600 * 1000;
 
-// About two years of ordinary use. The file is trimmed from the front when it
-// grows past this, so the chart loses its oldest weeks rather than the disk
-// filling up unattended.
+// Three to five months of ordinary use, measured rather than guessed (checked
+// 2026-08-12): full days in the two histories on this machine carry 139, 162,
+// 253 and 255 rows, so 20000 rows is 78–144 days and the trim first fires,
+// at 1.2x, somewhere between day 94 and day 173. The comment here used to say
+// "about two years", which would need 27 rows a day — below every day observed,
+// including a partial one. The file is trimmed from the front when it grows past
+// this, so the chart loses its oldest weeks rather than the disk filling up
+// unattended.
 const MAX_ROWS = 20000;
 const TRIM_SLACK = 1.2;
 

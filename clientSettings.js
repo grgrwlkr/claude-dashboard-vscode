@@ -20,10 +20,38 @@ const { resolveSetting } = require('./session');
 // screenshot of it travels further than the person taking it expects.
 const SECRET = /key|token|secret|password|credential|auth/i;
 
+// The name is not the only witness, and inside `env` it is the weaker one: the
+// keys there are the user's own, and `GH_PAT`, `GITLAB_PAT`, `SLACK_BOT` and
+// `SENTRY_DSN` all read as innocent while holding the thing this masking exists
+// for. So a value that is shaped like a credential is hidden whatever it is
+// filed under. Only unmistakable shapes are listed — an issuer's own prefix, a
+// JWT, a credential inside a URL, or a long unbroken hex string. A UUID does
+// not match (its hyphens break the run), which keeps the session ids on the
+// page where they are useful.
+const SECRET_VALUE = new RegExp([
+    'sk-ant-[A-Za-z0-9_-]{8,}',
+    'gh[pousr]_[A-Za-z0-9]{16,}',
+    'github_pat_[A-Za-z0-9_]{16,}',
+    'xox[baprs]-[A-Za-z0-9-]{10,}',
+    'AKIA[0-9A-Z]{16}',
+    'eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}',
+    // A credential in front of a host: `//user:pass@` and the passwordless
+    // `//<key>@` a Sentry DSN uses. Bounded below so `//me@example` is not it.
+    '//[^/\\s:@]{3,}:[^/\\s@]{3,}@',
+    '//[A-Za-z0-9_.-]{16,}@',
+    // Long unbroken hex, but only if it is actually mixed: `'a'.repeat(200)` is
+    // hex by the letter and a credential by no other measure.
+    '\\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{32,}\\b',
+].join('|'));
+
 const MAX_INLINE = 120;
 
 function isSecret(key) {
     return SECRET.test(key);
+}
+
+function looksSecret(value) {
+    return typeof value === 'string' && SECRET_VALUE.test(value);
 }
 
 // The name alone over-fires: `MAX_THINKING_TOKENS` is a budget, `TTL_MS` on an
@@ -32,6 +60,7 @@ function isSecret(key) {
 // so the value settles it — and everything else under a credential-shaped name
 // stays hidden, including paths and objects.
 function shouldMask(key, value) {
+    if (looksSecret(value)) return true;
     if (!isSecret(key)) return false;
     if (typeof value === 'number' || typeof value === 'boolean') return false;
     if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())) return false;

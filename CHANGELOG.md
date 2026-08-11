@@ -43,8 +43,17 @@ sessions reviewing each other's halves of it.
 
 Four pieces of code that were attached to nothing: a function with no caller, a
 filter on a field that does not exist, a shadowed import, and a chart axis built
-twice per drawing. The preview tool priced every agent at zero, which made the
-overflow probe measure a page narrower than the real one.
+twice per drawing.
+
+The tool that checks the dashboard for clipped content could not have failed on
+the tab it was most needed for: it rendered the Changelog tab empty, and it
+priced every agent at zero, so it measured a page both shorter and narrower than
+the real one. Both fixed, and the probe now opens what is folded before it
+measures. Settings values that are shaped like a credential are masked on the
+Client tab even when their name gives nothing away — `GH_PAT` and a Sentry DSN
+were printed in full. The trim that keeps the limits history from growing without
+bound now has a test, and the comment above it carries a measured figure instead
+of one that was out by a factor of five.
 
 ## [0.22.1] — 2026-08-12
 

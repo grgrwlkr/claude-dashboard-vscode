@@ -93,6 +93,42 @@ test('what is documented and absent, managed-only marked as such', () => {
 
 // The page is a webview in a published extension: whatever it draws is one
 // screenshot away from leaving the machine.
+// The other half of the same promise. Inside `env` the keys are the user's own,
+// and the ones that hold a credential are mostly not named like one — which is
+// the case the name test cannot see, on a page that is a webview in a published
+// extension.
+test('a value shaped like a credential is masked whatever it is filed under', () => {
+    const out = cs.clientSettings({
+        chain: [file('user', {
+            env: {
+                GH_PAT: 'ghp_PLANTEDaaaaaaaaaaaaaaaaaaaaaaaa',
+                SLACK_BOT: 'xoxb-PLANTED-11111111-aaaaaaaaaaaa',
+                SENTRY_DSN: 'https://PLANTEDcafe1234567890abcdef@o1.ingest.sentry.io/42',
+                // A bare hex secret, which is how one actually looks — no word
+                // in front of it, or the run would not start at a boundary.
+                SESSION_HASH: '0123456789abcdef0123456789abcdefcafe',
+                CLAUDE_CODE_SESSION_ID: '99ed2bbb-112f-4486-b479-96ce294db365',
+                CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '40',
+            },
+        })],
+        registry: REGISTRY,
+        hostEnv: {},
+    });
+
+    const blob = JSON.stringify(out);
+    assert.ok(!blob.includes('PLANTED'), 'a credential-shaped value reached the rendered data');
+    assert.ok(!blob.includes('0123456789abcdef'), 'a bare hex secret reached the rendered data');
+
+    const value = (key) => out.env.fromSettings.find((e) => e.key === key).value;
+    for (const key of ['GH_PAT', 'SLACK_BOT', 'SENTRY_DSN', 'SESSION_HASH']) {
+        assert.equal(value(key), '•••', `${key} carries a credential and none of its letters say so`);
+    }
+    // A uuid's hyphens break the hex run, which is what keeps the ids that make
+    // this tab useful on the page.
+    assert.equal(value('CLAUDE_CODE_SESSION_ID'), '99ed2bbb-112f-4486-b479-96ce294db365');
+    assert.equal(value('CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS'), '40');
+});
+
 test('anything whose name reads like a credential is masked', () => {
     const chain = [file('user', {
         apiKeyHelper: '/usr/local/bin/mint-token',
