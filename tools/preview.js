@@ -48,7 +48,16 @@ for (const entry of Object.values(index.files)) {
 // The Setup section reads the installation itself, and there is no invented
 // version of that — in demo mode those tabs draw their own empty states rather
 // than photographing this machine's plugins, jobs and disk.
-const snap = demo ? null : sys.snapshot({ workspace: REPO, projects: [REPO], sessionProjects });
+// The changelog is passed in as the fetched file would be, because without it
+// the tab this page is measured for is empty: `changelog()` cuts the client's
+// own cache at the running version, and on an up-to-date client that leaves
+// nothing. A probe over that tab then reports "clean" about a heading and one
+// panel — which is not an answer about the 361 releases the tab carries when the
+// fetch is on. `config.fetchChangelog` below turns the tab to that heavy state.
+const changelogText = (() => {
+    try { return fs.readFileSync(path.join(os.homedir(), '.claude', 'cache', 'changelog.md'), 'utf8'); } catch { return ''; }
+})();
+const snap = demo ? null : sys.snapshot({ workspace: REPO, projects: [REPO], sessionProjects, changelogText });
 
 // A couple of synthetic weeks so the Limits chart has a shape before the
 // extension has collected real ones.
@@ -112,6 +121,8 @@ const html = db.render(index, total, demo ? { ...demo.meta, system: snap } : {
         defaults: seg.DEFAULT_SEGMENTS,
         presets: seg.PRESETS,
         alignment: 'right', priority: 100, refreshInterval: 60,
+        // Draw the Changelog tab in its heavy state — the one worth measuring.
+        fetchChangelog: true,
         palette: Object.entries(seg.fields({})).map(([name, f]) => ({ name, topic: f.topic, doc: f.doc, value: '' })),
     },
 });
@@ -203,6 +214,10 @@ addEventListener('load', () => {
       t.click();
       const pane = document.querySelector('section.tab[data-tab="' + t.dataset.tab + '"]');
       if (!pane || pane.hidden) continue;
+      // Anything behind a "show the rest" button is still content of this tab —
+      // and on the Changelog tab it is 346 of the 361 rows. Unopened, the probe
+      // measures fifteen and calls the tab clean.
+      for (const more of pane.querySelectorAll('[data-more]')) more.click();
       for (const el of pane.querySelectorAll('*')) {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;
@@ -226,6 +241,13 @@ addEventListener('load', () => {
 });
 </script>`));
 
-const bad = /undefined|NaN|\[object Object\]/.exec(html);
+// A leak is a value the page failed to compute, not the word for one. Searching
+// the whole document for `undefined` matched prose quoted from a transcript —
+// and a real leak is invisible in that noise. What cannot be prose: the entire
+// contents of an element, or an attribute that is nothing else.
+const LEAK = /(?:>\s*(?:undefined|NaN|\[object Object\])\s*<)|(?:="(?:undefined|NaN|\[object Object\])")/g;
+const leaks = [...html.matchAll(LEAK)];
 console.log('rendered', (html.length / 1024).toFixed(0), 'KB · panes:', (html.match(/class="tab"/g) || []).length,
-    '· placeholder leak:', bad ? html.slice(Math.max(0, bad.index - 100), bad.index + 40) : 'none');
+    '· placeholder leak:', leaks.length
+        ? `${leaks.length} — ${html.slice(Math.max(0, leaks[0].index - 90), leaks[0].index + 30)}`
+        : 'none');
