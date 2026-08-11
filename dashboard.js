@@ -1308,9 +1308,26 @@ function healthTab(total, sys, cfg = {}) {
       </tr>`).join('')}
     </tbody></table>` : '<p class="empty">No installed plugins recorded.</p>';
 
-    const updateNote = `${updates.length} installed from ${new Set(updates.map((u) => u.marketplace)).size} marketplace${new Set(updates.map((u) => u.marketplace)).size === 1 ? '' : 's'}, each of which is a clone on this disk${stale ? `, last refreshed ${esc(fmtDateTime(stale))}` : ''}. ${behind.length ? `${behind.length} differ${behind.length === 1 ? 's' : ''} from the copy.` : 'None differs from the copy.'} Most manifests declare no version at all, and a missing version is reported as missing rather than as up to date.
+    // What the network answered, when it was asked. A clone whose repository has
+    // moved since it was cloned is the whole point of the setting, and saying it
+    // per marketplace is the only way the answer is actionable — the fix is one
+    // `claude plugin update` against that marketplace.
+    const heads = sys.marketHeads || {};
+    const markets = [...new Set(updates.map((u) => u.marketplace))];
+    const marketLines = markets.map((m) => {
+        const head = heads[m];
+        const clone = updates.find((u) => u.marketplace === m);
+        const cloned = clone ? clone.marketUpdated : 0;
+        if (!head) return `<li>${esc(m)} — <span class="dim">not asked</span></li>`;
+        const late = cloned > 0 && head.at > cloned;
+        return `<li>${esc(m)} — ${late
+            ? `<span class="o-stopped">the copy is behind</span>, newest commit ${esc(fmtDateTime(head.at))} (<code>${esc(head.sha)}</code>) against a clone from ${esc(fmtDateTime(cloned))}`
+            : `<span class="ok">the copy is current</span> as of ${esc(fmtDateTime(head.at))}`}</li>`;
+    }).join('');
+
+    const updateNote = `${updates.length} installed from ${markets.length} marketplace${markets.length === 1 ? '' : 's'}, each of which is a clone on this disk${stale ? `, last refreshed ${esc(fmtDateTime(stale))}` : ''}. ${behind.length ? `${behind.length} differ${behind.length === 1 ? 's' : ''} from the copy.` : 'None differs from the copy.'} Most manifests declare no version at all, and a missing version is reported as missing rather than as up to date.
       ${checks
-        ? '<b>Update checking is on</b>: the extension may ask each marketplace whether the clone itself is behind.'
+        ? `<b>Update checking is on.</b> One request per marketplace asks GitHub for its newest commit and compares it with the clone:<ul class="log">${marketLines}</ul>Bring a stale copy up to date with <code>claude plugin update</code>.`
         : '<b>Nothing is asked of the network.</b> Without <code>claudeStatusline.checkPluginUpdates</code> this compares against the copy already on disk, so a plugin whose marketplace moved after that date will read as current. Turn the setting on to check, or refresh the clone yourself with <code>claude plugin update</code>.'}`;
 
     const enabled = pluginRows.filter((p) => p.enabled).length;
@@ -1537,16 +1554,30 @@ function tasksTab(sys) {
     </section>`;
 }
 
-// How many releases the page carries. The upstream file is half a megabyte and
-// hundreds of releases deep; everything past this is history nobody scrolls to,
-// and the page says how much it left behind rather than pretending that is all.
-const CHANGELOG_LIMIT = 60;
+// How many releases the page carries, and how many of the older ones it shows
+// before asking. The upstream file is half a megabyte and hundreds of releases
+// deep; the page carries a bounded slice and says how much it left behind
+// rather than pretending that is all there was.
+const CHANGELOG_LIMIT = 80;
+const CHANGELOG_SHOWN = 15;
 
 function changelogTab(sys, cfg = {}) {
     const all = (sys && sys.changelog) || [];
     const releases = all.slice(0, CHANGELOG_LIMIT);
     const v = (sys && sys.versions) || {};
     const fetched = Boolean(cfg.fetchChangelog);
+    // Anything newer than the version running is the answer and stays open;
+    // everything behind it is history, folded. With the full file fetched that
+    // is the difference between sixty open releases and one screen.
+    const newer = (a, b) => {
+        const pa = String(a).split('.').map(Number);
+        const pb = String(b).split('.').map(Number);
+        for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+        return false;
+    };
+    const ahead = v.current ? releases.filter((r) => newer(r.version, v.current)) : releases;
+    const history = releases.filter((r) => !ahead.includes(r));
+    const entries = (r) => `<ul class="log">${r.entries.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`;
     return `<section class="tab" data-tab="changelog" hidden>
         ${tiles(
         tile('Running', v.current || '—', v.waiting ? `${v.latest} is unpacked and waiting` : 'up to date'),
@@ -1560,10 +1591,22 @@ function changelogTab(sys, cfg = {}) {
             : "Reading <code>~/.claude/cache/changelog.md</code>, the client's own copy. It is written when the client feels like it, which is why a version can be unpacked here before its notes are.",
     })}
         ${releases.length
-        // A release is a block of the page like any other, so each gets its own
-        // panel rather than a heading in one long scroll.
-        ? releases.map((r) => panel(r.version,
-            `<ul class="log">${r.entries.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`)).join('')
+        // A release newer than the one running is a block of the page like any
+        // other; the ones behind it are a folded list, because nobody scrolls
+        // sixty of them and every one of them was already read once.
+        ? ahead.map((r) => panel(r.version, entries(r))).join('')
+        + (history.length ? panel(`${history.length} release${history.length === 1 ? '' : 's'} already behind you`,
+            // The first fifteen are open to scroll; the rest are in the page and
+            // one button away. Revealing rather than fetching, because the data
+            // is already here — a round trip to show what is in the document is
+            // a spinner for nothing.
+            history.map((r, i) => `<details class="memory${i >= CHANGELOG_SHOWN ? ' folded' : ''}"><summary>
+                <span class="mem-name">${esc(r.version)}</span>
+                <span class="dim">${plural(r.entries.length, 'note')}</span>
+              </summary>${entries(r)}</details>`).join('')
+            + (history.length > CHANGELOG_SHOWN
+                ? `<button class="btn" data-more>Show ${history.length - CHANGELOG_SHOWN} older releases</button>` : ''),
+            { note: v.current ? `Up to and including ${esc(v.current)}, the version running now.` : '' }) : '')
         // "Nothing new" beside a tile saying a newer version is unpacked is a
         // contradiction on one screen. The cache is the client's, refreshed on
         // its own schedule, so a version can be on disk before its notes are —
@@ -1915,6 +1958,9 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
 .memory > summary .dim { font-size: 11px; margin-left: auto; white-space: nowrap; }
 .mem-open { flex: none; }
+/* Carried in the page, out of the way until asked for. */
+.memory.folded { display: none; }
+.more-open .memory.folded { display: block; }
 .mem-text { margin: 6px 0 10px; padding: 10px 12px; border-radius: 5px; max-height: 460px;
   overflow: auto; background: var(--vscode-editor-background);
   border: 1px solid var(--vscode-panel-border);
@@ -1956,6 +2002,10 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .panel-flush { padding-left: 0; padding-right: 0; }
 .panel-flush > .panel-title, .panel-flush > .panel-note { padding: 0 15px; }
 .panel-flush > .panel-body { overflow-x: auto; }
+/* A flush panel drops its side padding so the table can run to the edge. Only
+   the table wants that: anything else in the body — a switch, a paragraph —
+   has to be put back in line with the heading above it. */
+.panel-flush > .panel-body > :not(table) { padding-left: 15px; padding-right: 15px; }
 .panel-flush th:first-child, .panel-flush td:first-child { padding-left: 15px; }
 .panel-flush th:last-child, .panel-flush td:last-child { padding-right: 15px; }
 /* Two panels side by side where the page is wide enough for it. */
@@ -2396,6 +2446,12 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('click', (e) => {
+  const more = e.target.closest('[data-more]');
+  if (more) {
+    more.closest('.panel-body').classList.add('more-open');
+    more.remove();
+    return;
+  }
   const open = e.target.closest('[data-open]');
   if (!open || !api) return;
   // Inside a <summary>: without this the click also toggles the disclosure,

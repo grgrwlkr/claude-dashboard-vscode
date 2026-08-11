@@ -843,7 +843,39 @@ test('the changelog names its source and carries its own switch', () => {
     const many = Array.from({ length: 80 }, (_, i) => ({ version: `2.1.${200 - i}`, entries: ['x'] }));
     const remote = db.changelogTab({ changelog: many, versions: { current: '2.1.200', installed: [] } },
         { fetchChangelog: true });
-    assert.match(remote, /80 releases known, of which the newest 60 are drawn/);
-    // Sixty panels of releases, not eighty: the rest is history nobody scrolls to.
-    assert.equal((remote.match(/class="panel"/g) || []).length, 61);
+    // Newer than the running version: open panels. Everything behind it: one
+    // folded list, with the first fifteen visible and a button for the rest.
+    // The fixture runs 2.1.200 and its newest release is 2.1.200, so nothing is
+    // ahead: the source panel and the folded history are the whole tab.
+    assert.equal((remote.match(/class="panel"/g) || []).length, 2);
+    // 80 releases, none of them ahead, fifteen shown: the rest are carried folded.
+    assert.equal((remote.match(/class="memory folded"/g) || []).length, 80 - 15);
+    assert.match(remote, /Show 65 older releases/);
+});
+
+// The switch promised a check and, for one release, performed none: the label
+// said the extension "may ask". A panel that says a thing was checked has to
+// have checked it.
+test('with update checking on, each marketplace reports what the network said', () => {
+    const day = 24 * 3600 * 1000;
+    const sys = {
+        plugins: [], mcp: [], hooks: [], permissions: [], settings: {}, versions: {},
+        pluginUpdates: [
+            { name: 'a', marketplace: 'official', installed: '1.0.0', available: '1.0.0', declared: true, repo: 'x/y', marketUpdated: Date.now() - 3 * day, installedAt: 0 },
+            { name: 'b', marketplace: 'warp', installed: '2.0.0', available: '', declared: false, repo: 'w/z', marketUpdated: Date.now() - day, installedAt: 0 },
+        ],
+        marketHeads: {
+            official: { at: Date.now(), sha: 'abc1234', repo: 'x/y' },
+            warp: { at: Date.now() - 2 * day, sha: 'def5678', repo: 'w/z' },
+        },
+    };
+    const html = db.healthTab(ix.summarize(demoIndex()), sys, { checkPluginUpdates: true });
+    assert.match(html, /official — <span class="o-stopped">the copy is behind/);
+    assert.match(html, /abc1234/);
+    assert.match(html, /warp — <span class="ok">the copy is current/);
+
+    // Off, no claim is made about any of them.
+    const off = db.healthTab(ix.summarize(demoIndex()), sys, {});
+    assert.match(off, /Nothing is asked of the network/);
+    assert.ok(!/the copy is behind|the copy is current/.test(off));
 });

@@ -586,7 +586,10 @@ function changelog(root = ROOT, sinceVersion = '', override = '') {
         const item = line.replace(/^\s*[-*]\s*/, '').trim();
         if (item) current.entries.push(item);
     }
-    if (!sinceVersion) return out;
+    // A fetched file is the whole history and is shown as such: cutting it at
+    // the running version is what the client's own cache already does, and it
+    // left one release on screen after a deliberate download of five hundred.
+    if (override || !sinceVersion) return out;
     const newer = [];
     for (const release of out) {
         if (compareVersions(release.version, sinceVersion) <= 0) break;

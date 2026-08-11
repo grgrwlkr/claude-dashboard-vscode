@@ -801,6 +801,7 @@ function configView(state) {
         checkPluginUpdates: cfg.get('checkPluginUpdates'),
         fetchLimits: cfg.get('fetchLimits'),
         autoRefresh: cfg.get('autoRefresh'),
+        fetchChangelog: cfg.get('fetchChangelog'),
         palette,
     };
 }
@@ -820,6 +821,37 @@ const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md';
 const CHANGELOG_TTL = 60 * 60 * 1000;
 let changelogCache = { at: 0, text: '' };
+
+// Whether each marketplace clone is behind its repository. The clone's own
+// `lastUpdated` is on disk; the repository's newest commit is one unauthenticated
+// request per marketplace, and there are two of them here. Cached for an hour,
+// like the changelog, and silent on failure: a plugin panel is not worth a
+// dialog about a network that is down.
+const MARKET_TTL = 60 * 60 * 1000;
+let marketCache = { at: 0, heads: {} };
+
+async function fetchMarketHeads(updates) {
+    if (vscode.workspace.getConfiguration('claudeStatusline').get('checkPluginUpdates') !== true) return {};
+    if (Date.now() - marketCache.at < MARKET_TTL) return marketCache.heads;
+
+    const repos = new Map();
+    for (const u of updates) if (u.repo && !repos.has(u.marketplace)) repos.set(u.marketplace, u.repo);
+    const heads = {};
+    await Promise.all([...repos].map(async ([market, repo]) => {
+        try {
+            const res = await fetch(`https://api.github.com/repos/${repo}/commits?per_page=1`, {
+                headers: { Accept: 'application/vnd.github+json' },
+            });
+            if (!res.ok) return;
+            const body = await res.json();
+            const head = Array.isArray(body) ? body[0] : null;
+            const at = head && Date.parse(head.commit?.committer?.date || '');
+            if (at) heads[market] = { at, sha: String(head.sha || '').slice(0, 7), repo };
+        } catch { /* offline is an absent answer, not an error */ }
+    }));
+    marketCache = { at: Date.now(), heads };
+    return heads;
+}
 
 async function fetchChangelog(storageDir) {
     if (vscode.workspace.getConfiguration('claudeStatusline').get('fetchChangelog') !== true) return '';
@@ -942,11 +974,12 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
     const total = ix.summarize(index);
     checkBudget(context, total);
     const changelogText = await fetchChangelog(storageDir);
+    const marketHeads = await fetchMarketHeads(sys.pluginUpdates());
     const html = dashboard.render(index, total, {
         files: stats.total,
         lastRun: Date.now(),
         history: hist.readHistory(storageDir),
-        system: systemSnapshot(barState, index, { force, changelogText }),
+        system: { ...systemSnapshot(barState, index, { force, changelogText }), marketHeads },
         config: configView(barState),
         // The same sections the tooltips are cut from, so the Now tab and the
         // hover cannot disagree about a number.
