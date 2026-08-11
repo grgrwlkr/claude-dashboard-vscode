@@ -193,3 +193,53 @@ test('readTail gives up cleanly on a transcript that has no usage at all', () =>
     assert.equal(s.readTail(file), null);
     fs.rmSync(dir, { recursive: true, force: true });
 });
+
+const chainOf = (...pairs) => pairs.map(([scope, data]) => ({
+    scope, path: `/fake/${scope}.json`, documented: true, exists: data !== null, data,
+}));
+
+test('the settings chain is the documented order, managed first', () => {
+    const scopes = s.settingsFiles('/work').map((f) => f.scope);
+    assert.deepEqual(scopes, ['managed', 'local', 'project', 'user local', 'user']);
+    // Without a workspace there are no project files to read — and asking for
+    // `/.claude/settings.json` at the filesystem root is how that used to look.
+    assert.deepEqual(s.settingsFiles('').map((f) => f.scope), ['managed', 'user local', 'user']);
+    assert.equal(s.settingsFiles('/work').find((f) => f.scope === 'managed').path, s.MANAGED);
+    // The one file the precedence list in the docs does not mention.
+    assert.equal(s.settingsFiles('/work').find((f) => f.scope === 'user local').documented, false);
+});
+
+test('resolveSetting names the file that won and the ones it shadowed', () => {
+    const chain = chainOf(
+        ['managed', null],
+        ['local', { model: 'opus', alwaysThinkingEnabled: false }],
+        ['user', { model: 'sonnet', outputStyle: 'Explanatory' }],
+    );
+    const model = s.resolveSetting(chain, 'model');
+    assert.equal(model.value, 'opus');
+    assert.equal(model.from, 'local');
+    assert.deepEqual(model.alsoIn.map((a) => a.from), ['user']);
+
+    assert.equal(s.resolveSetting(chain, 'outputStyle').from, 'user');
+    assert.equal(s.resolveSetting(chain, 'nothingHere'), null);
+    // `false` is stated, so it wins; `null` and `undefined` are not.
+    assert.equal(s.resolveSetting(chain, 'alwaysThinkingEnabled').value, false);
+    assert.equal(s.resolveSetting(chainOf(['user', { x: null }]), 'x'), null);
+});
+
+test('both readers answer from the chain they are given', () => {
+    const chain = chainOf(['local', { alwaysThinkingEnabled: false }], ['user', {
+        alwaysThinkingEnabled: true, advisorModel: 'fable', showThinkingSummaries: false,
+    }]);
+    const out = s.settingsOf('/work', chain);
+    assert.equal(out.thinking, false, 'the nearer file said false');
+    assert.equal(out.thinkingSummaries, false);
+    assert.equal(out.advisor, 'fable');
+
+    // Auto-compact off anywhere in the chain means there is no threshold to draw.
+    assert.equal(s.autoCompactPct('/work', 200000, chainOf(['user', { autoCompactEnabled: false }])), -1);
+    // 200k window, no override: (200000 − 20000 − 13000) / 200000.
+    assert.equal(s.autoCompactPct('/work', 200000, chainOf(['user', {}])), 84);
+    // A smaller autoCompactWindow moves the threshold down, not the window.
+    assert.equal(s.autoCompactPct('/work', 200000, chainOf(['user', { autoCompactWindow: 100000 }])), 34);
+});

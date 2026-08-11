@@ -19,6 +19,7 @@ const sys = require(`${REPO}/system`);
 const seg = require(`${REPO}/segments`);
 const status = require(`${REPO}/status`);
 const u = require(`${REPO}/usage`);
+const { clientSettings } = require(`${REPO}/clientSettings`);
 const sess = require(`${REPO}/session`);
 const { fmtCost } = require(`${REPO}/pricing`);
 const wfm = require(`${REPO}/workflows`);
@@ -96,6 +97,14 @@ const html = db.render(index, total, demo ? { ...demo.meta, system: snap } : {
             fmtDuration: sess.fmtDuration, tok: wfm.tokenLabel, shortModel: db.shortModel,
         }, { stale: false, updatedAt: u.mtime(u.CACHE) });
     })(),
+    // The Client tab reads this machine's own settings chain — there is no
+    // invented version of it, so in demo mode it draws its empty state instead
+    // of photographing whatever is in ~/.claude.
+    client: DEMO ? null : clientSettings({
+        chain: sess.settingsChain(REPO),
+        registry: (() => { try { return require(`${REPO}/claude-settings-registry.json`); } catch { return {}; } })(),
+        hostEnv: process.env,
+    }),
     config: {
         segments: seg.DEFAULT_SEGMENTS,
         defaults: seg.DEFAULT_SEGMENTS,

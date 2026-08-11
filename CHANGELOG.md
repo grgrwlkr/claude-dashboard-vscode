@@ -9,6 +9,37 @@ Everything below 0.19.19 was built and installed on one machine — the extensio
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.19.20] — 2026-08-11
+
+### Added
+
+- **A Claude Code tab**, under Setup. It answers three questions and keeps them
+  apart: what you have set, what you could set, and what you have moved away
+  from the default. The settings files are listed in the order the client
+  resolves them — managed first, then the project, then you — with the file that
+  won each key named, the files it shadowed counted, and a button to open any of
+  them. Environment variables are shown twice on purpose: the `env` block every
+  session gets, and what this editor window happens to have inherited, which are
+  not the same thing and disagree often enough to be worth saying.
+- **A settings reference**, parsed from Anthropic's published documentation and
+  packaged with the extension, so defaults and descriptions are there offline.
+  It carries the date it was read. With the network switch on it refreshes
+  itself; with it off the tab says how old the packaged copy is rather than
+  presenting it as current.
+
+### Fixed
+
+- **Values that read like credentials are hidden.** The Health tab printed the
+  `env` block of `~/.claude/settings.json` verbatim, so anyone keeping an
+  `ANTHROPIC_API_KEY` there had it drawn on the page. Anything whose name looks
+  like a key, token, secret or password now renders as `•••`, at any depth
+  inside an object — but not when the value is a plain number, because
+  `MAX_THINKING_TOKENS` is a budget and hiding it helps nobody.
+- **Managed settings are read.** `/Library/Application Support/ClaudeCode/managed-settings.json`
+  overrides everything else on a machine that has one, and the extension did not
+  look at it — so on a managed install every number it derived from settings
+  could be wrong.
+
 ## [0.19.19] — 2026-08-11
 
 ### Changed

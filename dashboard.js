@@ -12,6 +12,7 @@ const { fmtCost } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
 const wfm = require('./workflows');
+const { renderValue } = require('./clientSettings');
 
 const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1192,7 +1193,7 @@ function settingsList(settings) {
     const rows = Object.entries(settings.values || {});
     if (rows.length === 0) return '<p class="empty">No settings found.</p>';
     return `<table class="kv"><tbody>${rows.map(([key, v]) =>
-        `<tr><th scope="row" title="${esc(key)}"><span>${esc(key)}</span></th><td>${esc(String(v.value))}</td>
+        `<tr><th scope="row" title="${esc(key)}"><span>${esc(key)}</span></th><td>${esc(renderValue(key, v.value).text)}</td>
          <td class="dim opt">${esc(v.from)}</td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -1242,7 +1243,7 @@ function healthTab(total, sys, cfg = {}) {
     const settingsBody = settingsList(sys.settings || {})
         + (Object.keys((sys.settings || {}).env || {}).length
             ? `<h3 class="now-sub">Environment</h3><table class="kv"><tbody>${Object.entries(sys.settings.env).map(([k, val]) =>
-        `<tr><th scope="row" title="${esc(k)}"><span>${esc(k)}</span></th><td>${esc(String(val))}</td></tr>`).join('')}</tbody></table>` : '');
+        `<tr><th scope="row" title="${esc(k)}"><span>${esc(k)}</span></th><td>${esc(renderValue(k, val).text)}</td></tr>`).join('')}</tbody></table>` : '');
 
     const mcpBody = `<table><thead><tr><th>Server</th><th class="opt2">Scope</th><th class="num">Calls</th>
             <th class="num">Failed</th><th>State</th></tr></thead><tbody>
@@ -2267,6 +2268,25 @@ code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity
    sentences, not identifiers. */
 .kv th[scope="row"] label { overflow-wrap: break-word; }
 .kv td { font-variant-numeric: tabular-nums; }
+/* An environment variable is an identifier, not prose: the longest one here is
+   40 characters and cannot wrap into half a panel without either widening the
+   table past it or breaking mid-word. So this one is clipped with an ellipsis
+   and says the whole of itself on hover, which is what [data-clipped] already
+   does everywhere else on the page. Fixed layout is what makes the clip
+   possible at all — under auto layout the cell asks for its content's width and
+   the panel gives it. */
+.envkv { width: 100%; table-layout: fixed; }
+.envkv th[scope="row"] { width: 55%; }
+.envkv th[scope="row"] span, .envkv td span {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: none;
+}
+/* The marker is drawn, not placed. An element inside the clipped span keeps
+   reporting its full rectangle however hidden it is — overflow: hidden clips
+   what you see, not what geometry measures — so a marker written as a <i> was
+   both invisible and 161 px outside the panel, which is exactly the shape of
+   defect the probe exists to catch. A pseudo-element is part of the text and is
+   cut by the same ellipsis as the value it follows. */
+.envkv td[data-undoc] span::after { content: ' · undocumented'; opacity: 0.55; }
 /* Right-aligned, but allowed to wrap: the last cell of a .kv table is a figure
    on some tabs and a file path on others, and kept on one line the path was
    what pushed Health past its panel in a narrow window. */
@@ -2525,7 +2545,7 @@ window.addEventListener('scroll', () => {
 // fallback — this only marks the ones actually clipped at the current width, so
 // the hover panel never appears over a name that is already whole.
 function markClipped() {
-  for (const el of document.querySelectorAll('.bars th span, .kv th[scope="row"] span, td.wrap')) {
+  for (const el of document.querySelectorAll('.bars th span, .kv th[scope="row"] span, .envkv td span, td.wrap')) {
     const cut = el.scrollWidth > el.clientWidth + 1;
     const cell = el.closest('th, td');
     if (cut) cell.setAttribute('data-clipped', '');
@@ -2726,6 +2746,120 @@ function dayModelMatrix(index) {
 // The sections group them by the question being asked — where did the money go,
 // what did the work, what was it spent well on — and only one section's tabs are
 // ever on screen.
+/**
+ * What Claude Code has been told, against what it can be told.
+ *
+ * The tab answers three questions and keeps them apart, because only the first
+ * is knowable from this machine: what is set, what could be set, and what
+ * differs from the documented default. The second and third come from a
+ * registry parsed out of the published reference, so the page says when that
+ * reference was last read — a settings list without a date reads as current
+ * forever, and this client ships settings most weeks.
+ */
+function clientTab(client, cfg = {}) {
+    if (!client) {
+        return '<section class="tab" data-tab="client" hidden><p class="empty">No settings files could be read.</p></section>';
+    }
+    const c = client.counts;
+    const fetched = Boolean(cfg.fetchChangelog);
+    const dash = (s) => (s ? esc(s) : '<span class="dim">—</span>');
+
+    const chainBody = `<table><thead><tr><th>Scope</th><th>File</th><th class="num">Keys</th><th class="opt">State</th></tr></thead><tbody>
+        ${client.chain.map((f) => `<tr>
+            <td>${esc(f.scope)}${f.documented ? '' : ' <span class="dim">undocumented</span>'}</td>
+            <td class="path" title="${esc(f.path)}"><span>${esc(f.path)}</span>${f.exists ? `<button class="link mem-open" data-open="${esc(f.path)}">open</button>` : ''}</td>
+            <td class="num">${f.exists ? String(f.keys) : ''}</td>
+            <td class="opt">${f.exists ? '<span class="ok">read</span>' : '<span class="idle">not there</span>'}</td>
+        </tr>`).join('')}
+    </tbody></table>`;
+
+    const setRow = (e) => `<tr>
+        <td title="${esc(e.description || e.key)}"><span>${esc(e.key)}</span></td>
+        <td class="wrap" title="${esc(e.value)}">${esc(e.value)}${e.masked ? ' — hidden' : ''}</td>
+        <td class="opt2">${e.differs ? `<span class="o-failed">${esc(e.default)}</span>` : dash(e.default)}</td>
+        <td class="opt dim" title="${esc(e.path)}">${esc(e.from)}${e.shadowed.length ? ` <span class="idle">over ${e.shadowed.length}</span>` : ''}</td>
+    </tr>`;
+    const setBody = client.set.length
+        ? `<table><thead><tr><th>Setting</th><th>Value</th><th class="opt2">Default</th><th class="opt">From</th></tr></thead>
+           <tbody>${client.set.map(setRow).join('')}</tbody></table>`
+        : '<p class="empty">Nothing is set: this client is running on its defaults.</p>';
+
+    // Two lists that are not the same thing, side by side because the difference
+    // is the point. The block in settings.json is what every session gets; the
+    // window's own environment is what this extension host happens to have, and
+    // a session started from a terminal inherits the shell instead.
+    const envTable = (rows, empty) => (rows.length
+        ? `<table class="kv envkv"><tbody>${rows.map((r) => `<tr>
+            <th scope="row" title="${esc(r.key)}${r.description ? ` — ${esc(r.description)}` : ''}"><span>${esc(r.key)}</span></th>
+            <td title="${esc(r.value)}"${r.known ? '' : ' data-undoc'}><span>${esc(r.value)}</span></td>
+        </tr>`).join('')}</tbody></table>`
+        : `<p class="empty">${empty}</p>`);
+
+    const envBody = `<div class="pair">
+        ${panel('Set for every session', envTable(client.env.fromSettings, 'No env block in any settings file.'), {
+        note: client.env.shadowed.length
+            ? `From the winning file only. ${client.env.shadowed.length} other file${client.env.shadowed.length === 1 ? '' : 's'} also define an <code>env</code> block, and the reference does not say object values merge.`
+            : 'The <code>env</code> block of the settings file that won, applied to every session and to what it spawns.',
+    })}
+        ${panel('This window has', envTable(client.env.fromHost, 'This window inherited no Claude variables.'), {
+        note: 'The environment of the editor, not of a session. VS Code launched from the Dock inherits launchd; a session you start in a terminal inherits your shell profile. They disagree often enough that this is a hint, not an answer.',
+    })}
+    </div>`;
+
+    const unknownBody = client.unknown.length
+        ? `<table><thead><tr><th>Setting</th><th>Value</th><th class="opt">From</th></tr></thead>
+           <tbody>${client.unknown.map((e) => `<tr>
+               <td><span>${esc(e.key)}</span></td>
+               <td class="wrap" title="${esc(e.value)}">${esc(e.value)}${e.masked ? ' — hidden' : ''}</td>
+               <td class="opt dim" title="${esc(e.path)}">${esc(e.from)}</td>
+           </tr>`).join('')}</tbody></table>`
+        : '';
+
+    const unsetBody = client.unset.length
+        ? `<details class="memory"><summary>
+            <span class="mem-name">${client.unset.length} you have not set</span>
+            <span class="dim">running on the documented default</span>
+          </summary>
+          <table><thead><tr><th>Setting</th><th class="opt2">Default</th><th class="opt">What it does</th></tr></thead><tbody>
+            ${client.unset.map((e) => `<tr>
+                <td><span>${esc(e.key)}</span>${e.managedOnly ? ' <span class="idle">managed only</span>' : ''}</td>
+                <td class="opt2">${dash(e.default)}</td>
+                <td class="opt dim wrap" title="${esc(e.description)}">${esc(e.description)}</td>
+            </tr>`).join('')}
+          </tbody></table></details>`
+        : '';
+
+    return `<section class="tab" data-tab="client" hidden>
+        ${tiles(
+        tile('Set', String(c.set + c.unknown), c.documented ? `of ${c.documented} in the reference` : 'no reference loaded'),
+        tile('Differ from the default', String(c.differs), c.differs ? 'the answer to "what did I change"' : 'every one matches'),
+        tile('Available', String(c.unset), 'documented, and not set here'),
+        c.unknown ? tile('Not in the reference', String(c.unknown), 'newer than the list below, or a typo') : null,
+    )}
+        ${panel('Where settings are read from', chainBody, {
+        flush: true,
+        note: 'Highest precedence first, which is the order the client resolves them in: a managed file overrides everything, then the project, then you. <code>~/.claude/settings.local.json</code> is read because it exists and holds ordinary keys, but the published precedence list does not mention it — so it is marked rather than presented as the client\'s own order.',
+    })}
+        ${panel('Set on this machine', setBody, {
+        flush: true,
+        note: 'A red default is one you have moved away from. <span class="idle">over N</span> means the same key is stated in N files further down the chain and lost.',
+    })}
+        ${envBody}
+        ${unknownBody ? panel('Set, but not in the reference', unknownBody, {
+        flush: true,
+        note: `These are read by the client all the same. A key lands here when it shipped after the reference below was last read${client.checkedAt ? ` on ${esc(client.checkedAt)}` : ''}, or when it is misspelled — the page cannot tell those apart, and guessing which is which is how a real setting gets called a typo.`,
+    }) : ''}
+        ${unsetBody ? panel('Everything else you could set', unsetBody, { flush: true }) : ''}
+        ${panel('Where this reference comes from', toggle('fetchChangelog',
+        'Fetch the reference and the changelog from Anthropic', fetched,
+        'Two public documentation files and the changelog, no credentials, at most once an hour. Off, the list below is the one packaged with this extension.'), {
+        note: client.checkedAt
+            ? `Parsed from <code>code.claude.com/docs/en/settings.md</code> and <code>env-vars.md</code>, read on ${esc(client.checkedAt)}: ${c.documented} settings and ${c.variables} variables. ${fetched ? 'Refreshed in the background and kept in the extension\'s own storage, so this still reads offline.' : 'This is the packaged copy — settings ship most weeks, so it drifts.'}`
+            : 'No reference is loaded, so this tab can only say what is set — not what else exists, nor what any of it defaults to.',
+    })}
+    </section>`;
+}
+
 const SECTIONS = [
     ['now', 'Now', [
         ['now', 'Now'],
@@ -2757,6 +2891,7 @@ const SECTIONS = [
         ['tasks', 'Task lists'],
         ['disk', 'Disk'],
         ['context', 'Memory & context'],
+        ['client', 'Claude Code'],
         ['changelog', 'Changelog'],
     ]],
 ];
@@ -2819,6 +2954,7 @@ ${liveTab(meta.system)}
 ${tasksTab(meta.system)}
 ${diskTab(meta.system)}
 ${contextTab(total, meta.system)}
+${clientTab(meta.client, meta.config || {})}
 ${changelogTab(meta.system || {}, meta.config || {})}
 <footer>All spend figures are estimates from public per-million-token rates, not a bill.</footer>
 <script>${SCRIPT}</script></body></html>`;
@@ -2828,7 +2964,7 @@ module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, SECTIONS, CACHE_PARTS,
-    agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, filesTab, settingsTab,
+    agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab,
     limitsTab, weekLabel, nowTab, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     shortModel, tok, bytes, plural, fmtDur, esc,

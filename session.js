@@ -324,31 +324,75 @@ function todoOf(sessionId) {
     return total > 0 ? { done, total, active } : null;
 }
 
+// The settings files, highest precedence first — one definition, because three
+// readers walk this list and a fourth is a page that reports which file won.
+// Order is the documented one: managed settings override everything, then the
+// project's local file, the project's shared file, and the user's.
+//
+// `~/.claude/settings.local.json` is the one entry the precedence list does not
+// mention. It is read anyway — it exists on machines that never created it by
+// hand, holds ordinary settings keys, and statusline.sh reads it too — but it
+// is flagged `documented: false` so a page can say so rather than presenting a
+// guess as the client's own order.
+const MANAGED = process.platform === 'darwin'
+    ? '/Library/Application Support/ClaudeCode/managed-settings.json'
+    : '/etc/claude-code/managed-settings.json';
+
+function settingsFiles(workspace) {
+    const ws = workspace || '';
+    return [
+        { scope: 'managed', path: MANAGED, documented: true },
+        ...(ws ? [
+            { scope: 'local', path: path.join(ws, '.claude', 'settings.local.json'), documented: true },
+            { scope: 'project', path: path.join(ws, '.claude', 'settings.json'), documented: true },
+        ] : []),
+        { scope: 'user local', path: path.join(HOME, '.claude', 'settings.local.json'), documented: false },
+        { scope: 'user', path: path.join(HOME, '.claude', 'settings.json'), documented: true },
+    ];
+}
+
+/**
+ * The chain with each file's contents attached: `{ scope, path, documented,
+ * exists, data }`, highest precedence first. A file that is missing or
+ * unparseable comes back with `data: null` and is skipped by every reader —
+ * the page shows it as a file that is not there rather than dropping the row.
+ */
+function settingsChain(workspace) {
+    return settingsFiles(workspace).map((f) => {
+        const data = readJson(f.path);
+        return { ...f, exists: data !== null, data };
+    });
+}
+
+/**
+ * The first file that states `key`, and every other file that also states it.
+ * `undefined` and `null` do not count as stating it — which is the whole reason
+ * this is not a `||` chain: `false` is an answer and `autoCompactEnabled: false`
+ * must beat a `true` further down.
+ */
+function resolveSetting(chain, key) {
+    let winner = null;
+    const alsoIn = [];
+    for (const file of chain) {
+        if (!file.data) continue;
+        const value = file.data[key];
+        if (value === undefined || value === null) continue;
+        if (!winner) winner = { value, from: file.scope, path: file.path };
+        else alsoIn.push({ value, from: file.scope, path: file.path });
+    }
+    return winner ? { ...winner, alsoIn } : null;
+}
+
 // Auto-compact threshold as a share of the window: the effective window minus
 // the reply reserve (capped at 20k) minus 13k — the same arithmetic as
-// statusline.sh. Reads the settings chain the client reads; the first file with
-// the key wins. `||` is wrong for autoCompactEnabled — false is meaningful there.
-function autoCompactPct(workspace, windowTokens) {
+// statusline.sh.
+function autoCompactPct(workspace, windowTokens, chain) {
     if (!(windowTokens > 0)) return -1;
-    const files = [
-        path.join(workspace, '.claude', 'settings.local.json'),
-        path.join(workspace, '.claude', 'settings.json'),
-        path.join(HOME, '.claude', 'settings.local.json'),
-        path.join(HOME, '.claude', 'settings.json'),
-    ];
-    let enabled = true;
-    let limit = 0;
-    let seenEnabled = false;
-    let seenLimit = false;
-    for (const file of files) {
-        const cfg = readJson(file);
-        if (!cfg) continue;
-        if (!seenEnabled && cfg.autoCompactEnabled !== undefined && cfg.autoCompactEnabled !== null) {
-            enabled = cfg.autoCompactEnabled !== false;
-            seenEnabled = true;
-        }
-        if (!seenLimit && cfg.autoCompactWindow) { limit = cfg.autoCompactWindow; seenLimit = true; }
-    }
+    const files = chain || settingsChain(workspace);
+    const enabledAt = resolveSetting(files, 'autoCompactEnabled');
+    const limitAt = resolveSetting(files, 'autoCompactWindow');
+    const enabled = enabledAt ? enabledAt.value !== false : true;
+    const limit = limitAt && limitAt.value > 0 ? limitAt.value : 0;
     if (!enabled) return -1;
     const effective = limit > 0 && limit < windowTokens ? limit : windowTokens;
     const threshold = effective - 20000 - 13000;
@@ -380,36 +424,20 @@ function compareVersions(a, b) {
     return 0;
 }
 
-// Settings the transcript does not carry — output style and advisor model — read
-// from the same chain the client reads; the first file with the key wins.
-function settingsOf(workspace) {
-    const files = [
-        path.join(workspace || '', '.claude', 'settings.local.json'),
-        path.join(workspace || '', '.claude', 'settings.json'),
-        path.join(HOME, '.claude', 'settings.local.json'),
-        path.join(HOME, '.claude', 'settings.json'),
-    ];
-    const out = { outputStyle: '', advisor: '', model: '', thinking: true, thinkingSummaries: true };
-    // `||` cannot resolve the two booleans: false is a real answer there, and
-    // the first file that states one wins, exactly as the client resolves them.
-    let seenThinking = false;
-    let seenSummaries = false;
-    for (const file of files) {
-        const cfg = readJson(file);
-        if (!cfg) continue;
-        if (!out.outputStyle && cfg.outputStyle) out.outputStyle = cfg.outputStyle;
-        if (!out.advisor && cfg.advisorModel) out.advisor = cfg.advisorModel;
-        if (!out.model && cfg.model) out.model = cfg.model;
-        if (!seenThinking && cfg.alwaysThinkingEnabled !== undefined && cfg.alwaysThinkingEnabled !== null) {
-            out.thinking = cfg.alwaysThinkingEnabled !== false;
-            seenThinking = true;
-        }
-        if (!seenSummaries && cfg.showThinkingSummaries !== undefined && cfg.showThinkingSummaries !== null) {
-            out.thinkingSummaries = cfg.showThinkingSummaries !== false;
-            seenSummaries = true;
-        }
-    }
-    return out;
+// Settings the transcript does not carry — output style and advisor model —
+// read from the same chain the client reads.
+function settingsOf(workspace, chain) {
+    const files = chain || settingsChain(workspace);
+    const at = (key) => resolveSetting(files, key);
+    const thinking = at('alwaysThinkingEnabled');
+    const summaries = at('showThinkingSummaries');
+    return {
+        outputStyle: at('outputStyle')?.value || '',
+        advisor: at('advisorModel')?.value || '',
+        model: at('model')?.value || '',
+        thinking: thinking ? thinking.value !== false : true,
+        thinkingSummaries: summaries ? summaries.value !== false : true,
+    };
 }
 
 function fmtDuration(ms) {
@@ -426,4 +454,5 @@ module.exports = {
     slugFor, listSessions, findOwnSession, transcriptPath, readTail, contextOf,
     windowFor, sessionStats, costOfSession, costToday, costSince, peersOf, todoOf,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
+    settingsFiles, settingsChain, resolveSetting, MANAGED,
 };

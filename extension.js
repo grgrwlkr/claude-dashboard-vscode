@@ -8,6 +8,8 @@ const seg = require('./segments');
 const dashboard = require('./dashboard');
 const wfm = require('./workflows');
 const status = require('./status');
+const docs = require('./settingsDocs');
+const { clientSettings } = require('./clientSettings');
 const { fmtCost, ratesFor } = require('./pricing');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -822,6 +824,56 @@ const CHANGELOG_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/
 const CHANGELOG_TTL = 60 * 60 * 1000;
 let changelogCache = { at: 0, text: '' };
 
+// The settings reference. Two more public documentation files behind the same
+// switch as the changelog: one toggle for "read Anthropic's published docs",
+// rather than a third checkbox saying the same thing about a different URL.
+const DOCS_URL = {
+    settings: 'https://code.claude.com/docs/en/settings.md',
+    env: 'https://code.claude.com/docs/en/env-vars.md',
+};
+let registryCache = null;
+let clientCache = null;
+
+/**
+ * The registry, best available: a fetched copy if the switch is on and the
+ * network answered, the copy this extension was packaged with otherwise. The
+ * packaged one is never discarded — an offline machine still gets defaults and
+ * descriptions, just dated ones.
+ */
+async function loadRegistry(storageDir) {
+    const packaged = () => {
+        try { return require('./claude-settings-registry.json'); } catch { return {}; }
+    };
+    if (vscode.workspace.getConfiguration('claudeStatusline').get('fetchChangelog') !== true) return packaged();
+
+    const file = path.join(storageDir, 'settings-registry.json');
+    if (!registryCache) {
+        try { registryCache = { at: fs.statSync(file).mtimeMs, data: JSON.parse(fs.readFileSync(file, 'utf8')) }; } catch { /* none yet */ }
+    }
+    if (registryCache && Date.now() - registryCache.at < CHANGELOG_TTL) return registryCache.data;
+
+    try {
+        const [settingsMd, envMd] = await Promise.all(
+            [DOCS_URL.settings, DOCS_URL.env].map(async (url) => {
+                const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+                return res.ok ? res.text() : '';
+            }),
+        );
+        // buildRegistry throws when a table comes back short, which is what a
+        // captive portal, a redesign or a moved heading all look like. The
+        // packaged copy is right there, so a throw costs nothing.
+        const data = docs.buildRegistry({
+            settingsMd, envMd, source: DOCS_URL,
+            checkedAt: new Date().toISOString().slice(0, 10),
+        });
+        registryCache = { at: Date.now(), data };
+        try { fs.mkdirSync(storageDir, { recursive: true }); fs.writeFileSync(file, JSON.stringify(data)); } catch { /* cache is a bonus */ }
+        return data;
+    } catch {
+        return (registryCache && registryCache.data) || packaged();
+    }
+}
+
 // Whether each marketplace clone is behind its repository. The clone's own
 // `lastUpdated` is on disk; the repository's newest commit is one unauthenticated
 // request per marketplace, and there are two of them here. Cached for an hour,
@@ -901,8 +953,11 @@ async function handleMessage(context, msg) {
     // anything else is refused rather than opened.
     if (msg.type === 'open') {
         const wanted = String(msg.path || '');
-        const known = (systemCache && systemCache.context && systemCache.context.files) || [];
-        if (!known.some((f) => f.abs === wanted)) return;
+        const known = [
+            ...((systemCache && systemCache.context && systemCache.context.files) || []).map((f) => f.abs),
+            ...((clientCache && clientCache.chain) || []).map((f) => f.path),
+        ];
+        if (!known.includes(wanted)) return;
         vscode.workspace.openTextDocument(vscode.Uri.file(wanted))
             .then((doc) => vscode.window.showTextDocument(doc),
                 (err) => vscode.window.showErrorMessage(`Cannot open ${wanted}: ${err.message}`));
@@ -974,6 +1029,11 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
     const total = ix.summarize(index);
     checkBudget(context, total);
     const changelogText = await fetchChangelog(storageDir);
+    clientCache = clientSettings({
+        chain: s.settingsChain((barState && barState.workspace) || ''),
+        registry: await loadRegistry(storageDir),
+        hostEnv: process.env,
+    });
     const marketHeads = await fetchMarketHeads(sys.pluginUpdates());
     const html = dashboard.render(index, total, {
         files: stats.total,
@@ -981,6 +1041,7 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
         history: hist.readHistory(storageDir),
         system: { ...systemSnapshot(barState, index, { force, changelogText }), marketHeads },
         config: configView(barState),
+        client: clientCache,
         // The same sections the tooltips are cut from, so the Now tab and the
         // hover cannot disagree about a number.
         now: statusNow(barState),
