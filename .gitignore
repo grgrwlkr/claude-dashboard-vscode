@@ -1,3 +1,12 @@
 node_modules/
 *.vsix
 .superpowers/
+
+# Finder leaves one of these in any directory it has looked at, including
+# media/ — and a repository that ships screenshots gets looked at.
+.DS_Store
+
+# Unzipping a .vsix in the working tree leaves this: inside the archive every
+# file lives under `extension/`. .vscodeignore keeps it out of the package; this
+# keeps it out of the history.
+extension/
