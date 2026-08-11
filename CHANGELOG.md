@@ -9,6 +9,17 @@ Everything below 0.19.19 was built and installed on one machine — the extensio
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.19.22] — 2026-08-11
+
+### Added
+
+- **Pause the refresh from the page header**, beside Reindex and the countdown.
+  It is the same `claudeStatusline.autoRefresh` as the switch on the Settings
+  tab — one setting with two controls, and moving either moves the other. While
+  it is paused the page is not rebuilt at all, so an expanded list stays
+  expanded and the scroll position stays put; the countdown says `paused`
+  instead of counting.
+
 ## [0.19.21] — 2026-08-11
 
 ### Changed

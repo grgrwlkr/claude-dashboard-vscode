@@ -2499,12 +2499,40 @@ if (wanted.scrollY) {
 // number, because the page is redrawn on that very tick — a number printed into
 // the markup would be a whole interval out of date the moment it arrived.
 const nextEl = document.getElementById('next');
-if (nextEl && nextEl.dataset.next) {
-  const due = Number(nextEl.dataset.next);
+const pauseEl = document.getElementById('pause');
+if (nextEl && pauseEl) {
+  const every = (Number(nextEl.dataset.every) || 60) * 1000;
+  let due = Number(nextEl.dataset.next);
   const paint = () => {
+    const on = pauseEl.dataset.on === '1';
+    pauseEl.textContent = on ? 'Pause' : 'Resume';
+    pauseEl.title = on
+      ? 'Stop rebuilding the page on the timer. The same claudeStatusline.autoRefresh you can set on the Settings tab.'
+      : 'Rebuild the page on the timer again.';
+    if (!on) { nextEl.textContent = 'paused'; return; }
     const left = Math.round((due - Date.now()) / 1000);
     nextEl.textContent = left > 0 ? 'next in ' + left + 's' : 'refreshing…';
   };
+  // One setting, two controls: the switch on the Settings tab and this button
+  // are the same autoRefresh, so flipping either has to move the other. The
+  // page is not rebuilt on the way into a pause — that rebuild would throw away
+  // the expanded lists the pause exists to keep — so the header updates itself
+  // rather than waiting to be redrawn.
+  const setAuto = (on) => {
+    pauseEl.dataset.on = on ? '1' : '0';
+    if (on) due = Date.now() + every;
+    for (const box of document.querySelectorAll('input[data-set="autoRefresh"]')) box.checked = on;
+    paint();
+  };
+  pauseEl.addEventListener('click', () => {
+    const on = pauseEl.dataset.on !== '1';
+    setAuto(on);
+    if (api) api.postMessage({ type: 'set', key: 'autoRefresh', value: on });
+  });
+  document.addEventListener('change', (e) => {
+    const box = e.target.closest('input[data-set="autoRefresh"]');
+    if (box) setAuto(box.checked);
+  });
   paint();
   setInterval(paint, 1000);
 }
@@ -2929,9 +2957,9 @@ function render(index, total, meta) {
 <title>Claude Dashboard</title><style>${STYLE}</style></head><body>
 <div class="mark">${MARK}<h1>Claude Dashboard <span class="ver">v${esc(VERSION)}</span></h1></div>
 <p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
- · <button id="refresh" class="link">Reindex</button>${(meta.config || {}).autoRefresh === false
-        ? ' <span class="dim" id="next">auto-refresh off</span>'
-        : ` <span class="dim" id="next" data-next="${Number(meta.lastRun || 0) + (Number((meta.config || {}).refreshInterval) || 60) * 1000}">·</span>`}</p>
+ · <button id="refresh" class="link">Reindex</button>
+ <span class="dim" id="next" data-next="${Number(meta.lastRun || 0) + (Number((meta.config || {}).refreshInterval) || 60) * 1000}" data-every="${Number((meta.config || {}).refreshInterval) || 60}">·</span>
+ <button id="pause" class="link" data-on="${(meta.config || {}).autoRefresh === false ? '0' : '1'}">·</button></p>
 ${navHtml()}
 ${nowTab(meta.now, meta.workflows, meta.metrics)}
 ${overviewTab(total, dayModels, modelOrder, meta.config || {})}

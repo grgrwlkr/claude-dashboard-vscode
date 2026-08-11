@@ -928,3 +928,30 @@ test('a panel note can hold a list without falling out of the panel', () => {
     const page = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
     assert.ok(!/<p class="panel-note">/.test(page));
 });
+
+// The header button and the switch on the Settings tab are one setting with two
+// controls. Two names for it would be two states, and the pair would agree only
+// until someone used the one further from the code they were reading.
+test('pausing the timer from the header is the same setting as the switch', () => {
+    const page = (autoRefresh) => db.render(demoIndex(), ix.summarize(demoIndex()), {
+        files: 1, lastRun: Date.parse('2026-08-11T04:00:00Z'), history: [],
+        config: { autoRefresh, refreshInterval: 60, segments: [], defaults: [], presets: [], palette: [] },
+    });
+
+    const on = page(true);
+    assert.match(on, /<button id="pause" class="link" data-on="1"/);
+    // The deadline and the interval both reach the script: after a pause the
+    // countdown has to be restarted from now, and the markup's own deadline is
+    // by then however long the pause lasted out of date.
+    assert.match(on, /id="next" data-next="\d+" data-every="60"/);
+
+    // Off is the same button in the other position, not a different control and
+    // not a sentence where a control used to be.
+    assert.match(page(false), /<button id="pause" class="link" data-on="0"/);
+
+    // Both controls write claudeStatusline.autoRefresh, and the script keeps
+    // them in step in both directions.
+    assert.match(on, /key: 'autoRefresh'/);
+    assert.match(on, /input\[data-set="autoRefresh"\]/);
+    assert.match(on, /<input[^>]*data-set="autoRefresh"/);
+});

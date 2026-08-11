@@ -1001,7 +1001,14 @@ async function handleMessage(context, msg) {
         if (!WRITABLE.includes(key)) return;
         const cfg = vscode.workspace.getConfiguration('claudeStatusline');
         cfg.update(key, msg.value, vscode.ConfigurationTarget.Global).then(
-            () => showDashboard(context, { silent: true }),
+            () => {
+                // Pausing the timer is the one setting whose own confirmation
+                // would undo it: a rebuild here discards every expanded list on
+                // the page, which is the thing the pause was pressed to keep.
+                // The header redraws itself for this case.
+                if (key === 'autoRefresh' && msg.value === false) return;
+                showDashboard(context, { silent: true });
+            },
             (err) => vscode.window.showErrorMessage(`Claude statusline: could not save ${key} — ${err.message}`),
         );
         return;
