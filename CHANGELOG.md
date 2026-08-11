@@ -9,6 +9,13 @@ Everything below 0.19.19 was built and installed on one machine — the extensio
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.19.23] — 2026-08-11
+
+### Changed
+
+- The listing says where the pause lives: the page header and the Settings tab
+  move the same switch.
+
 ## [0.19.22] — 2026-08-11
 
 ### Added
