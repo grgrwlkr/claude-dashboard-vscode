@@ -408,9 +408,11 @@ function noteTools(agg, content, toolNames, row) {
 function noteEdit(agg, r) {
     const res = r.toolUseResult;
     if (!res || typeof res !== 'object') return;
-    const path = res.filePath || (res.file && res.file.filePath);
-    if (!path) return;
-    const f = agg.files[path] || (agg.files[path] = { edits: 0, added: 0, removed: 0 });
+    // Not `path`: that is the module this file imports, and shadowing it here
+    // leaves a trap for whoever next needs path.join inside this function.
+    const file = res.filePath || (res.file && res.file.filePath);
+    if (!file) return;
+    const f = agg.files[file] || (agg.files[file] = { edits: 0, added: 0, removed: 0 });
     f.edits++;
     for (const hunk of (Array.isArray(res.structuredPatch) ? res.structuredPatch : [])) {
         for (const line of hunk.lines || []) {

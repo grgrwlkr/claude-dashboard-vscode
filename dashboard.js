@@ -164,7 +164,10 @@ function stackedDays(days, modelOrder, dayModels, { width = 860, height = 190 } 
     const barW = Math.max(2, Math.min(26, Math.floor(plot / keys.length) - 2));
     const step = barW + 2;
     const w = AXIS_W + Math.max(plot, keys.length * step);
-    const axis = yAxis(max, (v) => fmtCost(v), { top: 8, base: height - 18, right: 0 });
+    // One axis, built once at the width it is drawn at: the earlier pair built
+    // it twice, and the first one's grid lines — right: 0, so zero length — were
+    // thrown away for the sake of reading `ceiling` off it.
+    const axis = yAxis(max, (v) => fmtCost(v), { top: 8, base: height - 18, right: w });
     const scale = (v) => (axis.ceiling > 0 ? (v / axis.ceiling) * (height - 26) : 0);
 
     let bars = '';
@@ -188,7 +191,7 @@ function stackedDays(days, modelOrder, dayModels, { width = 860, height = 190 } 
     });
 
     return `<svg class="chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="xMinYMin meet" role="img">`
-        + yAxis(max, (v) => fmtCost(v), { top: 8, base: height - 18, right: w }).svg
+        + axis.svg
         + `${bars}</svg>`;
 }
 
@@ -369,7 +372,7 @@ function stackedTokens(days, parts, { width = 860, height = 170 } = {}) {
     const barW = Math.max(2, Math.min(26, Math.floor(plot / keys.length) - 2));
     const step = barW + 2;
     const w = AXIS_W + Math.max(plot, keys.length * step);
-    const axis = yAxis(max, (v) => tok(Math.round(v)), { top: 8, base: height - 18, right: 0 });
+    const axis = yAxis(max, (v) => tok(Math.round(v)), { top: 8, base: height - 18, right: w });
     const scale = (v) => (axis.ceiling > 0 ? (v / axis.ceiling) * (height - 26) : 0);
 
     let bars = '';
@@ -390,7 +393,7 @@ function stackedTokens(days, parts, { width = 860, height = 170 } = {}) {
     });
 
     return `<svg class="chart" viewBox="0 0 ${w} ${height}" preserveAspectRatio="xMinYMin meet" role="img">`
-        + yAxis(max, (v) => tok(Math.round(v)), { top: 8, base: height - 18, right: w }).svg
+        + axis.svg
         + `${bars}</svg>`;
 }
 
@@ -1817,7 +1820,10 @@ function nowTab(sections, workflows, metrics) {
     // the disk, and a graveyard is not a status.
     const RECENT_MS = 60 * 60 * 1000;
     const now = Date.now();
-    const active = (workflows || []).filter((r) => r.state === 'running' || r.active
+    // No `r.active` here: these are scanRuns records, which have no such field —
+    // it belongs to the { runs, active } shape the bar reads, and testing for it
+    // read as a safety net that was never connected to anything.
+    const active = (workflows || []).filter((r) => r.state === 'running'
         || (r.lastActivity > 0 && now - r.lastActivity < RECENT_MS));
 
     if (rows.length === 0) {

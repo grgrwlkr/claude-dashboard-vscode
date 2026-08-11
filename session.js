@@ -248,12 +248,6 @@ function sessionStats(file) {
     };
 }
 
-// Compatibility with the earlier call site: cost only.
-function costOfSession(file) {
-    const stats = sessionStats(file);
-    return stats ? stats.cost : 0;
-}
-
 // Today's spend across every project. Files are picked by mtime and records
 // inside them by date: a session started yesterday and continued today lives in
 // a file named yesterday but carries a fresh mtime.
@@ -385,7 +379,14 @@ function resolveSetting(chain, key) {
 
 // Auto-compact threshold as a share of the window: the effective window minus
 // the reply reserve (capped at 20k) minus 13k — the same arithmetic as
-// statusline.sh.
+// statusline.sh, down to the constant.
+//
+// The client's reserve is min(max_output_tokens, 20k), so the cap is real; it is
+// written here as a flat 20000 because every model anyone works in has a larger
+// max_output_tokens, which means the cap always binds. Both implementations
+// folded it the same way on purpose — a different number here and the two stop
+// agreeing. That reasoning lived only in the shell script, which is not in this
+// repository.
 function autoCompactPct(workspace, windowTokens, chain) {
     if (!(windowTokens > 0)) return -1;
     const files = chain || settingsChain(workspace);
@@ -452,7 +453,7 @@ function fmtDuration(ms) {
 module.exports = {
     SESSIONS, PROJECTS, TAIL,
     slugFor, listSessions, findOwnSession, transcriptPath, readTail, contextOf,
-    windowFor, sessionStats, costOfSession, costToday, costSince, peersOf, todoOf,
+    windowFor, sessionStats, costToday, costSince, peersOf, todoOf,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
     settingsFiles, settingsChain, resolveSetting, MANAGED,
 };

@@ -132,7 +132,7 @@ test("costSince drops yesterday's records from the same file", () => {
 
     const one = costOf('claude-opus-5', rec().message.usage);
     assert.ok(Math.abs(s.costSince(file, NOW - 3600 * 1000) - one) < 1e-9);
-    assert.ok(Math.abs(s.costOfSession(file) - one * 2) < 1e-9);
+    assert.ok(Math.abs(s.sessionStats(file).cost - one * 2) < 1e-9);
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
