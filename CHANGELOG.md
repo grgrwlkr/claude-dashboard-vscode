@@ -9,6 +9,14 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.22.0] — 2026-08-11
+
+**The first version actually published.** Even minor, so it lands in the stable
+channel where the Install button works without picking anything from a dropdown.
+It carries everything 0.20.0 was, plus the fixes that came after it: a run is
+aged by its files rather than by its directory, and three tests stopped measuring
+the machine they run on.
+
 ## [0.21.0] — 2026-08-11
 
 ### Fixed
