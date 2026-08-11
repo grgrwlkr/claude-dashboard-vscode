@@ -87,10 +87,17 @@ test('fetchLimits false leaves the token unread and the network untouched', asyn
 });
 
 test('left at its default the refresh command does ask for limits', async () => {
-    const real = { refreshUsage: u.refreshUsage, touchStamp: u.touchStamp };
+    const real = { refreshUsage: u.refreshUsage, touchStamp: u.touchStamp, stampExpired: u.stampExpired };
     let requests = 0;
     u.refreshUsage = async () => { requests++; return false; };
     u.touchStamp = () => true;
+    // The slow tick fires inside activate() and asks for limits too, but only
+    // when the shared stamp has expired — which depends on whether anything
+    // else on the machine refreshed recently. Pinning it keeps this test about
+    // the command rather than about the state of ~/.claude: without it the
+    // count is 1 on a machine running Claude Code and 2 on a clean one, and CI
+    // is always the clean one.
+    u.stampExpired = () => false;
     const run = activate({ segments: ['✻ {weekly}'] });
     try {
         await vscode.__commands.get('claudeStatusline.refresh')();
