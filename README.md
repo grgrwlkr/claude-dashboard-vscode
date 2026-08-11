@@ -12,11 +12,14 @@
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard"><img src="https://badgen.net/vs-marketplace/v/grgrwlkr.claude-dashboard?label=VS%20Marketplace&color=blue" alt="VS Marketplace version" /></a>
-  <!-- Installs and rating are deliberately absent: the badge services answer 500
-       for an extension with no statistics yet, and a broken image reads worse
-       than a missing one. Add them back once the first installs land:
-       badgen.net/vs-marketplace/i/... and /rating/... The same goes for the Open
-       VSX badge, which says "extension not found" until we publish there. -->
+  <!-- installs and rating wait for real data: with no statistics yet the badge
+       services do not go blank, they print the upstream error code as the value
+       — "installs 500" reads as five hundred installs. Paste back once the first
+       ones land:
+  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard"><img src="https://badgen.net/vs-marketplace/i/grgrwlkr.claude-dashboard?label=installs" alt="Installs" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard&ssr=false#review-details"><img src="https://badgen.net/vs-marketplace/rating/grgrwlkr.claude-dashboard?label=rating" alt="Rating" /></a>
+  -->
+  <a href="https://open-vsx.org/extension/grgrwlkr/claude-dashboard"><img src="https://img.shields.io/open-vsx/v/grgrwlkr/claude-dashboard?label=Open%20VSX&color=a60ee5" alt="Open VSX version" /></a>
   <a href="https://github.com/grgrwlkr/claude-dashboard-vscode"><img src="https://img.shields.io/github/stars/grgrwlkr/claude-dashboard-vscode?style=flat&logo=github&color=444" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/grgrwlkr/claude-dashboard-vscode?color=blue" alt="MIT licence" /></a>
 </p>
