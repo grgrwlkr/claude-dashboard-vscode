@@ -1174,12 +1174,19 @@ function activate(context) {
     // Re-armed on a settings change, because the interval is read once when the
     // timer is created: without this, a new refreshInterval — editable right on
     // the Settings tab — did nothing until the window was reloaded.
+    // One predicate, three callers: the timer, the focus event and the settings
+    // listener. The setting names a promise about the expensive work, not about
+    // one of the paths to it, and it was three paths that made the first attempt
+    // at this incomplete.
+    const timerOn = () => vscode.workspace.getConfiguration('claudeStatusline').get('autoRefresh') !== false;
     let slow = null;
     const armSlow = () => {
         if (slow) clearInterval(slow);
         const every = Math.max(15, vscode.workspace.getConfiguration('claudeStatusline').get('refreshInterval') || 60);
         slow = setInterval(() => {
-            if (vscode.workspace.getConfiguration('claudeStatusline').get('autoRefresh') === false) return;
+            // Read per tick, not captured: flipping the switch then has to move
+            // nothing but itself, which is why only the interval re-arms below.
+            if (!timerOn()) return;
             slowTick(state);
             // The open dashboard follows the same interval: the numbers on it come
             // from the reading that just happened.
@@ -1194,12 +1201,27 @@ function activate(context) {
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (!e.affectsConfiguration('claudeStatusline')) return;
             applyConfig(state);
-            armSlow();
-            slowTick(state);
+            // Only the interval needs a new timer, and the checkboxes on the
+            // Settings tab write immediately — re-arming on any key would reset
+            // the countdown every time one of them was ticked.
+            if (e.affectsConfiguration('claudeStatusline.refreshInterval')) armSlow();
+            // Turning the timer off used to cost one full pass, because this is
+            // the event that turning it off produces. With it off the bar is
+            // still redrawn from the cheap read — the setting takes away the
+            // expensive work, not the picture.
+            if (timerOn()) slowTick(state);
+            else { collectFast(state); render(state); }
         }),
         // Focus returning to the window is the only sensible "the user is looking
-        // again" signal; there is no event channel from the CLI itself.
-        vscode.window.onDidChangeWindowState((w) => { if (w.focused) slowTick(state); }),
+        // again" signal; there is no event channel from the CLI itself. It obeys
+        // the same switch: with the timer off, the expensive pass — and with it
+        // the limits request — waits to be asked for, and coming back to the
+        // window is not asking.
+        vscode.window.onDidChangeWindowState((w) => {
+            if (!w.focused) return;
+            if (timerOn()) slowTick(state);
+            else { collectFast(state); render(state); }
+        }),
         vscode.window.createTreeView('claudeStatusline.workflows', { treeDataProvider: state.tree }),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),

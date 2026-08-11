@@ -9,6 +9,20 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.22.5] — 2026-08-12
+
+### Fixed
+
+- **"Refresh on a timer", switched off, now covers every way in.** 0.22.3 gated
+  the timer; two other paths still ran the full pass with the switch off —
+  returning focus to the window, and changing any setting, which meant that
+  turning the timer off cost one complete pass at the moment you turned it off.
+  With it off, all three now redraw the bar from the cheap read and leave the
+  transcript pass, the spend across every project and the limits request for
+  when you ask.
+- Ticking a checkbox on the Settings tab no longer restarts the refresh
+  countdown: only a new interval rebuilds the timer.
+
 ## [0.22.4] — 2026-08-12
 
 Housekeeping, no change to what anything reports: four pieces of code that were

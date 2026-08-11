@@ -125,8 +125,16 @@ vscode.__setSaveTarget = (uri) => { saveTarget = uri; };
 vscode.__setWorkspace = (folder) => {
     vscode.workspace.workspaceFolders = folder ? [{ uri: { fsPath: folder } }] : undefined;
 };
-vscode.__changeConfiguration = () => {
-    for (const cb of listeners.config) cb({ affectsConfiguration: () => true });
+vscode.__changeConfiguration = (key) => {
+    // A real event answers per key. Without an argument every key matches, which
+    // is what the older callers expect; with one, only that key does — the
+    // difference a listener that re-arms a timer on one setting depends on.
+    for (const cb of listeners.config) {
+        cb({ affectsConfiguration: (asked) => (key ? String(key).startsWith(asked) : true) });
+    }
+};
+vscode.__focusWindow = (focused = true) => {
+    for (const cb of listeners.window) cb({ focused });
 };
 vscode.__reset = () => {
     items.length = 0;

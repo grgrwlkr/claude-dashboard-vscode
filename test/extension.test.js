@@ -1018,6 +1018,40 @@ test('a csv cell survives commas, quotes and newlines', () => {
     assert.match(csv, /x y/);
 });
 
+// `autoRefresh` names the expensive work, not one path to it. Three events can
+// reach that work — the timer, a settings change and focus returning to the
+// window — and the first attempt at this gated only the timer, leaving the other
+// two to do the full pass, limits request included, with the switch off.
+// `d.limits` is the witness rather than the spend: only collectSlow writes it,
+// while `d.now` and the rest are written by the cheap read too — and the spend
+// fields need a live session, which a test has none of.
+const ranSlow = (state, fire) => {
+    state.data.limits = 'SENTINEL';
+    fire();
+    return state.data.limits !== 'SENTINEL';
+};
+
+test('with the timer off, neither focus nor a settings change runs the expensive pass', () => {
+    const run = activate({ segments: ['{today}'], settings: { autoRefresh: false, fetchLimits: false } });
+    try {
+        const state = run.context.claudeState;
+        assert.equal(ranSlow(state, () => vscode.__focusWindow(true)), false,
+            'coming back to the window is not asking for it');
+        assert.equal(ranSlow(state, () => vscode.__changeConfiguration('claudeStatusline.segments')), false,
+            'and neither is ticking a checkbox');
+    } finally { run.dispose(); }
+});
+
+// The same events with the switch on: focus is exactly the "the user is looking
+// again" signal the pass exists for.
+test('with the timer on, returning to the window runs it', () => {
+    const run = activate({ segments: ['{today}'], settings: { autoRefresh: true, fetchLimits: false } });
+    try {
+        const state = run.context.claudeState;
+        assert.equal(ranSlow(state, () => vscode.__focusWindow(true)), true);
+    } finally { run.dispose(); }
+});
+
 // A timer that is a setting has to survive a settings file written before the
 // setting existed: `undefined` means the documented default, which is on.
 test('auto-refresh is on unless it was switched off', async () => {
