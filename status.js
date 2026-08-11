@@ -84,13 +84,26 @@ function limits(d, h, env) {
     // they are stated without a tilde and said plainly when they have run out.
     const cr = lim.credits;
     if (cr) {
+        // In the currency the endpoint stated, not in the dollars the rest of
+        // this file assumes: everything else is priced from published
+        // per-million rates, which are dollars by definition, and this is the one
+        // line that is somebody's actual bill. Intl carries every symbol and the
+        // right number of decimals; an unknown code falls back to printing itself
+        // rather than borrowing a `$`.
+        const money = (amount) => {
+            try {
+                return new Intl.NumberFormat('en-US', {
+                    style: 'currency', currency: cr.currency || 'USD', currencyDisplay: 'narrowSymbol',
+                }).format(amount);
+            } catch { return `${amount.toFixed(2)} ${cr.currency}`; }
+        };
         blocks.push({
             kind: 'note',
             tone: cr.enabled ? 'plain' : 'warn',
             label: 'Credits',
             text: cr.enabled
-                ? `${h.fmtCost(cr.used)} spent past the plan${cr.limit > 0 ? ` of ${h.fmtCost(cr.limit)}, ${cr.pct}%` : ''} — billed, not estimated`
-                : `${h.fmtCost(cr.used)} spent past the plan, and credits are off${cr.reason === 'out_of_credits' ? ': none left' : ''} — work stops at the limit rather than continuing on credit`,
+                ? `${money(cr.used)} spent past the plan${cr.limit > 0 ? ` of ${money(cr.limit)}, ${cr.pct}%` : ''} — billed, not estimated`
+                : `${money(cr.used)} spent past the plan, and credits are off${cr.reason === 'out_of_credits' ? ': none left' : ''} — work stops at the limit rather than continuing on credit`,
         });
     }
 

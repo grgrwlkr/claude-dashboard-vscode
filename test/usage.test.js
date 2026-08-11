@@ -190,3 +190,13 @@ test('credits already spent survive the switch being off', () => {
     assert.equal(u.creditsOf({}), null, 'no spend block at all is not a zero, it is an absence');
     assert.equal(u.creditsOf({ spend: { enabled: true } }), null, 'enabled with nothing spent has nothing to say');
 });
+
+// The currency is stated beside the amount, and this is the one figure in the
+// extension that is a bill rather than an estimate from published rates. A
+// borrowed `$` would leave the number right and its meaning wrong.
+test('creditsOf carries the currency the endpoint named', () => {
+    const spend = (currency) => ({ spend: { used: { amount_minor: 10367, exponent: 2, currency }, enabled: true } });
+    assert.equal(u.creditsOf(spend('USD')).currency, 'USD');
+    assert.equal(u.creditsOf(spend('EUR')).currency, 'EUR');
+    assert.equal(u.creditsOf(spend(undefined)).currency, 'USD', 'a missing code is the one everything else assumes');
+});

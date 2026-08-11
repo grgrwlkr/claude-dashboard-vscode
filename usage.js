@@ -141,6 +141,13 @@ function creditsOf(payload) {
     return {
         used,
         limit,
+        // The endpoint states the currency beside the amount, and this is the one
+        // figure here that is a bill rather than an estimate from public rates —
+        // printing it with a borrowed `$` would make the number right and its
+        // meaning wrong. Everything else in the extension is priced from
+        // Anthropic's published per-million rates, which are in dollars by
+        // definition, so only this one needs to ask.
+        currency: String(sp.used.currency || 'USD'),
         pct: limit > 0 ? Math.floor(sp.percent ?? 0) : 0,
         enabled: Boolean(sp.enabled),
         reason: String(sp.disabled_reason || ''),
