@@ -152,7 +152,13 @@ const THEME = THEMES[THEME_NAME];
 const page = demo ? (() => {
     const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const previews = require('./demo-index').presetPreviews();
-    return html.replace(/(data-preset-preview="([^"]+)">)(?:<span class="chip-seg">[\s\S]*?<\/span>)*/g,
+    // The version number lives in the page header, so it appears on every
+    // screenshot — and a listing image would then go stale on each bump rather
+    // than on each change to what it shows. Seven bumps in one day is what made
+    // this worth a line. The marketplace prints the version on the card anyway.
+    return html
+        .replace(/ <span class="ver">v[^<]*<\/span>/, '')
+        .replace(/(data-preset-preview="([^"]+)">)(?:<span class="chip-seg">[\s\S]*?<\/span>)*/g,
         (m, head, id) => head + (previews[id] || []).map((line) => `<span class="chip-seg">${esc(line)}</span>`).join(''));
 })() : html;
 
