@@ -36,13 +36,19 @@ dictionary of English irregulars for sixteen nouns that are spelled out in our o
 nothing — while a package that replaced a hundred lines of parsing would buy a great deal. Ask which
 one you are looking at, and say so in the commit.
 
-**A version bump is a commit.** Raising `version` in `package.json` — by any amount, for any reason —
-means committing the working tree in the same step, with that version in the message trailer
-(`chore(release): 0.15.1` or the feature commit that carried it). The installed `.vsix` is built from
-the working tree, so a bumped-but-uncommitted tree means the editor is running code that exists
-nowhere in git: nothing can be reverted to it, diffed against it, or explained by it. Installing
-without committing is how a dozen versions ended up as one uncommitted pile. Package, install, commit
-— in that order, without waiting to be asked.
+**A version bump rides inside the commit that caused it.** Raise `version` in `package.json` as part
+of the change — bump, package, install, then one commit containing both the code and the new
+version. A standalone `chore(release): 0.15.1` is for the case where there is nothing else to
+commit: a rebuild of unchanged code, a republish, a bump asked for on its own. Splitting an ordinary
+change into "the fix" plus "the version" is the failure this rule names — it doubled sixteen
+releases into thirty-two commits, and the release halves said nothing the feature commits did not
+already say.
+
+The reason to commit at all is that the installed `.vsix` is built from the **working tree**: a
+bumped-but-uncommitted tree means the editor runs code that exists nowhere in git, and nothing can
+be reverted to it, diffed against it, or explained by it. Installing without committing is how a
+dozen versions once ended up as one uncommitted pile. So: package, install, commit — in that order,
+without waiting to be asked.
 
 ## Architecture
 
