@@ -28,9 +28,11 @@ function rec(over = {}) {
 }
 
 test('slugFor encodes a path the way the client does', () => {
-    assert.equal(s.slugFor('/Users/x/Develop/second-brain'), '-Users-x-Develop-second-brain');
-    // Underscores become hyphens too — an easy detail to get wrong.
-    assert.equal(s.slugFor('/Users/x/Develop/backend-service'), '-Users-x-Develop-rust-service');
+    // Mixed case survives; the hyphen is left alone.
+    assert.equal(s.slugFor('/Users/x/Develop/ACME-second-brain'), '-Users-x-Develop-ACME-second-brain');
+    // Underscores become hyphens too — an easy detail to get wrong, and the
+    // reason this fixture must keep one.
+    assert.equal(s.slugFor('/Users/x/Develop/my_service'), '-Users-x-Develop-my-service');
 });
 
 test('contextOf sums context from all three parts of usage', () => {
