@@ -19,11 +19,27 @@ code --install-extension claude-statusline-*.vsix             # install it
 No build step, no lint config, no npm scripts — plain CommonJS run by VS Code and by `node --test`.
 Reloading the window is the user's action, never yours — other Claude sessions may be alive in it.
 
-A local reinstall of the same version leaves the old code live in the extension host, so a build you
-want to actually see needs a different `.vsix` than the one already installed. That is a fact about
-the extension host, not a reason to raise `version` — see the release rule below. Package to a
-scratch path and install from there when you want the editor to run what you just wrote; the number
-in the manifest moves only at a release.
+**Every change you finish is packaged and installed over the one already there, without touching
+`version`.** That is how Grigory checks the work: the editor has to be running what you just wrote,
+not the build from three commits ago.
+
+```bash
+npx @vscode/vsce package --no-dependencies -o <scratch>/current.vsix   # scratch, never the repo
+code --install-extension <scratch>/current.vsix                        # overwrites the same number
+```
+
+Installing the same version **does** overwrite the files on disk — verified 2026-08-12 by packaging a
+marked build and finding the marker in `~/.vscode/extensions/…-<version>/`. No uninstall step, no
+`--force`. What survives is the code already loaded into the extension host, which is why the last
+line of your report is that the window needs reloading — and that reload is the user's action, never
+yours: other Claude sessions may be alive in it.
+
+What must never happen again: several numbers installed side by side. VS Code runs the **highest**
+version present, so building 0.22.3/0.22.4/0.22.5 and then settling the tree back to 0.22.2 left the
+editor running the newest of the four — code that no longer existed in git. If a stale number is
+installed, `code --uninstall-extension grgrwlkr.claude-dashboard` and remove any leftover
+`~/.vscode/extensions/grgrwlkr.claude-dashboard-*` directories before installing the current build.
+`globalStorage` holds the index and the limits history and is not touched by any of this.
 
 **Add a dependency when it makes the work easier. Do not reimplement what already exists.** The tree
 happens to have none today; that is a fact about it, not a rule against them. Before writing a
