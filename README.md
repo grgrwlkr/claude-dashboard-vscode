@@ -387,7 +387,7 @@ Written down rather than discovered by you.
 ## 🤝 Contributing
 
 ```bash
-node --test 'test/*.test.js'     # the whole suite, no build step, no dependencies
+node --test test/*.test.js     # the whole suite, no build step, no dependencies
 ```
 
 Issues and pull requests are welcome — a

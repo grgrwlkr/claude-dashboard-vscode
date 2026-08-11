@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test 'test/*.test.js'
+      - run: node --test test/*.test.js
 
   package:
     # Packaging catches what tests cannot: a manifest that no longer parses, a

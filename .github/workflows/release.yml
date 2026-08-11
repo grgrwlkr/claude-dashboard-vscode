@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 22
 
-      - run: node --test 'test/*.test.js'
+      - run: node --test test/*.test.js
 
       # The channel is decided by the --pre-release flag, not by the number: an
       # odd version published without it lands in stable. Odd-minor-means-

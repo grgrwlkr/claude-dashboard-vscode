@@ -9,7 +9,7 @@ user-facing behaviour and every data source in detail — read it before changin
 ## Commands
 
 ```bash
-node --test 'test/*.test.js'                                  # whole suite
+node --test test/*.test.js                                  # whole suite
 node --test test/usage.test.js                                # one file
 node --test --test-name-pattern 'pace' test/usage.test.js     # one test by name
 npx @vscode/vsce package                                      # build the .vsix
