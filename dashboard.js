@@ -1294,26 +1294,45 @@ function healthTab(total, sys, cfg = {}) {
     const stale = updates.reduce((a, u) => Math.max(a, u.marketUpdated || 0), 0);
     const checks = Boolean(cfg.checkPluginUpdates);
     const behind = updates.filter((u) => u.declared && u.installed && u.installed !== u.available);
+    const heads = sys.marketHeads || {};
+    const markets = [...new Set(updates.map((u) => u.marketplace))];
+    // The question this table is asked is "does this need updating", and for
+    // most rows the answer is not a version at all: 24 of 28 plugins here live
+    // inside the marketplace repository, so their update is the marketplace's.
+    // Saying that per row beats making a reader infer it from a line above.
+    const staleMarket = (m) => {
+        const head = heads[m];
+        const clone = updates.find((u) => u.marketplace === m);
+        return Boolean(head && clone && clone.marketUpdated > 0 && head.at > clone.marketUpdated);
+    };
     const updateTable = updates.length ? `<table><thead><tr><th>Plugin</th><th class="opt2">Marketplace</th>
-        <th>Installed</th><th>In the local copy</th><th class="opt">Since</th></tr></thead><tbody>
-      ${updates.map((u) => `<tr>
+        <th>Installed</th><th class="opt">In the local copy</th><th>Update comes from</th></tr></thead><tbody>
+      ${updates.map((u) => {
+        const behindVersion = u.declared && u.installed && u.installed !== u.available;
+        const stale = !u.origin && staleMarket(u.marketplace);
+        const where = u.origin
+            ? `<span class="dim" title="${esc(u.origin)}">its own repository</span>`
+            : (checks
+                ? (stale
+                    ? `<span class="o-stopped">the marketplace, and it has moved</span>`
+                    : '<span class="ok">the marketplace, which is current</span>')
+                : '<span class="dim">the marketplace — not checked</span>');
+        return `<tr>
         <td class="wrap">${esc(u.name)}</td>
         <td class="dim opt2" title="${esc(u.repo)}">${esc(u.marketplace)}</td>
         <td class="mono">${esc(u.installed || '—')}</td>
-        <td class="mono">${u.declared
-        ? (u.installed === u.available ? `<span class="ok">${esc(u.available)}</span>`
-            : `<span class="o-stopped">${esc(u.available)}</span>`)
+        <td class="mono opt">${u.declared
+        ? (behindVersion ? `<span class="o-stopped">${esc(u.available)}</span>` : `<span class="ok">${esc(u.available)}</span>`)
         : '<span class="dim">not declared</span>'}</td>
-        <td class="dim opt">${u.installedAt ? esc(fmtDateTime(u.installedAt)) : '—'}</td>
-      </tr>`).join('')}
+        <td>${behindVersion ? `<span class="o-stopped">a newer version, ${esc(u.available)}</span>` : where}</td>
+      </tr>`;
+    }).join('')}
     </tbody></table>` : '<p class="empty">No installed plugins recorded.</p>';
 
     // What the network answered, when it was asked. A clone whose repository has
     // moved since it was cloned is the whole point of the setting, and saying it
     // per marketplace is the only way the answer is actionable — the fix is one
     // `claude plugin update` against that marketplace.
-    const heads = sys.marketHeads || {};
-    const markets = [...new Set(updates.map((u) => u.marketplace))];
     const marketLines = markets.map((m) => {
         const head = heads[m];
         const clone = updates.find((u) => u.marketplace === m);
@@ -1327,7 +1346,7 @@ function healthTab(total, sys, cfg = {}) {
 
     const updateNote = `${updates.length} installed from ${markets.length} marketplace${markets.length === 1 ? '' : 's'}, each of which is a clone on this disk${stale ? `, last refreshed ${esc(fmtDateTime(stale))}` : ''}. ${behind.length ? `${behind.length} differ${behind.length === 1 ? 's' : ''} from the copy.` : 'None differs from the copy.'} Most manifests declare no version at all, and a missing version is reported as missing rather than as up to date.
       ${checks
-        ? `<b>Update checking is on.</b> One request per marketplace asks GitHub for its newest commit and compares it with the clone:<ul class="log">${marketLines}</ul>Bring a stale copy up to date with <code>claude plugin update</code>.`
+        ? `<b>Update checking is on.</b> One request per marketplace asks GitHub for its newest commit and compares it with the clone:<ul class="log">${marketLines}</ul>Bring a stale copy up to date with <code>claude plugin update</code>. ${updates.filter((u) => u.origin).length} plugin${updates.filter((u) => u.origin).length === 1 ? '' : 's'} here live in a repository of their own rather than in a marketplace, and nothing checks those — a version for them would cost one request each.`
         : '<b>Nothing is asked of the network.</b> Without <code>claudeStatusline.checkPluginUpdates</code> this compares against the copy already on disk, so a plugin whose marketplace moved after that date will read as current. Turn the setting on to check, or refresh the clone yourself with <code>claude plugin update</code>.'}`;
 
     const enabled = pluginRows.filter((p) => p.enabled).length;

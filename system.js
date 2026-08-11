@@ -492,6 +492,18 @@ function pluginUpdates(root = ROOT) {
         const manifest = market && market.installLocation
             ? readJson(path.join(market.installLocation, 'plugins', name, '.claude-plugin', 'plugin.json'))
             : null;
+        // Where an update for this plugin would come from. Most of them live
+        // inside the marketplace repository itself — 24 of 28 here — and for
+        // those "a newer version exists" is the same sentence as "the clone is
+        // behind"; there is no second thing to check. The rest carry their own
+        // repository, and those are the only ones a per-plugin check could ever
+        // answer for.
+        const listing = market && market.installLocation
+            ? (readJson(path.join(market.installLocation, '.claude-plugin', 'marketplace.json')) || {})
+            : {};
+        const entry = (listing.plugins || []).find((x) => x && x.name === name);
+        const src = entry ? entry.source : null;
+        const origin = src && typeof src === 'object' && src.url ? src.url : '';
         rows.push({
             name,
             marketplace,
@@ -500,6 +512,7 @@ function pluginUpdates(root = ROOT) {
             available: manifest ? (manifest.version || '') : '',
             declared: Boolean(manifest && manifest.version),
             repo: market && market.source ? market.source.repo || '' : '',
+            origin,
             marketUpdated: market ? Date.parse(market.lastUpdated || '') || 0 : 0,
         });
     }

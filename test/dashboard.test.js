@@ -889,3 +889,29 @@ test('the hover panel has an opaque base under whatever the theme provides', () 
     // And the theme's own colour rides on top rather than replacing it.
     assert.match(rule, /background-image:\s*linear-gradient\(var\(--vscode-editorHoverWidget-background/);
 });
+
+// Most plugins live inside the marketplace repository, so their update is the
+// marketplace's and there is no second version to compare. The row says which
+// of the two it is rather than leaving a reader to infer it from a line above.
+test('every plugin row says where its update would come from', () => {
+    const day = 24 * 3600 * 1000;
+    const sys = {
+        plugins: [], mcp: [], hooks: [], permissions: [], settings: {}, versions: {},
+        pluginUpdates: [
+            { name: 'inside', marketplace: 'official', installed: '1.0.0', available: '1.0.0', declared: true, repo: 'x/y', origin: '', marketUpdated: Date.now() - 3 * day, installedAt: 0 },
+            { name: 'own-repo', marketplace: 'official', installed: 'abc', available: '', declared: false, repo: 'x/y', origin: 'https://github.com/o/p.git', marketUpdated: Date.now() - 3 * day, installedAt: 0 },
+            { name: 'outdated', marketplace: 'official', installed: '1.0.0', available: '2.0.0', declared: true, repo: 'x/y', origin: '', marketUpdated: Date.now() - 3 * day, installedAt: 0 },
+        ],
+        marketHeads: { official: { at: Date.now(), sha: 'abc1234', repo: 'x/y' } },
+    };
+    const on = db.healthTab(ix.summarize(demoIndex()), sys, { checkPluginUpdates: true });
+    assert.match(on, /the marketplace, and it has moved/);
+    assert.match(on, /its own repository/);
+    assert.match(on, /a newer version, 2\.0\.0/);
+    assert.match(on, /1 plugin here live in a repository of their own/);
+
+    // Unchecked, no row claims to know anything about the marketplace.
+    const off = db.healthTab(ix.summarize(demoIndex()), sys, {});
+    assert.match(off, /the marketplace — not checked/);
+    assert.ok(!/and it has moved|which is current/.test(off));
+});
