@@ -9,59 +9,42 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
-## [0.22.5] — 2026-08-12
-
-### Fixed
-
-- **"Refresh on a timer", switched off, now covers every way in.** 0.22.3 gated
-  the timer; two other paths still ran the full pass with the switch off —
-  returning focus to the window, and changing any setting, which meant that
-  turning the timer off cost one complete pass at the moment you turned it off.
-  With it off, all three now redraw the bar from the cheap read and leave the
-  transcript pass, the spend across every project and the limits request for
-  when you ask.
-- Ticking a checkbox on the Settings tab no longer restarts the refresh
-  countdown: only a new interval rebuilds the timer.
-
-## [0.22.4] — 2026-08-12
-
-Housekeeping, no change to what anything reports: four pieces of code that were
-attached to nothing — a function with no caller, a filter on a field that does
-not exist, a shadowed import, and a chart axis built twice per drawing.
-
-## [0.22.3] — 2026-08-12
-
-Found by reading the code rather than by using it — two sessions reviewing each
-other's half of the modules.
-
-### Fixed
-
-- **"Refresh on a timer", switched off, now switches off the work it names.** It
-  only stopped the dashboard from redrawing: the full transcript pass, the spend
-  across every project and the request for limits carried on every minute. The
-  setting offers itself for use on battery, so that was the opposite of what it
-  promised.
-- **A new refresh interval takes effect when you set it.** The timer read the
-  interval once, when the window opened, so moving the slider on the Settings tab
-  did nothing until the window was reloaded.
-- **"Releases ahead" counts what is ahead.** It counted every release on the
-  page, so a client running the newest version was told it had hundreds waiting.
-- The "Across all requests" figure on the Context tab reads the Opus rate from
-  the one file that holds rates, instead of a copy of the number that would have
-  gone stale on the day it changed.
-
 ## [0.22.2] — 2026-08-12
+
+Most of this was found by reading the code rather than by using it — three
+sessions reviewing each other's halves of it.
 
 ### Fixed
 
 - **The Changelog tab stops at the end of the changelog, and nowhere else.** It
   drew the newest 80 releases and said nothing about the rest, so the list ended
   at an arbitrary version and read as though that was all there was. With the
-  full file fetched that hid 281 of 361 releases. Every release the source had
-  is now on the page.
-- **The links in the README's table of contents work on the listing pages.**
-  They were written in GitHub's anchor style, which no marketplace shares, so
+  full file fetched that hid 281 of 361 releases.
+- **"Refresh on a timer", switched off, now switches off the work it names.** It
+  stopped the dashboard from redrawing and nothing else: the full transcript
+  pass, the spend across every project and the request for limits carried on
+  every minute, and so did each return of focus to the window. The setting offers
+  itself for use on battery, which was the opposite of what it did. Off, all
+  three paths now redraw the bar from the cheap ten-second read and leave the
+  expensive work for when you ask.
+- **A new refresh interval takes effect when you set it**, instead of waiting for
+  the window to be reloaded. Ticking one of the other checkboxes no longer
+  restarts the countdown.
+- **"Releases ahead" counts what is ahead.** It counted every release on the
+  page, so a client running the newest version was told it had hundreds waiting.
+- **The links in the README's table of contents work on the listing pages.** They
+  were written in GitHub's anchor style, which neither marketplace shares, so
   every one of them was dead anywhere but GitHub.
+- The "Across all requests" figure on the Context tab reads the Opus rate from
+  the one file that holds rates, instead of a copy that would have gone stale on
+  the day it changed.
+
+### Internal
+
+Four pieces of code that were attached to nothing: a function with no caller, a
+filter on a field that does not exist, a shadowed import, and a chart axis built
+twice per drawing. The preview tool priced every agent at zero, which made the
+overflow probe measure a page narrower than the real one.
 
 ## [0.22.1] — 2026-08-12
 

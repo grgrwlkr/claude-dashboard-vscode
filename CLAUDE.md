@@ -17,9 +17,13 @@ code --install-extension claude-statusline-*.vsix             # install it
 ```
 
 No build step, no lint config, no npm scripts — plain CommonJS run by VS Code and by `node --test`.
-Bump `version` in `package.json` on every rebuild: a same-version reinstall leaves the old code live
-in the extension host. Reloading the window is the user's action, never yours — other Claude sessions
-may be alive in it.
+Reloading the window is the user's action, never yours — other Claude sessions may be alive in it.
+
+A local reinstall of the same version leaves the old code live in the extension host, so a build you
+want to actually see needs a different `.vsix` than the one already installed. That is a fact about
+the extension host, not a reason to raise `version` — see the release rule below. Package to a
+scratch path and install from there when you want the editor to run what you just wrote; the number
+in the manifest moves only at a release.
 
 **Add a dependency when it makes the work easier. Do not reimplement what already exists.** The tree
 happens to have none today; that is a fact about it, not a rule against them. Before writing a
@@ -36,19 +40,30 @@ dictionary of English irregulars for sixteen nouns that are spelled out in our o
 nothing — while a package that replaced a hundred lines of parsing would buy a great deal. Ask which
 one you are looking at, and say so in the commit.
 
-**A version bump rides inside the commit that caused it.** Raise `version` in `package.json` as part
-of the change — bump, package, install, then one commit containing both the code and the new
-version. A standalone `chore(release): 0.15.1` is for the case where there is nothing else to
-commit: a rebuild of unchanged code, a republish, a bump asked for on its own. Splitting an ordinary
-change into "the fix" plus "the version" is the failure this rule names — it doubled sixteen
-releases into thirty-two commits, and the release halves said nothing the feature commits did not
-already say.
+**The version moves at a release and nowhere else (2026-08-12, since the extension went public).**
+Ordinary commits — fixes, features, refactors, docs — leave `package.json` alone. The number is
+raised once, in the commit that carries the tag: bump, write the CHANGELOG entry covering everything
+since the last released version, commit, `git tag vX.Y.Z && git push --tags`.
 
-The reason to commit at all is that the installed `.vsix` is built from the **working tree**: a
-bumped-but-uncommitted tree means the editor runs code that exists nowhere in git, and nothing can
+This replaces the earlier rule that a bump rode inside the commit that caused it. That one was
+written when nothing had been published and every build was its own release; now a version is a
+thing other people install, and four bumps inside one unreleased stretch of work — which is what
+happened on the day this changed — produce four numbers nobody can install and four CHANGELOG
+entries describing one piece of work.
+
+**How far to raise it is your call, from what actually changed since the released version.** A
+`patch` for fixes and internals; a `minor` when the extension does something it did not do before,
+or does something visibly differently. Read the CHANGELOG entry you are about to write: if it is all
+`### Fixed`, that is a patch. **`major` is never yours** — only on Grigory's explicit word.
+
+Mind the channel while choosing: an odd minor publishes as a pre-release and an even one as stable
+(see `release.yml`), so a minor step inside the stable channel goes 0.22 → 0.24, and the odd number
+in between is the pre-release line rather than a version that was skipped.
+
+Committing still matters for its own reason: the installed `.vsix` is built from the **working
+tree**, so an uncommitted tree means the editor runs code that exists nowhere in git, and nothing can
 be reverted to it, diffed against it, or explained by it. Installing without committing is how a
-dozen versions once ended up as one uncommitted pile. So: package, install, commit — in that order,
-without waiting to be asked.
+dozen versions once ended up as one uncommitted pile.
 
 ## Architecture
 
