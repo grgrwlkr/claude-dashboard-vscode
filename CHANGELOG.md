@@ -9,6 +9,12 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.22.4] — 2026-08-12
+
+Housekeeping, no change to what anything reports: four pieces of code that were
+attached to nothing — a function with no caller, a filter on a field that does
+not exist, a shadowed import, and a chart axis built twice per drawing.
+
 ## [0.22.3] — 2026-08-12
 
 Found by reading the code rather than by using it — two sessions reviewing each
