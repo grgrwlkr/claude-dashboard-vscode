@@ -565,9 +565,14 @@ function contextBudget(root = ROOT, projects = [], slugs = []) {
  * Split into versions, newest first, so the dashboard can show only what landed
  * after the version currently running.
  */
-function changelog(root = ROOT, sinceVersion = '') {
-    let text;
-    try { text = fs.readFileSync(path.join(root, 'cache', 'changelog.md'), 'utf8'); } catch { return []; }
+function changelog(root = ROOT, sinceVersion = '', override = '') {
+    // `override` is the full upstream file when the user has allowed the fetch;
+    // without it the client's own cache is the source, which lags a release by
+    // up to a day and covers only a little history.
+    let text = override;
+    if (!text) {
+        try { text = fs.readFileSync(path.join(root, 'cache', 'changelog.md'), 'utf8'); } catch { return []; }
+    }
     const out = [];
     let current = null;
     for (const line of text.split('\n')) {
@@ -705,7 +710,7 @@ function runningVersion(root = ROOT) {
  * because walking three gigabytes of transcripts and plugin caches takes
  * seconds — the caller caches the result and refreshes it on demand.
  */
-function snapshot({ root = ROOT, workspace = '', projects = [], sessionProjects = {}, withDisk = true } = {}) {
+function snapshot({ root = ROOT, workspace = '', projects = [], sessionProjects = {}, withDisk = true, changelogText = '' } = {}) {
     const config = readJson(CONFIG);
     const current = runningVersion(root);
     // Sized once and handed to disk(), rather than walking every job twice.
@@ -724,7 +729,7 @@ function snapshot({ root = ROOT, workspace = '', projects = [], sessionProjects 
         disk: withDisk ? disk(root, jobRows) : null,
         context: contextBudget(root, projects, slugsOf(projects)),
         pluginUpdates: pluginUpdates(root),
-        changelog: changelog(root, current),
+        changelog: changelog(root, current, changelogText),
         projects: projectMetrics(config),
         prompts: promptLog(root),
     };

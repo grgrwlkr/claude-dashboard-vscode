@@ -813,3 +813,37 @@ test('the page names the version it was built from', () => {
     const html = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
     assert.ok(html.includes(`v${manifest.version}`), `no v${manifest.version} in the header`);
 });
+
+// A tile saying a newer version is unpacked, beside a panel saying there is
+// nothing new, is a contradiction on one screen. The cache belongs to the
+// client and lags its own releases; the page says which of the two it is.
+test('a version on disk without its notes says so, instead of "nothing new"', () => {
+    const waiting = db.changelogTab({
+        changelog: [],
+        versions: { current: '2.1.226', latest: '2.1.227', waiting: true, installed: [] },
+    });
+    assert.match(waiting, /2\.1\.227 is here, its notes are not/);
+    assert.match(waiting, /newest entry there is 2\.1\.226/);
+    assert.ok(!/Nothing newer than the version already running/.test(waiting));
+
+    // With nothing waiting, the plain answer is still the plain answer.
+    const idle = db.changelogTab({ changelog: [], versions: { current: '2.1.226', installed: [] } });
+    assert.match(idle, /Nothing newer than the version already running/);
+});
+
+// The changelog has two sources and the tab says which one it is reading. It
+// also carries the switch, because the place you notice the notes are thin is
+// the place you want to turn the fetch on.
+test('the changelog names its source and carries its own switch', () => {
+    const local = db.changelogTab({ changelog: [], versions: { current: '2.1.226', installed: [] } }, {});
+    assert.match(local, /data-set="fetchChangelog"/);
+    assert.match(local, /the client's own copy/);
+    assert.ok(!/checked/.test(local.split('data-set="fetchChangelog"')[1].slice(0, 20)));
+
+    const many = Array.from({ length: 80 }, (_, i) => ({ version: `2.1.${200 - i}`, entries: ['x'] }));
+    const remote = db.changelogTab({ changelog: many, versions: { current: '2.1.200', installed: [] } },
+        { fetchChangelog: true });
+    assert.match(remote, /80 releases known, of which the newest 60 are drawn/);
+    // Sixty panels of releases, not eighty: the rest is history nobody scrolls to.
+    assert.equal((remote.match(/class="panel"/g) || []).length, 61);
+});

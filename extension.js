@@ -640,6 +640,12 @@ let refreshing = false;
 // wait for the page to actually be replaced.
 function refreshDashboard(context) {
     if (!panel || !panel.visible || refreshing || openTab === 'settings') return Promise.resolve(false);
+    // The timer is a setting, not a law: a page nobody asked to move is a page
+    // that scrolls out from under a reader.
+    // `!== false`, not a truthiness test: a settings file written before this key
+    // existed returns undefined, and undefined has to mean the documented
+    // default — which is on — rather than silently switching the timer off.
+    if (vscode.workspace.getConfiguration('claudeStatusline').get('autoRefresh') === false) return Promise.resolve(false);
     refreshing = true;
     return showDashboard(context, { silent: true })
         .then(() => true)
@@ -734,8 +740,12 @@ function checkBudget(context, total) {
     vscode.window.showWarningMessage(text);
 }
 
-function systemSnapshot(state, index, { force = false } = {}) {
-    const fresh = systemCache && !force && Date.now() - systemCache.at < SYSTEM_TTL;
+function systemSnapshot(state, index, { force = false, changelogText = '' } = {}) {
+    // A newly fetched changelog is a reason to rebuild even inside the TTL:
+    // otherwise switching the setting on shows the old cache for a minute and
+    // reads as "it did nothing".
+    const fresh = systemCache && !force && Date.now() - systemCache.at < SYSTEM_TTL
+        && systemCache.changelogSource === changelogText.length;
     if (fresh) return systemCache;
 
     // Project directories and the session→project map come from the index, so
@@ -756,7 +766,9 @@ function systemSnapshot(state, index, { force = false } = {}) {
             workspace: (state && state.workspace) || '',
             projects: [...projects],
             sessionProjects,
+            changelogText,
         });
+        systemCache.changelogSource = changelogText.length;
     } catch {
         // A tree that is half-readable must not take the dashboard down with it.
         systemCache = null;
@@ -787,13 +799,49 @@ function configView(state) {
         refreshInterval: cfg.get('refreshInterval'),
         monthlyBudget: cfg.get('monthlyBudget'),
         checkPluginUpdates: cfg.get('checkPluginUpdates'),
+        fetchLimits: cfg.get('fetchLimits'),
+        autoRefresh: cfg.get('autoRefresh'),
         palette,
     };
 }
 
 // The webview edits settings; writing them is the extension's job. Only these
 // four keys are ever written, and only into the scope the form asked for.
-const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval'];
+// Every setting the page may write, which is every setting the extension has:
+// the dashboard is the settings UI, and a key it cannot reach is a key that
+// exists only in settings.json — which is the thing the Setup tab was built to
+// avoid. The list is the gate: a message naming anything else is dropped.
+const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
+    'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog'];
+
+// The full changelog, when the user has allowed the fetch. One public file, no
+// credentials, and at most once an hour — kept in the extension's own storage
+// so a page opened offline still has the last copy rather than nothing.
+const CHANGELOG_URL = 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md';
+const CHANGELOG_TTL = 60 * 60 * 1000;
+let changelogCache = { at: 0, text: '' };
+
+async function fetchChangelog(storageDir) {
+    if (vscode.workspace.getConfiguration('claudeStatusline').get('fetchChangelog') !== true) return '';
+    const file = path.join(storageDir, 'changelog.md');
+    if (!changelogCache.text) {
+        try { changelogCache = { at: fs.statSync(file).mtimeMs, text: fs.readFileSync(file, 'utf8') }; } catch { /* none yet */ }
+    }
+    if (changelogCache.text && Date.now() - changelogCache.at < CHANGELOG_TTL) return changelogCache.text;
+    try {
+        const res = await fetch(CHANGELOG_URL);
+        if (!res.ok) return changelogCache.text;
+        const text = await res.text();
+        // A body that is not a changelog is not written over the good copy: a
+        // captive portal answers 200 with a login page.
+        if (!/^#\s|^##\s\d/m.test(text)) return changelogCache.text;
+        changelogCache = { at: Date.now(), text };
+        try { fs.mkdirSync(storageDir, { recursive: true }); fs.writeFileSync(file, text); } catch { /* cache is a bonus */ }
+        return text;
+    } catch {
+        return changelogCache.text; // offline is not an error worth a dialog
+    }
+}
 
 // One template against the data the bar is holding at this moment, rendered by
 // the same code that draws the bar — so a preview cannot disagree with what
@@ -857,6 +905,21 @@ async function handleMessage(context, msg) {
         return;
     }
 
+    // One setting, written where it stands. The Settings tab saves a form; a
+    // toggle beside the thing it governs saves itself, because walking to
+    // another tab to switch on what you are looking at is the friction this
+    // page exists to remove.
+    if (msg.type === 'set') {
+        const key = String(msg.key || '');
+        if (!WRITABLE.includes(key)) return;
+        const cfg = vscode.workspace.getConfiguration('claudeStatusline');
+        cfg.update(key, msg.value, vscode.ConfigurationTarget.Global).then(
+            () => showDashboard(context, { silent: true }),
+            (err) => vscode.window.showErrorMessage(`Claude statusline: could not save ${key} — ${err.message}`),
+        );
+        return;
+    }
+
     if (msg.type === 'save') {
         const target = msg.scope === 'workspace'
             ? vscode.ConfigurationTarget.Workspace
@@ -878,11 +941,12 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
     const { index, stats } = await buildIndex(storageDir, { force, silent });
     const total = ix.summarize(index);
     checkBudget(context, total);
+    const changelogText = await fetchChangelog(storageDir);
     const html = dashboard.render(index, total, {
         files: stats.total,
         lastRun: Date.now(),
         history: hist.readHistory(storageDir),
-        system: systemSnapshot(barState, index, { force }),
+        system: systemSnapshot(barState, index, { force, changelogText }),
         config: configView(barState),
         // The same sections the tooltips are cut from, so the Now tab and the
         // hover cannot disagree about a number.

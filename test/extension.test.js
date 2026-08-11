@@ -988,3 +988,20 @@ test('a csv cell survives commas, quotes and newlines', () => {
     assert.match(csv, /"a, ""b""\nc"/);
     assert.match(csv, /x y/);
 });
+
+// A timer that is a setting has to survive a settings file written before the
+// setting existed: `undefined` means the documented default, which is on.
+test('auto-refresh is on unless it was switched off', async () => {
+    for (const [autoRefresh, expected] of [[undefined, true], [true, true], [false, false]]) {
+        const run = activate({ segments: ['{weekly}'], settings: { autoRefresh } });
+        let panel;
+        try {
+            panel = await openDashboard();
+            const before = panel.webview.html;
+            await panel.__receive({ type: 'tab', id: 'now' });
+            const moved = await ext.__refreshDashboard(run.context);
+            assert.equal(moved, expected, `autoRefresh=${autoRefresh} should ${expected ? '' : 'not '}redraw`);
+            if (!expected) assert.equal(panel.webview.html, before, 'a page nobody asked to move must not move');
+        } finally { if (panel) panel.dispose(); run.dispose(); }
+    }
+});

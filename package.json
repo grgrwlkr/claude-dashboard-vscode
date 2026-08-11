@@ -2,7 +2,7 @@
   "name": "claude-statusline",
   "displayName": "Statusline for Claude Code",
   "description": "Unofficial. Claude Code limits, session context, spend and a usage dashboard, in the VS Code status bar.",
-  "version": "0.19.11",
+  "version": "0.19.12",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -153,11 +153,21 @@
           "default": true,
           "markdownDescription": "Ask Anthropic for the account's limits.\n\nWhen on, the extension reads the OAuth token Claude Code already stores (macOS Keychain, falling back to `~/.claude/.credentials.json`) and sends it in one `Authorization` header to `https://api.anthropic.com/api/oauth/usage` — the same endpoint `/usage` reads. The answer is cached in `~/.claude/statusline-usage.json`, shared with `statusline.sh`, at most once a minute per machine. The token is not stored, copied or sent anywhere else.\n\nWhen off, nothing leaves the machine and the token is never read. Limit fields then come from that cache if something else wrote it, and stay empty otherwise; everything drawn from local transcripts — context, spend, workflows, the dashboard — is unaffected."
         },
+        "claudeStatusline.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Redraw the dashboard and the status bar on a timer.\n\nOn, both refresh every `claudeStatusline.refreshInterval` seconds. Off, the status bar still updates from the cheap ten-second read, but the expensive pass — the full transcript index, the spend across every project, the limits request — happens only when you ask for it with **Reindex** or **Claude: Refresh now**.\n\nTurn it off on battery, or while a page is open that you want to keep still."
+        },
         "claudeStatusline.monthlyBudget": {
           "type": "number",
           "default": 0,
           "minimum": 0,
           "markdownDescription": "A spend ceiling for the calendar month, in dollars.\n\nSet it above zero and the dashboard draws the month against it and the extension says so once at 80% and once at 100% — once per month each, not on every tick. Zero turns both off.\n\nThe figure is an estimate from public per-million-token rates across every transcript on this machine, not a bill."
+        },
+        "claudeStatusline.fetchChangelog": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Fetch the full Claude Code changelog.\n\n**Off by default.** With it off, the Changelog tab reads the copy the client already keeps in `~/.claude/cache/changelog.md` — which covers the version running and a little history, and lags a release by up to a day.\n\nWith it on, the extension fetches `https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md` — one public file, no credentials, at most once an hour — and shows every release Anthropic has published. The answer is cached in the extension's own storage."
         },
         "claudeStatusline.checkPluginUpdates": {
           "type": "boolean",

@@ -449,6 +449,27 @@ const tile = (label, value, sub, pct, tone) => {
         + `<span class="tile-sub">${esc(sub || '')}</span></div>`;
 };
 
+/**
+ * A setting, switched where it stands. The same control appears in the Settings
+ * tab and beside the panel it governs — one component, so a toggle cannot say
+ * one thing in one place and another somewhere else, and turning something on
+ * never means walking to another tab to do it.
+ *
+ * It writes immediately and alone: the segment editor saves a form on a button
+ * because half-typed text needs a commit point, and a switch does not.
+ */
+const toggle = (key, label, on, note = '') => `<label class="switch">
+    <input type="checkbox" data-set="${esc(key)}"${on ? ' checked' : ''}>
+    <span class="switch-box" aria-hidden="true"></span>
+    <span class="switch-text"><b>${esc(label)}</b>${note ? `<span class="dim">${note}</span>` : ''}</span>
+</label>`;
+
+/** The same, for a setting that is a number rather than a state. */
+const numberField = (key, label, value, note = '', min = 0) => `<label class="switch numeric">
+    <input type="number" class="num-set" data-set="${esc(key)}" value="${esc(String(value ?? ''))}" min="${min}">
+    <span class="switch-text"><b>${esc(label)}</b>${note ? `<span class="dim">${note}</span>` : ''}</span>
+</label>`;
+
 /** A row of them. Wrapping is the grid's business, not the caller's. */
 const tiles = (...items) => `<div class="tiles">${items.filter(Boolean).join('')}</div>`;
 
@@ -1310,7 +1331,9 @@ function healthTab(total, sys, cfg = {}) {
         flush: true,
         note: 'What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call\'s arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.',
     })}
-        ${panel('Versions', updateTable, {
+        ${panel('Versions', toggle('checkPluginUpdates', 'Check the marketplaces for newer versions',
+        checks, 'One request per marketplace, at most hourly. Off means nothing is asked of the network.')
+        + updateTable, {
         flush: true,
         note: updateNote,
     })}
@@ -1514,21 +1537,41 @@ function tasksTab(sys) {
     </section>`;
 }
 
-function changelogTab(sys) {
-    const releases = (sys && sys.changelog) || [];
+// How many releases the page carries. The upstream file is half a megabyte and
+// hundreds of releases deep; everything past this is history nobody scrolls to,
+// and the page says how much it left behind rather than pretending that is all.
+const CHANGELOG_LIMIT = 60;
+
+function changelogTab(sys, cfg = {}) {
+    const all = (sys && sys.changelog) || [];
+    const releases = all.slice(0, CHANGELOG_LIMIT);
     const v = (sys && sys.versions) || {};
+    const fetched = Boolean(cfg.fetchChangelog);
     return `<section class="tab" data-tab="changelog" hidden>
         ${tiles(
         tile('Running', v.current || '—', v.waiting ? `${v.latest} is unpacked and waiting` : 'up to date'),
         tile('Releases ahead', String(releases.length), releases.length ? 'not yet running' : 'nothing new'),
     )}
+        ${panel('Where these notes come from', toggle('fetchChangelog',
+        'Fetch the full changelog from Anthropic', fetched,
+        'One public file, no credentials, at most once an hour. Off, the tab reads the copy the client keeps in ~/.claude/cache, which covers only a little history and lags a release by up to a day.'), {
+        note: fetched
+            ? `Fetched from <code>raw.githubusercontent.com/anthropics/claude-code</code> and kept in the extension's own storage, so this still reads offline. ${all.length} release${all.length === 1 ? '' : 's'} known${all.length > CHANGELOG_LIMIT ? `, of which the newest ${CHANGELOG_LIMIT} are drawn` : ''}.`
+            : "Reading <code>~/.claude/cache/changelog.md</code>, the client's own copy. It is written when the client feels like it, which is why a version can be unpacked here before its notes are.",
+    })}
         ${releases.length
         // A release is a block of the page like any other, so each gets its own
         // panel rather than a heading in one long scroll.
-        ? releases.map((r, i) => panel(r.version,
-            `<ul class="log">${r.entries.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`,
-            { note: i === 0 ? "The client's own changelog, which it already keeps in <code>~/.claude/cache</code>. Only releases newer than the one running are shown." : '' })).join('')
-        : panel('', '<p class="empty">Nothing newer than the version already running.</p>')}
+        ? releases.map((r) => panel(r.version,
+            `<ul class="log">${r.entries.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`)).join('')
+        // "Nothing new" beside a tile saying a newer version is unpacked is a
+        // contradiction on one screen. The cache is the client's, refreshed on
+        // its own schedule, so a version can be on disk before its notes are —
+        // and that is what this says instead of pretending there is nothing.
+        : panel(v.waiting ? `${v.latest} is here, its notes are not` : 'Nothing new',
+            `<p class="empty">${v.waiting
+                ? `${esc(v.latest)} is unpacked and starts with the next launch, but the client has not written its notes into <code>~/.claude/cache/changelog.md</code> yet — the newest entry there is ${esc(v.current || '—')}, the version running now. They usually arrive within a day of the release.`
+                : 'Nothing newer than the version already running.'}</p>`)}
     </section>`;
 }
 
@@ -1789,6 +1832,18 @@ function settingsTab(config) {
         ${panel('Placeholders', paletteHtml, {
         note: 'Click one to insert it into the segment you last edited. The value beside each name is what it says on this machine right now.',
     })}
+        ${panel('Reading and the network', [
+        toggle('autoRefresh', 'Refresh on a timer', cfg.autoRefresh !== false,
+            `Redraw the page and the bar every ${esc(String(Number(cfg.refreshInterval) || 60))} seconds. Off, the expensive pass happens only when you press Reindex.`),
+        toggle('fetchLimits', 'Ask Anthropic for the account limits', cfg.fetchLimits !== false,
+            'The one request this extension makes. Off, nothing leaves the machine and the limit fields come from the cache statusline.sh shares, or stay empty.'),
+        toggle('checkPluginUpdates', 'Check the marketplaces for newer plugin versions', Boolean(cfg.checkPluginUpdates),
+            'Off by default. Off means the Versions panel compares against the marketplace copy already on this disk.'),
+        numberField('monthlyBudget', 'Monthly budget', Number(cfg.monthlyBudget) || 0,
+            'Dollars. Above zero, the month is drawn against it and you are told once at 80% and once at 100%. Zero turns both off.'),
+    ].join(''), {
+        note: 'The same switches that sit beside the things they govern — changing one here changes it there, and both write your own settings straight away.',
+    })}
         ${panel('Behaviour', `<table class="kv form">
           <tbody>
             <tr><th scope="row"><label for="alignment">Side of the bar</label></th>
@@ -1865,6 +1920,26 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
   border: 1px solid var(--vscode-panel-border);
   font-family: var(--vscode-editor-font-family); font-size: 11.5px; line-height: 1.55;
   white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* A setting where it stands. The box is drawn rather than native so it reads
+   the same in both themes and beside a table. */
+.switch { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0 12px;
+  cursor: pointer; max-width: 78ch; }
+.switch input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-box { flex: none; width: 30px; height: 17px; border-radius: 9px; margin-top: 1px;
+  background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+  border: 1px solid var(--vscode-panel-border); position: relative; transition: background .12s; }
+.switch-box::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
+  border-radius: 50%; background: var(--vscode-foreground); opacity: .6; transition: transform .12s, opacity .12s; }
+.switch input:checked + .switch-box { background: var(--vscode-charts-blue, #3794ff); border-color: transparent; }
+.switch input:checked + .switch-box::after { transform: translateX(13px); opacity: 1; background: #fff; }
+.switch input:focus-visible + .switch-box { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.switch-text { font-size: 12.5px; line-height: 1.45; }
+.switch-text b { font-weight: 500; }
+.switch-text .dim { display: block; font-size: 11.5px; margin-top: 2px; }
+.switch.numeric input[type="number"] { flex: none; width: 9ch; font: inherit; padding: 3px 6px;
+  border-radius: 4px; background: var(--vscode-input-background, var(--vscode-editor-background));
+  color: inherit; border: 1px solid var(--vscode-panel-border); }
 
 /* A block of the page: heading, the sentence under it, and the answer. The
    panel is what makes a tab read as a set of answers instead of a scroll; a
@@ -2297,6 +2372,29 @@ if (wanted.scrollY) {
   requestAnimationFrame(restore);
   addEventListener('load', () => requestAnimationFrame(restore));
 }
+// The countdown to the next rebuild. Rendered as a deadline rather than as a
+// number, because the page is redrawn on that very tick — a number printed into
+// the markup would be a whole interval out of date the moment it arrived.
+const nextEl = document.getElementById('next');
+if (nextEl && nextEl.dataset.next) {
+  const due = Number(nextEl.dataset.next);
+  const paint = () => {
+    const left = Math.round((due - Date.now()) / 1000);
+    nextEl.textContent = left > 0 ? 'next in ' + left + 's' : 'refreshing…';
+  };
+  paint();
+  setInterval(paint, 1000);
+}
+
+// A control carrying a data-set attribute writes its own setting the moment it moves.
+document.addEventListener('change', (e) => {
+  const el = e.target.closest('[data-set]');
+  if (!el || !api) return;
+  const value = el.type === 'checkbox' ? el.checked : Number(el.value);
+  if (el.type === 'number' && !Number.isFinite(value)) return;
+  api.postMessage({ type: 'set', key: el.dataset.set, value });
+});
+
 document.addEventListener('click', (e) => {
   const open = e.target.closest('[data-open]');
   if (!open || !api) return;
@@ -2587,7 +2685,9 @@ function render(index, total, meta) {
 <title>Claude Dashboard</title><style>${STYLE}</style></head><body>
 <h1>Claude Dashboard <span class="ver">v${esc(VERSION)}</span></h1>
 <p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
- · <button id="refresh" class="link">Reindex</button></p>
+ · <button id="refresh" class="link">Reindex</button>${(meta.config || {}).autoRefresh === false
+        ? ' <span class="dim" id="next">auto-refresh off</span>'
+        : ` <span class="dim" id="next" data-next="${Number(meta.lastRun || 0) + (Number((meta.config || {}).refreshInterval) || 60) * 1000}">·</span>`}</p>
 ${navHtml()}
 ${nowTab(meta.now, meta.workflows, meta.metrics)}
 ${overviewTab(total, dayModels, modelOrder, meta.config || {})}
@@ -2610,7 +2710,7 @@ ${liveTab(meta.system)}
 ${tasksTab(meta.system)}
 ${diskTab(meta.system)}
 ${contextTab(total, meta.system)}
-${changelogTab(meta.system)}
+${changelogTab(meta.system || {}, meta.config || {})}
 <footer>All spend figures are estimates from public per-million-token rates, not a bill.</footer>
 <script>${SCRIPT}</script></body></html>`;
 }
