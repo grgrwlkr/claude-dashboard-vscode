@@ -18,7 +18,13 @@ const { resolveSetting } = require('./session');
 // towards hiding: `apiKeyHelper` holds a command rather than a key and is
 // hidden anyway, because the page is a webview in a published extension and a
 // screenshot of it travels further than the person taking it expects.
-const SECRET = /key|token|secret|password|credential|auth/i;
+// `pat` and `bot` are bounded by a non-letter on each side, or they would take
+// PATH, PATTERN and anything ending in -bot with them. `_` is not a letter, so
+// GH_PAT and TELEGRAM_BOT still match, which is the point: they are the names
+// that carry a credential whose value has no recognisable shape at all — a
+// Slack webhook URL and a Telegram token are long mixed-case strings with no
+// issuer prefix, and nothing but the name can catch them.
+const SECRET = /key|token|secret|password|credential|auth|webhook|dsn|(?:^|[^a-z])pat(?:[^a-z]|$)|(?:^|[^a-z])bot(?:[^a-z]|$)/i;
 
 // The name is not the only witness, and inside `env` it is the weaker one: the
 // keys there are the user's own, and `GH_PAT`, `GITLAB_PAT`, `SLACK_BOT` and
@@ -40,7 +46,11 @@ const SECRET_VALUE = new RegExp([
     '//[^/\\s:@]{3,}:[^/\\s@]{3,}@',
     '//[A-Za-z0-9_.-]{16,}@',
     // Long unbroken hex, but only if it is actually mixed: `'a'.repeat(200)` is
-    // hex by the letter and a credential by no other measure.
+    // hex by the letter and a credential by no other measure. This does hide a
+    // 40-character git SHA, which is a deliberate trade rather than an oversight:
+    // one cannot reach this tab — `fromHost` admits only the client's own
+    // prefixes, and a commit hash has no business in its settings — while the
+    // secrets shaped exactly like it are common. A short SHA does not match.
     '\\b(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{32,}\\b',
 ].join('|'));
 

@@ -129,6 +129,32 @@ test('a value shaped like a credential is masked whatever it is filed under', ()
     assert.equal(value('CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS'), '40');
 });
 
+// Where the shape gives nothing away, the name is all there is. A Slack webhook
+// URL and a Telegram bot token are long mixed-case strings with no issuer
+// prefix — no rule over the value can tell them from a build id, so these four
+// names are caught by name, bounded so that PATH and PATTERN are not.
+test('a credential whose value has no recognisable shape is caught by its name', () => {
+    const out = cs.clientSettings({
+        chain: [file('user', {
+            env: {
+                SLACK_WEBHOOK: 'https://hooks.slack.com/services/T00/B00/PLANTEDAbCdEfGhIjKlMnOp',
+                TELEGRAM_BOT: '7123456789:PLANTEDqTcvCH1vGWJxfSeofSAs0K5PALDsaw',
+                PATH: '/usr/local/bin:/usr/bin',
+                PATTERN: '*.jsonl',
+            },
+        })],
+        registry: REGISTRY,
+        hostEnv: {},
+    });
+
+    assert.ok(!JSON.stringify(out).includes('PLANTED'), 'a credential named plainly reached the page');
+    const value = (key) => out.env.fromSettings.find((e) => e.key === key).value;
+    assert.equal(value('SLACK_WEBHOOK'), '•••');
+    assert.equal(value('TELEGRAM_BOT'), '•••');
+    assert.equal(value('PATH'), '/usr/local/bin:/usr/bin', 'PATH is not a credential for containing "pat"');
+    assert.equal(value('PATTERN'), '*.jsonl');
+});
+
 test('anything whose name reads like a credential is masked', () => {
     const chain = [file('user', {
         apiKeyHelper: '/usr/local/bin/mint-token',
