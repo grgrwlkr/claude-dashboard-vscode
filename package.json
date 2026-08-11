@@ -1,8 +1,8 @@
 {
-  "name": "claude-statusline",
-  "displayName": "Statusline for Claude Code",
-  "description": "Unofficial. Claude Code limits, session context, spend and a usage dashboard, in the VS Code status bar.",
-  "version": "0.19.17",
+  "name": "claude-dashboard",
+  "displayName": "Dashboard & Statusline for Claude Code",
+  "description": "Unofficial. A 22-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
+  "version": "0.19.18",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -14,12 +14,12 @@
   "qna": "marketplace",
   "repository": {
     "type": "git",
-    "url": "https://github.com/grgrwlkr/claude-statusline-vscode.git"
+    "url": "https://github.com/grgrwlkr/claude-dashboard-vscode.git"
   },
   "bugs": {
-    "url": "https://github.com/grgrwlkr/claude-statusline-vscode/issues"
+    "url": "https://github.com/grgrwlkr/claude-dashboard-vscode/issues"
   },
-  "homepage": "https://github.com/grgrwlkr/claude-statusline-vscode#readme",
+  "homepage": "https://github.com/grgrwlkr/claude-dashboard-vscode#readme",
   "engines": {
     "vscode": "^1.100.0"
   },

@@ -9,12 +9,12 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-statusline"><img src="https://vsmarketplacebadges.dev/version-short/grgrwlkr.claude-statusline.svg" alt="VS Marketplace version" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-statusline"><img src="https://vsmarketplacebadges.dev/installs-short/grgrwlkr.claude-statusline.svg" alt="Installs" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-statusline&ssr=false#review-details"><img src="https://vsmarketplacebadges.dev/rating-star/grgrwlkr.claude-statusline.svg" alt="Rating" /></a>
-  <a href="https://open-vsx.org/extension/grgrwlkr/claude-statusline"><img src="https://img.shields.io/open-vsx/v/grgrwlkr/claude-statusline?label=Open%20VSX&color=a60ee5" alt="Open VSX version" /></a>
-  <a href="https://github.com/grgrwlkr/claude-statusline-vscode"><img src="https://img.shields.io/github/stars/grgrwlkr/claude-statusline-vscode?style=flat&logo=github&color=444" alt="GitHub stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/grgrwlkr/claude-statusline-vscode?color=blue" alt="MIT licence" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard"><img src="https://vsmarketplacebadges.dev/version-short/grgrwlkr.claude-dashboard.svg" alt="VS Marketplace version" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard"><img src="https://vsmarketplacebadges.dev/installs-short/grgrwlkr.claude-dashboard.svg" alt="Installs" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard&ssr=false#review-details"><img src="https://vsmarketplacebadges.dev/rating-star/grgrwlkr.claude-dashboard.svg" alt="Rating" /></a>
+  <a href="https://open-vsx.org/extension/grgrwlkr/claude-dashboard"><img src="https://img.shields.io/open-vsx/v/grgrwlkr/claude-dashboard?label=Open%20VSX&color=a60ee5" alt="Open VSX version" /></a>
+  <a href="https://github.com/grgrwlkr/claude-dashboard-vscode"><img src="https://img.shields.io/github/stars/grgrwlkr/claude-dashboard-vscode?style=flat&logo=github&color=444" alt="GitHub stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/grgrwlkr/claude-dashboard-vscode?color=blue" alt="MIT licence" /></a>
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
   <a href="#-the-dashboard"><b>Dashboard</b></a> ·
   <a href="#-configuring-the-bar"><b>Configure</b></a> ·
   <a href="#-privacy"><b>Privacy</b></a> ·
-  <a href="https://github.com/grgrwlkr/claude-statusline-vscode/issues"><b>Issues</b></a>
+  <a href="https://github.com/grgrwlkr/claude-dashboard-vscode/issues"><b>Issues</b></a>
 </p>
 
 > ⚠️ **Unofficial.** Not affiliated with, endorsed by or sponsored by Anthropic, PBC.
@@ -67,19 +67,19 @@ editor rather than fighting it.
 
 ## 🚀 Install
 
-From the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-statusline),
-or from [Open VSX](https://open-vsx.org/extension/grgrwlkr/claude-statusline) for
+From the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=grgrwlkr.claude-dashboard),
+or from [Open VSX](https://open-vsx.org/extension/grgrwlkr/claude-dashboard) for
 Cursor, Windsurf, VSCodium and Gitpod:
 
 ```bash
-code --install-extension grgrwlkr.claude-statusline
+code --install-extension grgrwlkr.claude-dashboard
 ```
 
 From source, which is also how you develop on it:
 
 ```bash
 npx @vscode/vsce package
-code --install-extension claude-statusline-*.vsix
+code --install-extension claude-dashboard-*.vsix
 ```
 
 Then reload the window (`Cmd+Shift+P` → Reload Window) — VS Code keeps the old
@@ -294,7 +294,7 @@ request can leave the machine, and it is optional.**
 | --- | --- |
 | **What is read locally** | `~/.claude` — transcripts, the session registry, settings, plugins, workflow runs. Read-only: nothing of ours is ever written there. |
 | **What is written** | Only inside the extension's own storage: the aggregate index and the limit history. Neither holds prompt text. |
-| **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint Claude Code's own `/usage` screen reads — carrying the OAuth token Claude Code already stores. At most once a minute per machine, shared with `statusline.sh` through the same cache file. |
+| **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage` — the same endpoint Claude Code's own `/usage` screen reads — carrying the OAuth token Claude Code already stores. At most once a minute per machine, however many windows are open — and shared with a terminal `statusline.sh` through the same cache file if you run one. |
 | **What happens to the token** | Read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and put into one `Authorization` header. Never logged, never cached, never written, never sent anywhere else. |
 | **The only other thing that could** | `claudeStatusline.checkPluginUpdates` asks each plugin's marketplace whether a newer version exists. **Off by default**, and off means those requests are never made. |
 | **Telemetry** | None. No analytics, no crash reporting, no phoning home. |
@@ -326,9 +326,12 @@ workflow view, Open the workflow script and Copy the workflow run id.
 Nothing is asked of the CLI — it has no channel to ask.
 
 - **Limits** — `api.anthropic.com/api/oauth/usage`, the endpoint the `/usage`
-  screen reads. The cache is shared with `~/.claude/statusline.sh`, so one request
-  per minute covers every VS Code window and terminal session on the machine.
-  Data older than 30 minutes is not drawn.
+  screen reads. The extension makes that request itself and caches the answer in
+  `~/.claude/statusline-usage.json`, at most once a minute per machine however
+  many windows are open. Nothing else has to be installed for this to work; the
+  cache and its stamp simply use the same file a terminal `statusline.sh` would,
+  so if you happen to run one too, the two share a single request rather than
+  making two. Data older than 30 minutes is not drawn.
 - **The window's session** — `~/.claude/sessions/*.json`. The panel's process is a
   direct child of the extension host, so `ppid(pid) === process.pid` maps a window
   to its own session exactly, rather than guessing at "the most recent record".
@@ -354,7 +357,7 @@ node --test 'test/*.test.js'     # the whole suite, no build step, no dependenci
 ```
 
 Issues and pull requests are welcome — a
-[bug report](https://github.com/grgrwlkr/claude-statusline-vscode/issues/new?template=bug_report.yml)
+[bug report](https://github.com/grgrwlkr/claude-dashboard-vscode/issues/new?template=bug_report.yml)
 that names your OS, VS Code version and Claude Code version is one that can
 actually be chased.
 

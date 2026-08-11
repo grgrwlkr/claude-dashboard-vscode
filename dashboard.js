@@ -1898,7 +1898,7 @@ function settingsTab(config) {
         toggle('autoRefresh', 'Refresh on a timer', cfg.autoRefresh !== false,
             `Redraw the page and the bar every ${esc(String(Number(cfg.refreshInterval) || 60))} seconds. Off, the expensive pass happens only when you press Reindex.`),
         toggle('fetchLimits', 'Ask Anthropic for the account limits', cfg.fetchLimits !== false,
-            'The one request this extension makes. Off, nothing leaves the machine and the limit fields come from the cache statusline.sh shares, or stay empty.'),
+            'The one request this extension makes, at most once a minute per machine. Off, nothing leaves the machine and the limit fields stay empty unless something else has already written the shared cache.'),
         toggle('checkPluginUpdates', 'Check the marketplaces for newer plugin versions', Boolean(cfg.checkPluginUpdates),
             'Off by default. Off means the Versions panel compares against the marketplace copy already on this disk.'),
         numberField('monthlyBudget', 'Monthly budget', Number(cfg.monthlyBudget) || 0,
