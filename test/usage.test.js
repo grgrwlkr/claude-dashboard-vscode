@@ -116,6 +116,32 @@ test('bar: cells beyond the plan are marked as spend ahead of schedule', () => {
     assert.equal(u.bar(17, 50), '▒▒·░░░');
 });
 
+test('bar: no overspend cell while spending is at or behind the plan', () => {
+    // Each of these lit an overspend cell before the fix, because ceil(fact)
+    // overtakes round(plan) on close values. 84/90 is behind schedule and used
+    // to render exactly like 92/84, which is ahead of it.
+    assert.ok(!u.bar(84, 90).includes('▓'), 'behind plan');
+    assert.ok(!u.bar(84, 84).includes('▓'), 'level with plan');
+    assert.ok(!u.bar(1, 8).includes('▓'), 'first day of the week');
+    assert.notEqual(u.bar(84, 90), u.bar(92, 84));
+
+    let lying = 0;
+    for (let fact = 0; fact <= 100; fact++) {
+        for (let plan = 0; plan <= 100; plan++) {
+            if (fact <= plan && u.bar(fact, plan).includes('▓')) lying++;
+        }
+    }
+    assert.equal(lying, 0, 'no (fact <= plan) pair may claim overspend');
+});
+
+test('bar: real overspend thinner than a cell still gets one', () => {
+    // 100% against a 99% plan rounds to six cells each, so the zone would come
+    // out zero-wide exactly where it matters most. statusline.sh clamps the plan
+    // to f-1 for this; so do we.
+    assert.equal(u.bar(100, 99), '▒▒▒▒▒▓');
+    assert.ok(u.bar(92, 84).includes('▓'), 'plainly ahead of plan');
+});
+
 test('barText assembles the whole bar string', () => {
     const elapsed = Math.round(0.19 * WEEK);
     const weekly = { pct: 23, reset: NOW + WEEK - elapsed };

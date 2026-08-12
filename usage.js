@@ -222,12 +222,24 @@ function fmtWhen(ts) {
 }
 
 // Fact and plan in one bar: cells beyond the plan are spend ahead of schedule.
+//
+// The overspend cell is decided by comparing the two percentages, never by the
+// two rounded cell counts. `f` is a ceil and `p` a round, so on close values `f`
+// jumps `p` by one and paints an overspend that is not there: 84 % against a
+// plan of 90 % — behind schedule — rendered identically to 92 % against 84 %,
+// and 1 % on day one of the week opened with a red cell. That is 216 of the
+// 10201 (fact, plan) pairs. statusline.sh carries the same two rules for the
+// same reason; keeping them in step is what makes both sides agree.
 function bar(fact, plan) {
     const f = Math.min(BAR_WIDTH, Math.max(0, Math.ceil((fact * BAR_WIDTH) / 100)));
-    const p = Math.min(BAR_WIDTH, Math.max(0, Math.round((plan * BAR_WIDTH) / 100)));
+    let p = Math.min(BAR_WIDTH, Math.max(0, Math.round((plan * BAR_WIDTH) / 100)));
+    const over = fact > plan;
+    // Real overspend gets a cell even when it is thinner than one: without this
+    // the zone comes out zero-wide exactly when it matters.
+    if (over && p >= f) p = Math.max(0, f - 1);
     let out = '';
     for (let i = 0; i < BAR_WIDTH; i++) {
-        if (i < f && i >= p) out += '▓';
+        if (over && i < f && i >= p) out += '▓';
         else if (i < f) out += '▒';
         else if (i < p) out += '·';
         else out += '░';
