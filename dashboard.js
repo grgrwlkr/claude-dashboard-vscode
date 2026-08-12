@@ -2443,7 +2443,34 @@ ul.log li { margin: 2px 0; opacity: .85; }
 footer { margin-top: 28px; opacity: .5; font-size: 11px; }
 `;
 
+/**
+ * What the header countdown says, and the deadline it counts to next.
+ *
+ * A rebuild is what replaces this document, so a counter that has run out and
+ * is still on screen means the tick did not happen: the panel was behind
+ * another tab, the settings editor was open, or a rebuild was already running.
+ * Waiting for a replacement that is not coming is how it sat on "refreshing…"
+ * for as long as the tab stayed in the background.
+ *
+ * The grace is the window a real rebuild takes — an index pass over every
+ * transcript plus the marketplace request, seconds rather than milliseconds —
+ * during which "refreshing…" is the truth. Past it the deadline rolls forward
+ * by one interval, which is when the next tick is due anyway.
+ *
+ * Defined here rather than inside SCRIPT so a test can call it; its source is
+ * interpolated into the page below.
+ */
+function countdown(due, now, every, grace = 10000) {
+    const left = Math.round((due - now) / 1000);
+    if (left > 0) return { text: 'next in ' + left + 's', due };
+    if (now - due < grace) return { text: 'refreshing…', due };
+    const rolled = now + every;
+    return { text: 'next in ' + Math.round(every / 1000) + 's', due: rolled };
+}
+
 const SCRIPT = `
+${String(countdown)}
+
 // acquireVsCodeApi may be called once per webview and throws on the second try,
 // so the page takes one handle here and everything below shares it. It is
 // declared first because the tab memory reads it on the very next lines — a
@@ -2521,8 +2548,9 @@ if (nextEl && pauseEl) {
       ? 'Stop rebuilding the page on the timer. The same claudeStatusline.autoRefresh you can set on the Settings tab.'
       : 'Rebuild the page on the timer again.';
     if (!on) { nextEl.textContent = 'paused'; return; }
-    const left = Math.round((due - Date.now()) / 1000);
-    nextEl.textContent = left > 0 ? 'next in ' + left + 's' : 'refreshing…';
+    const state = countdown(due, Date.now(), every);
+    due = state.due;
+    nextEl.textContent = state.text;
   };
   // One setting, two controls: the switch on the Settings tab and this button
   // are the same autoRefresh, so flipping either has to move the other. The
@@ -3008,7 +3036,7 @@ ${changelogTab(meta.system || {}, meta.config || {})}
 module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
-    sessionLabel, navHtml, SECTIONS, CACHE_PARTS,
+    sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab,
     limitsTab, weekLabel, nowTab, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,

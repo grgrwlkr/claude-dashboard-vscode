@@ -638,6 +638,15 @@ let openTab = '';
 // flight, and the settings editor, whose unsaved fields a redraw would discard.
 let refreshing = false;
 
+// When the page on screen was last assembled. A hidden panel skips its ticks,
+// so this is how stale the reader's copy is when the tab comes back.
+let lastRender = 0;
+
+// The slow tick's interval, floored the same way wherever it is read: the timer
+// arms itself with it, and a page has missed a tick exactly when it is older
+// than one of these.
+const tickSeconds = () => Math.max(15, vscode.workspace.getConfiguration('claudeStatusline').get('refreshInterval') || 60);
+
 // Returns the rebuild, so a caller — the tick ignores it, a test does not — can
 // wait for the page to actually be replaced.
 function refreshDashboard(context) {
@@ -1031,6 +1040,10 @@ async function handleMessage(context, msg) {
 }
 
 async function showDashboard(context, { force = false, silent = false } = {}) {
+    // Stamped where the build starts, not where it ends: a visibility event that
+    // lands in the middle of this one would read the previous stamp, find the
+    // page stale and start a second build of the same reading.
+    lastRender = Date.now();
     const storageDir = context.globalStorageUri.fsPath;
     const { index, stats } = await buildIndex(storageDir, { force, silent });
     const total = ix.summarize(index);
@@ -1066,6 +1079,20 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
         );
         panel.onDidDispose(() => { panel = null; });
         panel.webview.onDidReceiveMessage((msg) => handleMessage(context, msg));
+        // A panel behind another editor tab is left alone by the tick, so the
+        // page a reader comes back to is as old as the moment they left — and
+        // its countdown has been sitting past zero all that time. Coming back
+        // into view is the one moment that page is worth rebuilding.
+        // Only when it has actually missed a tick: flipping between two tabs
+        // must not cost an index pass each way.
+        // Returned rather than fired and forgotten, for the same reason
+        // refreshDashboard returns its rebuild: the editor ignores it, a test
+        // waits on it.
+        panel.onDidChangeViewState(() => {
+            if (!panel || !panel.visible) return Promise.resolve(false);
+            if (Date.now() - lastRender < tickSeconds() * 1000) return Promise.resolve(false);
+            return refreshDashboard(context);
+        });
     } else {
         panel.reveal(vscode.ViewColumn.Active);
     }
@@ -1182,7 +1209,7 @@ function activate(context) {
     let slow = null;
     const armSlow = () => {
         if (slow) clearInterval(slow);
-        const every = Math.max(15, vscode.workspace.getConfiguration('claudeStatusline').get('refreshInterval') || 60);
+        const every = tickSeconds();
         slow = setInterval(() => {
             // Read per tick, not captured: flipping the switch then has to move
             // nothing but itself, which is why only the interval re-arms below.

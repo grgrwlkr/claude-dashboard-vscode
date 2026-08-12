@@ -80,6 +80,9 @@ const vscode = {
                     postMessage(msg) { panel.webview.posted.push(msg); return Promise.resolve(true); },
                 },
                 onDidDispose(cb) { panel.__dispose = cb; },
+                // The editor fires this whenever the tab is shown or hidden; a
+                // test drives it by flipping `visible` and calling __viewState.
+                onDidChangeViewState(cb) { panel.__viewState = cb; },
                 reveal() {},
                 dispose() { if (panel.__dispose) panel.__dispose(); },
             };

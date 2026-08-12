@@ -814,6 +814,42 @@ test('the open dashboard is rebuilt on the tick, except while settings are open'
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
+// The tick leaves a hidden panel alone, which is right — and left the page a
+// reader came back to as old as the moment they left, its countdown stuck past
+// zero on "refreshing…" for as long as the tab stayed behind another one.
+// Coming back into view is the moment that page is worth rebuilding.
+test('a page that missed its ticks while hidden is rebuilt when the tab comes back', async () => {
+    const run = activate({ segments: ['{weekly}'], settings: { refreshInterval: 60 } });
+    let panel;
+    const real = Date.now;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({ type: 'tab', id: 'now' });
+
+        // Away and back inside one interval: the page on screen is still the
+        // reading the last tick took, and rebuilding it would cost an index
+        // pass for every flick between two editor tabs.
+        panel.visible = false;
+        await ext.__refreshDashboard(run.context);
+        panel.visible = true;
+        panel.webview.html = 'FRESH';
+        await panel.__viewState();
+        assert.equal(panel.webview.html, 'FRESH', 'a page that has not missed a tick is left alone');
+
+        // Hidden across a tick, and the page is stale by exactly the amount the
+        // countdown has been sitting past zero.
+        panel.visible = false;
+        panel.webview.html = 'STALE';
+        Date.now = () => real() + 120_000;
+        await ext.__refreshDashboard(run.context);
+        assert.equal(panel.webview.html, 'STALE', 'the hidden panel still skips its tick');
+
+        panel.visible = true;
+        await panel.__viewState();
+        assert.notEqual(panel.webview.html, 'STALE', 'coming back into view rebuilds it');
+    } finally { Date.now = real; if (panel) panel.dispose(); run.dispose(); }
+});
+
 // The settings tab shipped blank: every palette value a dash, every preview
 // "hidden", while the bar two inches below was full of numbers. The page read
 // the state through a property parked on the ExtensionContext, which the stub

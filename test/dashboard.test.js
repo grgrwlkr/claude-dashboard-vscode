@@ -988,3 +988,42 @@ test('the meter thresholds are the ones statusline.sh colours by', () => {
     assert.equal(db.meterTone(80), 'hot', '80 is the first hot value, as in color_for');
     assert.equal(db.meterTone(100), 'hot');
 });
+
+// The rebuild is what replaces the document, so a counter that has run out and
+// is still on screen means the tick never came — the panel was behind another
+// tab, or the settings editor was open. It used to wait for that replacement
+// forever, which is what the reader saw: "refreshing…" from the moment the tab
+// went into the background until it came back.
+test('the countdown rolls over instead of waiting for a rebuild that was skipped', () => {
+    const now = Date.parse('2026-08-12T13:31:00Z');
+    const every = 60_000;
+
+    // Counting down: the deadline is untouched.
+    const ahead = db.countdown(now + 42_000, now, every);
+    assert.deepEqual(ahead, { text: 'next in 42s', due: now + 42_000 });
+
+    // Just past it, a rebuild really may be running — it reads every transcript
+    // and asks the marketplace, which is seconds, not milliseconds.
+    assert.equal(db.countdown(now - 3_000, now, every).text, 'refreshing…');
+    assert.equal(db.countdown(now - 3_000, now, every).due, now - 3_000, 'and the deadline still stands');
+
+    // Past the grace nothing is coming: the deadline moves to the next tick.
+    const rolled = db.countdown(now - 30_000, now, every);
+    assert.equal(rolled.text, 'next in 60s');
+    assert.equal(rolled.due, now + every);
+
+    // A minute later it is counting down again rather than stuck.
+    assert.equal(db.countdown(rolled.due, now + 20_000, every).text, 'next in 40s');
+});
+
+// The function above is the page's, not the module's: its source is interpolated
+// into the script the webview runs. Exported only so it can be tested — a test
+// that never checks it reached the page would pass over a page that lost it.
+test('the countdown the page runs is the one under test', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()), {
+        files: 1, lastRun: Date.now(), history: [],
+        config: { autoRefresh: true, refreshInterval: 60, segments: [], defaults: [], presets: [], palette: [] },
+    });
+    assert.match(html, /function countdown\(due, now, every/);
+    assert.match(html, /const state = countdown\(due, Date\.now\(\), every\);/);
+});
