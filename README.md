@@ -60,7 +60,7 @@ machine that uses them is the larger half of the bill.
 This extension reads that state and gives it two surfaces: **a status bar you
 write yourself**, and **a dashboard** over every transcript on the machine.
 
-![The Now tab: both limit windows, the week as a track, context, spend, tasks and the agents of a running workflow](media/screenshots/now-dark.png)
+![The Now tab: both limit windows, the week as a track of the time it has left, context, spend, tasks and the agents of a running workflow](media/screenshots/now-dark.png)
 
 <a name="what-you-get"></a><a name="user-content-what-you-get"></a>
 
@@ -220,8 +220,9 @@ answer. A figure that is a share of something is drawn as one rather than only
 written.
 
 **⏱️ Now** — the state of Claude as the page was opened: the four numbers that
-decide the next hour as headline tiles, the week as a track with spend, now and
-the forecast on one line, the four status-bar tooltips at full width, and a row
+decide the next hour as headline tiles, the week as a track of time — how long
+the quota still lasts and how long the week runs on without it — the four
+status-bar tooltips at full width, and a row
 per agent of every workflow still running. Those panels are not a copy of the
 tooltips: both are rendered from the same sections in `status.js`, so the page
 cannot fall behind the hover.

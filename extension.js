@@ -70,10 +70,13 @@ function renderSection(section) {
             if (block.rows.length === 0) continue;
             // The meter is the bar the status bar itself draws — same glyphs,
             // same rounding, so a hover never disagrees with the item under it.
+            // Passed its own percentage as the plan, because a meter is a share
+            // and has no plan to be ahead of: with a plan of zero every filled
+            // cell came out hatched, and hatched now means overspend.
             // Three columns, so the head has to be three wide: a row with more
             // cells than the header loses the extras, which here is the reset.
             md.appendMarkdown(table(block.rows.map((r) => [
-                r.label, `\`${u.bar(r.pct, 0)}\` **${r.value}**`, r.note ? `_${r.note}_` : '',
+                r.label, `\`${u.bar(r.pct, r.pct)}\` **${r.value}**`, r.note ? `_${r.note}_` : '',
             ]), ['', '', '']));
         }
         if (block.kind === 'table') {

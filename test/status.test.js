@@ -82,7 +82,7 @@ test('the limits section reads every window and says which side of plan it is on
     assert.equal(metersOf(limits)[2].note, '');
 
     const pace = notes(limits).find((n) => n.label === 'Pace');
-    assert.match(pace.text, /52% spent, 61% of the window elapsed: 9% under plan/);
+    assert.match(pace.text, /52% spent, 61% of the window elapsed: 9% behind plan/);
 
     // The forecast lands past the reset, so it is stated as the reassurance it is.
     const forecast = notes(limits).find((n) => n.label === 'Forecast');

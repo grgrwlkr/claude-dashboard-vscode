@@ -241,7 +241,11 @@ test('a share in the hover is the bar the status bar itself draws', () => {
 
     const lines = md.split('\n');
     const row = lines.find((line) => line.startsWith('| 7d '));
-    assert.ok(row.includes(`\`${u.bar(52, 0)}\``), `the meter is not the bar: ${row}`);
+    // A meter is a share, not a pace, so it is drawn against its own percentage:
+    // against a plan of zero every filled cell is hatched, and hatched means
+    // spend past the plan.
+    assert.ok(row.includes(`\`${u.bar(52, 52)}\``), `the meter is not the bar: ${row}`);
+    assert.ok(!row.includes('▓'), `a share cannot be ahead of anything: ${row}`);
 
     const width = (line) => line.split('|').length - 1;
     lines.forEach((line, i) => {

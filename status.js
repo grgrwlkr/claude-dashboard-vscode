@@ -62,7 +62,9 @@ function limits(d, h, env) {
         // Pace as a sentence: spend against plan is a comparison, and a
         // comparison squeezed into a row label is what was hard to read.
         const diff = lim.weekly.pct - pc.plan;
-        const verdict = diff > 0 ? `${diff}% ahead of plan` : diff < 0 ? `${-diff}% under plan` : 'exactly on plan';
+        // "behind", not "under": the track header says the same thing in the
+        // same words, and a verdict assembled in two files may not drift.
+        const verdict = diff > 0 ? `${diff}% ahead of plan` : diff < 0 ? `${-diff}% behind plan` : 'exactly on plan';
         blocks.push({
             kind: 'note',
             tone: 'plain',
