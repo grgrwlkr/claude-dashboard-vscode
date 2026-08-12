@@ -45,7 +45,7 @@
 > the tool already leaves on your own disk.
 
 ```text
-✻ 7d 27% ▒▒░░░░ dry 12.08 ~13h    ▤ 29% 294k/1M    ~$114.29 $5.18/h    ⧉ 2 ▸ 3/6
+✻ 7d 27% ██░░░░ dry 12.08 ~13h    ▤ 29% 294k/1M    ~$114.29 $5.18/h    ⧉ 2 ▸ 3/6
 ```
 
 Claude Code writes a great deal to disk and shows you almost none of it. Its VS
@@ -68,7 +68,7 @@ write yourself**, and **a dashboard** over every transcript on the machine.
 
 |  |  |
 | --- | --- |
-| **📉 Never hit the wall by surprise** | The weekly and 5-hour windows with a pace bar: `▓` is spend ahead of an even burn, `·` is plan you have not reached yet. `dry` says when you hit 100 % if the pace holds — and stays quiet when that lands after the reset, because running out then never happens. |
+| **📉 Never hit the wall by surprise** | The weekly and 5-hour windows with a pace bar: `█` is spend, `▓` is spend ahead of an even burn, `▒` is plan you have not reached yet. `dry` says when you hit 100 % if the pace holds — and stays quiet when that lands after the reset, because running out then never happens. |
 | **🧠 The context of *this* window** | How full the model's window is for the Claude session open in this VS Code window — not "the newest session on the machine". Hover for model, effort, thinking, advisor, cache share, auto-compact distance, branch and client version. |
 | **💸 What it actually costs** | Session spend with a burn rate, today across every project, and a dashboard that breaks it down by day, model, project, branch, tool and skill. Estimated from public rates — the one figure that is real money, usage credits, is labelled as such. |
 | **🤖 The agents nobody else shows** | Subagents and workflow agents write their own transcripts, so on a machine that runs fan-outs their spend is the larger half — and it is invisible in the terminal statusline, which only ever sees one session. Here they get a tree, a table and a live row each. |

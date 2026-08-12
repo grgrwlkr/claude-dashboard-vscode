@@ -107,13 +107,13 @@ test('fmtLeft: days, hours, minutes, and the past', () => {
 
 test('bar: cells beyond the plan are marked as spend ahead of schedule', () => {
     assert.equal(u.bar(0, 0), '░░░░░░');
-    assert.equal(u.bar(100, 100), '▒▒▒▒▒▒');
+    assert.equal(u.bar(100, 100), '██████');
     // Fact 50% (3 cells) against a 17% plan (1 cell): two cells are ahead.
-    assert.equal(u.bar(50, 17), '▒▓▓░░░');
-    // Fact behind the plan: unspent plan cells are dotted. Fact takes two cells,
-    // not one — ceil lights a cell at any non-zero percent, the same behaviour as
-    // (fact*w+99)/100 in statusline.sh.
-    assert.equal(u.bar(17, 50), '▒▒·░░░');
+    assert.equal(u.bar(50, 17), '█▓▓░░░');
+    // Fact behind the plan: plan cells the spending has not reached are light.
+    // Fact takes two cells, not one — ceil lights a cell at any non-zero
+    // percent, the same behaviour as (fact*w+99)/100 in statusline.sh.
+    assert.equal(u.bar(17, 50), '██▒░░░');
 });
 
 test('bar: no overspend cell while spending is at or behind the plan', () => {
@@ -138,7 +138,7 @@ test('bar: real overspend thinner than a cell still gets one', () => {
     // 100% against a 99% plan rounds to six cells each, so the zone would come
     // out zero-wide exactly where it matters most. statusline.sh clamps the plan
     // to f-1 for this; so do we.
-    assert.equal(u.bar(100, 99), '▒▒▒▒▒▓');
+    assert.equal(u.bar(100, 99), '█████▓');
     assert.ok(u.bar(92, 84).includes('▓'), 'plainly ahead of plan');
 });
 
@@ -146,7 +146,7 @@ test('barText assembles the whole bar string', () => {
     const elapsed = Math.round(0.19 * WEEK);
     const weekly = { pct: 23, reset: NOW + WEEK - elapsed };
     const text = u.barText(weekly, u.pace(weekly, NOW), NOW_MS);
-    assert.match(text, /^✻ 7d 23% [▓▒·░]{6} dry [A-Z][a-z]{2} \d{2}\.\d{2} ~\d{2}h$/);
+    assert.match(text, /^✻ 7d 23% [█▓▒░]{6} dry [A-Z][a-z]{2} \d{2}\.\d{2} ~\d{2}h$/);
 });
 
 test('barText carries neither bar nor dry without a pace', () => {

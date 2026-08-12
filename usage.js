@@ -237,11 +237,16 @@ function bar(fact, plan) {
     // Real overspend gets a cell even when it is thinner than one: without this
     // the zone comes out zero-wide exactly when it matters.
     if (over && p >= f) p = Math.max(0, f - 1);
+    // Four glyphs on one scale of density, so the eye ranks them without a
+    // legend: solid is spent, hatched is spent past the plan, light is plan the
+    // spending has not caught up to, empty is the rest. The previous set put a
+    // middle shade on ordinary spend and a dot on the plan, which sat outside
+    // that ranking and read as damage rather than as less.
     let out = '';
     for (let i = 0; i < BAR_WIDTH; i++) {
         if (over && i < f && i >= p) out += '▓';
-        else if (i < f) out += '▒';
-        else if (i < p) out += '·';
+        else if (i < f) out += '█';
+        else if (i < p) out += '▒';
         else out += '░';
     }
     return out;

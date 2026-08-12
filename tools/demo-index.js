@@ -233,7 +233,7 @@ function runs(now) {
 // that rendering is done by extension.js over a live reading, and outside it the
 // preview harness has to stand in or the cards show their own templates back.
 const VALUES = {
-    weekly: '57%', weeklyBar: '▒▒▒▓░░', plan: '64%', drift: '-7%', dry: '', dryAt: 'Thu 13.08, ~19h',
+    weekly: '57%', weeklyBar: '████░░', plan: '64%', drift: '-7%', dry: '', dryAt: 'Thu 13.08, ~19h',
     dryLeft: '2d4h', reset: 'Wed 13.08 09:00', resetLeft: '2d12h', session5h: '43%', session5hLeft: '2h40m',
     scoped: 'opus 61%', ctx: '29%', ctxTokens: '294k', ctxWindow: '1M', ctxCache: '78%', compact: '78%',
     model: 'Opus 5', effort: 'xhigh', advisor: 'Fable 5', thinking: 'on', outputStyle: 'default',
