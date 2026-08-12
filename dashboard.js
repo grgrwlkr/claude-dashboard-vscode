@@ -1719,44 +1719,90 @@ function filesTab(total, sys) {
 // means high-contrast and light themes get their own without a second palette.
 const meterTone = (pct) => (pct >= 80 ? 'hot' : pct >= 50 ? 'warm' : 'cool');
 
+const TRACK_WEEK_S = 604800;
+// A block narrower than this cannot hold its own duration, so the number moves
+// to the foot line. The name of a mark never moves.
+const TRACK_MIN_LABEL = 13;
+
 /**
- * The week as a length of time rather than a percentage.
+ * The week as a length of time — and only that.
  *
- * A bar answers "how much is gone". The question underneath it is "how much is
- * gone *by now*", and that needs two marks a bar cannot carry: where the window
- * has got to, and where the forecast lands. Both live on one track here — the
- * fill is spend, the notch is this moment, the flag is the forecast, and a flag
- * past the right edge is the whole point of the reassuring case: you run out
- * after the window has already reset, which is to say you do not.
+ * This used to draw two scales on one rail: the fill measured money while the
+ * marks measured time, so "92% of the width" meant the limit for one element
+ * and the calendar for another. Nothing could be compared against anything, and
+ * the question it invited — does the fill crossing the flag mean the quota is
+ * gone — has no answer, because no event happens there.
+ *
+ * So the rail is time, end to end. The grey fill is the part of the week
+ * already gone and its right edge *is* now, which is why there is no separate
+ * notch to collide with anything. What follows is the answer in two lengths:
+ * how long the quota still lasts, then how long the week runs on without it.
+ * The second one is the alarm — no tail, nothing to fear — and it cannot be
+ * mistaken for the first, because both carry their duration in words.
+ *
+ * Spend keeps the header, as a sentence. It has the tiles and the Limits meters
+ * for its geometry; the rail was the only place the week itself lived.
  */
 function paceTrack(w) {
     if (!w) return '';
-    const pct = Math.max(0, Math.min(100, w.pct));
     const now = Math.max(0, Math.min(1, w.now || 0)) * 100;
-    const tone = meterTone(pct);
-    const dry = w.dry;
-    const inside = dry !== null && dry !== undefined && dry <= 1;
-    const flagAt = inside ? Math.max(0, Math.min(100, dry * 100)) : null;
+    const has = w.dry !== null && w.dry !== undefined;
+    const inside = has && w.dry <= 1;
+    const dryAt = inside ? Math.max(0, Math.min(100, w.dry * 100)) : null;
 
-    // A label near the right edge would run off the rail, so it changes sides;
-    // and two labels within a few percent of each other overprint, so the one
-    // that only repeats the tick beneath it gives way to the forecast.
-    const side = (at) => (at > 78 ? ' flip' : '');
-    const crowded = flagAt !== null && Math.abs(flagAt - now) < 11;
+    // Both durations are cut out of the time that is actually left, never
+    // computed from the positions: derived from positions they drift from the
+    // "resets in" figure printed beside them by tens of minutes.
+    const aliveS = has ? Math.min(w.resetIn, Math.max(0, w.dry - w.now) * TRACK_WEEK_S) : 0;
+    const tailS = inside ? Math.max(0, w.resetIn - aliveS) : 0;
+    // Out of quota: the forecast has collapsed onto now. There is no living
+    // block to draw and no second mark worth naming — the rest of the week is
+    // the wait, and it says so inside itself.
+    const dead = inside && aliveS < 60;
+    const aliveW = has && !dead ? Math.max(0, (inside ? dryAt : 100) - now) : 0;
+    const tailW = inside ? Math.max(0, 100 - (dead ? now : dryAt)) : 0;
+    const aliveText = has ? fmtLeft(aliveS, 0) : '';
+    const tailText = inside ? fmtLeft(tailS || w.resetIn, 0) : '';
+
+    const drift = w.plan === null || w.plan === undefined ? '' : w.pct - w.plan;
+    const spend = `${w.pct}% spent${drift === '' ? ''
+        : drift === 0 ? ' · on plan'
+            : drift > 0 ? ` · ${drift}% ahead of plan` : ` · ${-drift}% behind plan`}`;
+
+    // Labels live on different floors — now under the rail, dry over it — so
+    // they cannot overprint however close the two marks are. That is what
+    // replaced suppressing the one that was in the way, which used to hide the
+    // name of a mark exactly when the forecast had come closest.
+    const labelAt = (at) => (at < 7 ? 'left:0'
+        : at > 93 ? 'right:0;left:auto'
+            : `left:${at.toFixed(2)}%;transform:translateX(-50%)`);
+
+    const inBlock = (text, width) => (width >= TRACK_MIN_LABEL ? `<span>${esc(text)}</span>` : '');
+    const spill = [];
+    if (!has) spill.push('too early to forecast');
+    else if (dead) { if (tailW < TRACK_MIN_LABEL) spill.push(`out of quota · ${tailText} to the reset`); else spill.push('out of quota'); }
+    else {
+        if (!inside) spill.push('lasts to the reset');
+        else {
+            if (aliveW < TRACK_MIN_LABEL) spill.push(`${aliveText} of quota left`);
+            if (tailW < TRACK_MIN_LABEL) spill.push(`${tailText} without it`);
+        }
+    }
 
     return `<div class="track">
-        <div class="track-head"><b>this week</b><span>spend against the window it has to last</span></div>
+        <div class="track-head"><b>this week</b><span>${esc(spend)}</span></div>
+        <div class="track-over">${inside && !dead ? `<span class="track-lbl" style="${labelAt(dryAt)}">dry</span>` : ''}</div>
         <div class="track-rail">
-          <div class="track-fill t-${tone}" style="width:${pct}%"></div>
-          <div class="track-edge t-${tone}" style="left:${pct}%"></div>
-          <div class="track-now${side(now)}" style="left:${now.toFixed(2)}%">${crowded ? '' : '<span>now</span>'}</div>
-          ${flagAt !== null ? `<div class="track-dry${side(flagAt)}" style="left:${flagAt.toFixed(2)}%"><span>dry</span></div>` : ''}
+          <div class="track-past" style="width:${now.toFixed(2)}%"></div>
+          ${aliveW > 0 ? `<div class="track-alive" style="left:${now.toFixed(2)}%;width:${aliveW.toFixed(2)}%">${inBlock(aliveText, aliveW)}</div>` : ''}
+          ${tailW > 0 ? `<div class="track-tail${dead ? ' is-dead' : ''}" style="left:${(dead ? now : dryAt).toFixed(2)}%;width:${tailW.toFixed(2)}%">${inBlock(dead ? `${tailText} without quota` : tailText, tailW)}</div>` : ''}
+          ${inside && !dead ? `<div class="track-flag" style="left:${dryAt.toFixed(2)}%"></div>` : ''}
         </div>
+        <div class="track-under"><span class="track-lbl" style="${labelAt(now)}">now</span></div>
         <div class="track-feet">
           <span>window opened</span>
-          <span>${dry !== null && dry !== undefined && !inside
-        ? `forecast lands past the reset · resets in ${esc(fmtLeft(w.resetIn, 0))}`
-        : `resets in ${esc(fmtLeft(w.resetIn, 0))}`}</span>
+          <span>${esc(spill.join(' · '))}</span>
+          <span>resets in ${esc(fmtLeft(w.resetIn, 0))}</span>
         </div>
     </div>`;
 }
@@ -2334,33 +2380,42 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .t-warm { background: var(--vscode-charts-yellow, hsl(35 72% 55%)); }
 .t-hot { background: var(--vscode-charts-red, hsl(0 60% 57%)); }
 
-/* The signature: the week as a length of time. Fill is what has been spent,
-   the notch is this moment, the flag is where the forecast lands — and a
-   forecast that lands past the right edge simply is not drawn, because the
-   window resets before it arrives. */
+/* The signature: the week as a length of time, and only that. The grey is the
+   part already gone, and what follows it is the answer in two lengths — how
+   long the quota lasts, then how long the week runs on without it. A forecast
+   past the right edge is not drawn at all: the window resets before it
+   arrives, which is to say it never happens. */
 .track { margin: 0 0 20px; max-width: 980px; }
 .track-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .track-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
   opacity: .5; font-weight: 600; }
 .track-head span { font-size: 11px; opacity: .5; }
-.track-rail { position: relative; height: 18px; border-radius: 4px;
+.track-rail { position: relative; height: 22px; border-radius: 4px;
   background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); overflow: hidden; }
-/* The spend reads at its edge, not across its area: a recessive fill with a
-   solid cap is a length you can measure, where a bright slab is just a mass.
-   The cap is a sibling rather than a child because opacity composites the whole
-   subtree: inside the fill it could never be brighter than the fill. */
-.track-fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px 0 0 4px; opacity: .3; }
-.track-edge { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -2px; border-radius: 1px; }
-.track-now, .track-dry { position: absolute; top: 0; bottom: 0; width: 0; }
-.track-now::before, .track-dry::before { content: ''; position: absolute; top: 0; bottom: 0;
-  width: 2px; margin-left: -1px; }
-.track-now::before { background: var(--vscode-foreground); opacity: .8; }
-.track-dry::before { background: var(--vscode-charts-red, hsl(0 60% 57%)); }
-.track-now span, .track-dry span { position: absolute; top: 3px; left: 6px; font-size: 9.5px;
-  text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; opacity: .85; }
-.track-now.flip span, .track-dry.flip span { left: auto; right: 6px; }
-.track-feet { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px;
+/* Two floors for two names: dry above the rail, now below it. Neither can ever
+   overprint the other, which is what lets both survive at any distance — the
+   old track hid whichever label was in the way. */
+.track-over, .track-under { position: relative; height: 13px; }
+.track-lbl { position: absolute; top: 0; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: .08em; white-space: nowrap; opacity: .8; }
+/* The week already gone is background, not news: it carries no number and the
+   lightest weight on the rail. Its right edge is now. */
+.track-past { position: absolute; inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
+.track-alive, .track-tail { position: absolute; top: 0; bottom: 0; display: flex;
+  align-items: center; justify-content: center; overflow: hidden; }
+.track-alive { background: color-mix(in srgb, var(--vscode-charts-green, hsl(160 50% 45%)) 32%, transparent); }
+.track-tail { background: color-mix(in srgb, var(--vscode-charts-red, hsl(0 60% 57%)) 32%, transparent);
+  min-width: 3px; }
+/* Out of quota is a different state, not a longer stripe of the same one. */
+.track-tail.is-dead { background: color-mix(in srgb, var(--vscode-charts-red, hsl(0 60% 57%)) 52%, transparent); }
+.track-alive span, .track-tail span { font-size: 10px; font-family: var(--vscode-editor-font-family);
+  white-space: nowrap; padding: 0 8px; }
+.track-flag { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+  background: var(--vscode-charts-red, hsl(0 60% 57%)); }
+.track-feet { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px;
   font-size: 11px; opacity: .5; }
+.track-feet span:nth-child(2) { flex: 1; text-align: center; }
 .track-feet span:last-child { text-align: right; }
 
 /* Columns rather than a grid: panels of wildly different heights leave a grid

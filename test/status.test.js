@@ -98,6 +98,22 @@ test('a forecast that lands before the reset is the alarming one', () => {
     assert.match(forecast.text, /before the window resets/);
 });
 
+test('the forecast carries the wait that follows it, and names an empty quota', () => {
+    // The track draws two lengths — quota left, then the week without it. The
+    // hover is the same answer in words, so it says both rather than a date.
+    const soon = { ...data, pace: { ...data.pace, beforeReset: true, dryAt: NOW + 3600 } };
+    const [limits] = status.statusSections(soon, helpers, {});
+    assert.match(notes(limits).find((n) => n.label === 'Forecast').text, /then .+ without quota before the window resets/);
+
+    // Spent: the forecast has collapsed onto now, and "100% around <now>" would
+    // be a date for something that already happened.
+    const spent = { ...data, pace: { ...data.pace, beforeReset: true, dryAt: NOW } };
+    const [spentLimits] = status.statusSections(spent, helpers, {});
+    const note = notes(spentLimits).find((n) => n.label === 'Forecast');
+    assert.equal(note.tone, 'alarm');
+    assert.match(note.text, /^out of quota — .+ until the window resets$/);
+});
+
 test('a stale cache says so, and the reading carries when it was taken', () => {
     const [limits] = status.statusSections(data, helpers, { stale: true, updatedAt: NOW });
     assert.ok(notes(limits).some((n) => n.tone === 'warn' && /refresh failed/.test(n.text)));

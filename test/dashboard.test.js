@@ -104,6 +104,64 @@ test('barList sorts by the caller and caps the list', () => {
     assert.ok(!html.includes('>c<'));
 });
 
+// `now` and `dry` are positions in the window: 0 when it opened, 1 at the reset.
+const week = (over = {}) => ({
+    pct: 62, plan: 50, now: 0.5, dry: 0.806, beforeReset: true, resetIn: 3.5 * 86400, ...over,
+});
+const widthOf = (html, cls) => {
+    const m = html.match(new RegExp(`class="${cls}[^"]*"[^>]*style="[^"]*width:([\\d.]+)%`));
+    return m ? Number(m[1]) : null;
+};
+
+test('paceTrack: the rail measures time, so spend never moves anything on it', () => {
+    // The bug this replaced: the fill was drawn from pct while the marks were
+    // drawn from the calendar, and the two were compared by eye. Spend now lives
+    // in the header as a sentence, and the geometry must not react to it at all.
+    const lean = db.paceTrack(week({ pct: 20 }));
+    const heavy = db.paceTrack(week({ pct: 95 }));
+    for (const cls of ['track-past', 'track-alive', 'track-tail']) {
+        assert.equal(widthOf(lean, cls), widthOf(heavy, cls), `${cls} moved with spend`);
+    }
+    assert.match(lean, /20% spent/);
+    assert.match(heavy, /95% spent/);
+});
+
+test('paceTrack: both marks keep their names however close they sit', () => {
+    // 1.8% apart — the distance at which the old track suppressed one label,
+    // which took a name off the screen exactly when the forecast was closest.
+    const html = db.paceTrack(week({ pct: 98, plan: 88, now: 0.88, dry: 0.898, resetIn: 20 * 3600 }));
+    assert.match(html, /class="track-lbl"[^>]*>dry</);
+    assert.match(html, /class="track-lbl"[^>]*>now</);
+});
+
+test('paceTrack: the two durations add up to the time left', () => {
+    const html = db.paceTrack(week({ pct: 92, plan: 84, now: 0.846, dry: 0.92, resetIn: 25 * 3600 }));
+    // 12h25m on quota + 12h34m without it == the 1d1h printed beside them. Read
+    // off the positions instead, and the pair drifts from it by tens of minutes.
+    assert.match(html, /12h25m of quota left · 12h34m without it/);
+    assert.match(html, /resets in 1d1h/);
+});
+
+test('paceTrack: the states that are not the ordinary one', () => {
+    const early = db.paceTrack(week({ pct: 2, plan: 3, now: 0.03, dry: null, resetIn: 6.8 * 86400 }));
+    assert.match(early, /too early to forecast/);
+    assert.ok(!early.includes('track-alive'), 'no forecast, no zones');
+    assert.ok(!early.includes('track-flag'));
+
+    const safe = db.paceTrack(week({ pct: 54, plan: 61, now: 0.61, dry: 1.4, resetIn: 2.6 * 86400 }));
+    assert.match(safe, /lasts to the reset/);
+    assert.ok(!safe.includes('track-tail'), 'nothing to sit out');
+    assert.ok(!safe.includes('track-flag'), 'a flag past the reset is not a warning');
+
+    // Out of quota: the forecast has collapsed onto now, so there is no living
+    // block and no second mark — the rest of the week is the wait.
+    const dry = db.paceTrack(week({ pct: 100, plan: 50, now: 0.5, dry: 0.5, resetIn: 3.5 * 86400 }));
+    assert.match(dry, /track-tail is-dead/);
+    assert.match(dry, /3d12h without quota/);
+    assert.ok(!dry.includes('track-alive'));
+    assert.equal(widthOf(dry, 'track-tail'), 50);
+});
+
 test('dayModelMatrix splits a file across its days without inventing spend', () => {
     const index = {
         files: {

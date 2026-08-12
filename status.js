@@ -74,9 +74,19 @@ function limits(d, h, env) {
         // not run out" is worth far more with the date that would have been.
         if (pc.dryAt && pc.elapsed >= 1800 && lim.weekly.pct >= 2) {
             const when = `${h.fmtWhen(pc.dryAt)}, in ${h.fmtLeft(pc.dryAt, now)}`;
-            blocks.push(pc.beforeReset
-                ? { kind: 'note', tone: 'alarm', label: 'Forecast', text: `100% around ${when}, before the window resets` }
-                : { kind: 'note', tone: 'safe', label: 'Forecast', text: `100% would be ${when}, which is after the reset: you do not get there` });
+            // The same two lengths the week track draws, said in words: how long
+            // the quota lasts, then how long the week runs on without it. Both
+            // are cut out of the time left, so they add up to the reset.
+            const left = Math.max(0, lim.weekly.reset - now);
+            const alive = Math.min(left, Math.max(0, pc.dryAt - now));
+            const without = h.fmtLeft(now + Math.max(0, left - alive), now);
+            if (pc.beforeReset && alive < 60) {
+                blocks.push({ kind: 'note', tone: 'alarm', label: 'Forecast', text: `out of quota — ${without} until the window resets` });
+            } else if (pc.beforeReset) {
+                blocks.push({ kind: 'note', tone: 'alarm', label: 'Forecast', text: `100% around ${when}, then ${without} without quota before the window resets` });
+            } else {
+                blocks.push({ kind: 'note', tone: 'safe', label: 'Forecast', text: `100% would be ${when}, which is after the reset: you do not get there` });
+            }
         }
     }
 
