@@ -1183,30 +1183,12 @@ test('the tab closes when the session ends cleanly and stays when it fails', asy
     } finally { run.dispose(); }
 });
 
-// The tab wears Claude Code's own logo where that extension is installed, and
-// this extension's icon where it is not. Both halves are worth a test because
-// both are silent when wrong: a tab icon that fails to resolve is simply blank,
-// and the path into their extension is private — a rename there has to land on
-// our icon rather than on nothing.
-const claudeCodeDir = () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-claude-'));
-    fs.mkdirSync(path.join(dir, 'resources'));
-    fs.writeFileSync(path.join(dir, 'resources', 'claude-logo.svg'), '<svg/>');
-    test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    return dir;
-};
-
-test('the tab wears Claude Code’s own logo when their extension is installed', async () => {
-    const dir = claudeCodeDir();
-    const run = activate({ segments: ['{today}'] });
-    try {
-        vscode.__installExtension('Anthropic.claude-code', dir);
-        await openClaude();
-        assert.equal(lastTerminal().options.iconPath.fsPath, `${dir}/resources/claude-logo.svg`);
-    } finally { run.dispose(); }
-});
-
-test('without their extension the tab wears ours, one file per theme', async () => {
+// The tab wears this extension's own icon, and only ever that. An earlier
+// version read Claude Code's logo out of the installed extension — nothing was
+// copied, but it put Anthropic's mark in this interface, which their trademark
+// guidelines do not allow without approval. Pinned here so it cannot drift back:
+// two files of ours, both present, and no path into anybody else's extension.
+test('the tab wears this extension’s icon, one file per theme', async () => {
     const run = activate({ segments: ['{today}'] });
     try {
         await openClaude();
@@ -1219,14 +1201,17 @@ test('without their extension the tab wears ours, one file per theme', async () 
     } finally { run.dispose(); }
 });
 
-test('a logo that has moved inside their extension falls back to ours', async () => {
-    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-claude-gone-'));
-    test.after(() => fs.rmSync(empty, { recursive: true, force: true }));
+test('the icon does not change when Claude Code’s extension is installed', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-claude-'));
+    fs.mkdirSync(path.join(dir, 'resources'));
+    fs.writeFileSync(path.join(dir, 'resources', 'claude-logo.svg'), '<svg/>');
+    test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const run = activate({ segments: ['{today}'] });
     try {
-        vscode.__installExtension('Anthropic.claude-code', empty);
+        vscode.__installExtension('Anthropic.claude-code', dir);
         await openClaude();
-        assert.match(lastTerminal().options.iconPath.dark.fsPath, /media\/open-claude-dark\.svg$/);
+        assert.match(lastTerminal().options.iconPath.dark.fsPath, /media\/open-claude-dark\.svg$/,
+            'their logo sitting on disk is not a reason to put their mark in this UI');
     } finally { run.dispose(); }
 });
 

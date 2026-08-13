@@ -28,11 +28,6 @@ const CONTEXT_TICK = 10;
 // shell's PATH like any other command — no path of ours to go stale.
 const CLAUDE_COMMAND = 'claude';
 
-// Claude Code's extension, by the id VS Code knows it under, and where its own
-// logo sits inside it. Both are read only for the tab icon below, and neither is
-// depended on: see `claudeIcon`.
-const CLAUDE_CODE = 'Anthropic.claude-code';
-const CLAUDE_LOGO = ['resources', 'claude-logo.svg'];
 
 // StatusBarItem has no arbitrary colors — only these three states — so the
 // 50/80 thresholds from statusline.sh map onto them one to one.
@@ -1347,21 +1342,19 @@ async function showPlaceholders(state) {
 const SHELL_INTEGRATION_WAIT = 3000;
 
 /**
- * What the terminal tab is marked with. The tab is a Claude Code session, so it
- * wears Claude Code's own logo where that extension is installed — a file inside
- * it, pointed at rather than copied.
+ * What the terminal tab is marked with: this extension's own icon, the same
+ * prompt-and-spark as the button that opens it.
  *
- * That path is a private one and is treated as such: an id and a file name of
- * theirs, both checked before use, with this extension's own icon behind them.
- * Nothing warns when it moves — the tab simply carries our mark instead, which
- * is the right outcome for a detail this size.
+ * An earlier version reached into the installed Claude Code extension for its
+ * logo instead. Nothing was copied — the file stayed theirs, on the user's
+ * disk — but it still put Anthropic's mark in this extension's interface, and
+ * their trademark guidelines leave no room for that: "You may only use our
+ * trademarks as specifically permitted by us and only in materials we approve
+ * beforehand", plus a bar on any use implying "a relationship or affiliation".
+ * There is no interoperability exception in that document to fall back on.
+ * A published extension is exactly where that matters, so the tab wears ours.
  */
 function claudeIcon(context) {
-    const theirs = vscode.extensions.getExtension(CLAUDE_CODE);
-    if (theirs) {
-        const logo = vscode.Uri.joinPath(theirs.extensionUri, ...CLAUDE_LOGO);
-        if (fs.existsSync(logo.fsPath)) return logo;
-    }
     return {
         light: vscode.Uri.joinPath(context.extensionUri, 'media', 'open-claude-light.svg'),
         dark: vscode.Uri.joinPath(context.extensionUri, 'media', 'open-claude-dark.svg'),
