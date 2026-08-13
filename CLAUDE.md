@@ -56,10 +56,22 @@ dictionary of English irregulars for sixteen nouns that are spelled out in our o
 nothing — while a package that replaced a hundred lines of parsing would buy a great deal. Ask which
 one you are looking at, and say so in the commit.
 
+**The changelog is written as you go; the version is stamped on it at the release (2026-08-13).**
+Every change that a user would notice adds its lines to `## [Unreleased]` in the same commit that
+makes the change — not to a numbered heading, because at that moment nobody knows which number the
+work will ship under. At the release, `[Unreleased]` is given the version and the date, and that is
+the whole ceremony.
+
+This exists because writing the entry at release time means reconstructing days of work from
+`git log`, and because the previous attempt at the same idea wrote a *numbered* entry early: `0.22.2`
+had a full entry, a bump in `package.json` and no tag, so the file claimed a version that nobody
+could install, and the next release had to work out by grep which of its lines were already
+described. An unnumbered section cannot drift that way — it has no number to be wrong about.
+
 **The version moves at a release and nowhere else (2026-08-12, since the extension went public).**
 Ordinary commits — fixes, features, refactors, docs — leave `package.json` alone. The number is
-raised once, in the commit that carries the tag: bump, write the CHANGELOG entry covering everything
-since the last released version, commit, `git tag vX.Y.Z && git push --tags`.
+raised once, in the commit that carries the tag: bump, stamp `[Unreleased]` with the number and the
+date, commit, `git tag vX.Y.Z && git push --tags`.
 
 This replaces the earlier rule that a bump rode inside the commit that caused it. That one was
 written when nothing had been published and every build was its own release; now a version is a
