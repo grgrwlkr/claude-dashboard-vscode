@@ -1338,26 +1338,36 @@ async function showPlaceholders(state) {
     vscode.window.showInformationMessage(`${picked.label} copied — put it in claudeStatusline.segments`);
 }
 
+// How long to wait for the new terminal to become the active one before giving
+// up on moving it. Claude Code creates and shows it synchronously, so this is
+// slack for the editor rather than a real wait.
+const CLAUDE_TERMINAL_WAIT = 500;
+
 /**
- * Claude Code in a tab of the group you are already looking at, rather than in a
- * split of its own.
+ * Claude Code as a tab in the group you are already looking at.
  *
  * Its own title-bar button runs `claude-vscode.terminal.open` with no arguments,
- * and the argument it leaves out is the one that decides where the session
- * lands: that command reads a third parameter of `beside | window | bottom`, and
- * anything else — an absent one included — means `beside`, a new editor group
- * split off to the right. `window` is the one that puts the terminal in the
- * first editor group, next to the files already open there. Read from
- * `extension.js` of anthropic.claude-code 2.1.231:
+ * and the argument it omits is the one that places the session. That command
+ * reads a third parameter, and none of the three values it knows is the one
+ * wanted here — read from `extension.js` of anthropic.claude-code 2.1.231:
  *
  *     let s = o === "beside" || o === void 0 ? { viewColumn: gr.ViewColumn.Beside }
  *           : o === "window" ? { viewColumn: gr.ViewColumn.One }
  *           : void 0;
+ *     ... l.show(), o === "window")
+ *         await gr.commands.executeCommand("workbench.action.moveEditorToNewWindow");
  *
- * That is a private contract, not an API, and it fails quietly in one direction:
- * a release that renames the location leaves the argument unrecognised and the
- * tab opens beside again, which looks like a button that did nothing rather than
- * an error. The test on this command is what notices — nothing here can.
+ * `beside` splits a new editor group off to the right; `window` reaches the
+ * first group and is then carried out of the window entirely — the tail of that
+ * function is easy to miss, and missing it is how this command first shipped
+ * opening a floating window. Which leaves `bottom`: no location at all, so the
+ * terminal opens in the panel, out of the editor's way.
+ *
+ * From the panel it can be moved as a terminal rather than as an editor.
+ * `workbench.action.terminal.moveToEditor` runs `service.moveToEditor(instance)`
+ * with no view column, which opens it in the active group — a tab beside the
+ * files already there — and its `activeInstanceType: "view"` means it can only
+ * ever take a terminal out of the panel, never somebody's open file.
  */
 async function openClaude() {
     const claude = vscode.extensions.getExtension(CLAUDE_CODE);
@@ -1369,11 +1379,35 @@ async function openClaude() {
     // on startup, but this one can be asked for from the palette in the second
     // before that, and "command not found" is not what the user did wrong.
     if (!claude.isActive) await claude.activate();
+
+    // The last one to open, not the first: Claude Code shows its terminal as the
+    // final step of creating it, so anything that opened before it was somebody
+    // else's. Paired with the focus check below, the only terminal that can be
+    // moved is one that both appeared during this call and holds the focus.
+    let opened = null;
+    const watch = vscode.window.onDidOpenTerminal((t) => { opened = t; });
     try {
-        await vscode.commands.executeCommand('claude-vscode.terminal.open', undefined, undefined, 'window');
+        await vscode.commands.executeCommand('claude-vscode.terminal.open', undefined, undefined, 'bottom');
     } catch (e) {
         vscode.window.showWarningMessage(`Claude Code did not open: ${e && e.message ? e.message : e}`);
+        return;
+    } finally {
+        watch.dispose();
     }
+
+    // Everything below is about the move, and the session is already running: a
+    // terminal left in the panel is worse than what was asked for, never worse
+    // than nothing. That is why none of this warns.
+    if (!opened) return;
+    for (let waited = 0; waited < CLAUDE_TERMINAL_WAIT && vscode.window.activeTerminal !== opened; waited += 50) {
+        await new Promise((r) => setTimeout(r, 50));
+    }
+    // The move acts on whichever terminal is active, so an active one that is not
+    // ours means the wrong session would travel. Leave it where it is instead.
+    if (vscode.window.activeTerminal !== opened) return;
+    try {
+        await vscode.commands.executeCommand('workbench.action.terminal.moveToEditor');
+    } catch { /* already an editor tab, or the command is gone; the session runs either way */ }
 }
 
 function deactivate() {}

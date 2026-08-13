@@ -1117,20 +1117,32 @@ test('auto-refresh is on unless it was switched off', async () => {
 // the command behind its own title-bar button, called with the argument that
 // button leaves out. Nothing at runtime can tell that argument was understood —
 // an unrecognised location falls back to `beside`, the very split this exists to
-// avoid, without an error. So the contract is pinned here instead: the command
-// id, the third position, and the word in it.
+// avoid, and `window` carries the session out of the window altogether, which is
+// what this command did on its first day. Neither reports anything. So the
+// contract is pinned here: the command id, the third position, the word in it,
+// and the move that follows.
 const openClaudeCalls = () => vscode.__executed.filter((c) => c.id === 'claude-vscode.terminal.open');
+const moveCalls = () => vscode.__executed.filter((c) => c.id === 'workbench.action.terminal.moveToEditor');
 const claudeCode = () => vscode.extensions.getExtension('Anthropic.claude-code');
+// Claude Code's own command creates the terminal and shows it before it returns,
+// so this is what the button is actually sequenced against.
+const opensATerminal = (opts) => () => {
+    vscode.__installExtension('Anthropic.claude-code');
+    vscode.__whenCommand('claude-vscode.terminal.open', () => vscode.__openTerminal('Claude Code', opts));
+};
 
-test('the tab button asks Claude Code for the first editor group', async () => {
-    const run = activate({
-        segments: ['{today}'],
-        before: () => vscode.__installExtension('Anthropic.claude-code'),
-    });
+test('the tab button opens in the panel and moves the terminal into the editor', async () => {
+    const run = activate({ segments: ['{today}'], before: opensATerminal() });
     const claude = claudeCode();
     try {
         await vscode.__commands.get('claudeStatusline.openClaude')();
-        assert.deepEqual(openClaudeCalls().map((c) => c.args), [[undefined, undefined, 'window']]);
+        // `bottom` is the only value that neither splits the group nor leaves the
+        // window; the move is what puts it in the group being looked at.
+        assert.deepEqual(openClaudeCalls().map((c) => c.args), [[undefined, undefined, 'bottom']]);
+        assert.equal(moveCalls().length, 1);
+        const order = vscode.__executed.map((c) => c.id).filter((id) => id !== 'setContext');
+        assert.deepEqual(order, ['claude-vscode.terminal.open', 'workbench.action.terminal.moveToEditor'],
+            'moving before the terminal exists would move whatever was there instead');
         // Already awake: nothing to start, and starting it again would be a
         // second window's worth of work for a button press.
         assert.equal(claude.activated, 0);
@@ -1141,13 +1153,51 @@ test('the tab button asks Claude Code for the first editor group', async () => {
 test('a Claude Code that has not woken up yet is started before it is asked', async () => {
     const run = activate({
         segments: ['{today}'],
-        before: () => vscode.__installExtension('Anthropic.claude-code', { isActive: false }),
+        before: () => {
+            vscode.__installExtension('Anthropic.claude-code', { isActive: false });
+            vscode.__whenCommand('claude-vscode.terminal.open', () => vscode.__openTerminal());
+        },
     });
     const claude = claudeCode();
     try {
         await vscode.__commands.get('claudeStatusline.openClaude')();
         assert.equal(claude.activated, 1, 'its commands do not exist until it has run');
         assert.equal(openClaudeCalls().length, 1);
+    } finally { run.dispose(); }
+});
+
+// The move takes whichever terminal is active. If that is not the one that just
+// opened — another terminal held the focus, or the editor never handed it over —
+// moving would send somebody else's session into the editor. The session this
+// button started is already running either way, so the move is the only thing
+// worth giving up, and it goes quietly: a terminal in the panel is not an error.
+test('a terminal that is not ours is left where it is', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        before: () => {
+            vscode.__installExtension('Anthropic.claude-code');
+            vscode.__whenCommand('claude-vscode.terminal.open', () => {
+                vscode.__openTerminal('someone else', { active: true });
+                vscode.__openTerminal('Claude Code', { active: false });
+            });
+        },
+    });
+    try {
+        await vscode.__commands.get('claudeStatusline.openClaude')();
+        assert.equal(openClaudeCalls().length, 1, 'the session still starts');
+        assert.equal(moveCalls().length, 0);
+        assert.deepEqual(vscode.__warnings, [], 'a terminal left in the panel is not worth a popup');
+    } finally { run.dispose(); }
+});
+
+test('no terminal at all means nothing is moved', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        before: () => vscode.__installExtension('Anthropic.claude-code'),
+    });
+    try {
+        await vscode.__commands.get('claudeStatusline.openClaude')();
+        assert.equal(moveCalls().length, 0);
     } finally { run.dispose(); }
 });
 

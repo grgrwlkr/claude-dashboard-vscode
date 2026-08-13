@@ -12,9 +12,10 @@ const updates = [];
 const commands = new Map();
 const executed = [];
 const executeFails = new Map();
+const executeEffects = new Map();
 const installed = new Map();
 const views = new Map();
-const listeners = { config: [], window: [] };
+const listeners = { config: [], window: [], terminal: [] };
 let settings = {};
 let saveTarget;
 
@@ -63,6 +64,11 @@ const vscode = {
             return item;
         },
         onDidChangeWindowState(cb) { listeners.window.push(cb); return disposable(); },
+        activeTerminal: undefined,
+        onDidOpenTerminal(cb) {
+            listeners.terminal.push(cb);
+            return { dispose() { listeners.terminal.splice(listeners.terminal.indexOf(cb), 1); } };
+        },
         createTreeView(id, opts) { views.set(id, opts.treeDataProvider); return disposable(); },
         showQuickPick: async () => undefined,
         showInformationMessage: async () => undefined,
@@ -122,6 +128,12 @@ const vscode = {
         executeCommand: async (id, ...args) => {
             executed.push({ id, args });
             if (executeFails.has(id)) throw new Error(executeFails.get(id));
+            // A command of another extension's is a black box with a side effect,
+            // and the side effect is what the caller waits for. This is where a
+            // test plays that half — opening a terminal, say — so the sequence
+            // after it is the real one and not a mock of itself.
+            const effect = executeEffects.get(id);
+            if (effect) await effect(...args);
             return undefined;
         },
     },
@@ -150,6 +162,16 @@ vscode.__installExtension = (id, { isActive = true } = {}) => {
     return ext;
 };
 vscode.__failCommand = (id, message) => { executeFails.set(id, message); };
+vscode.__whenCommand = (id, effect) => { executeEffects.set(id, effect); };
+// A terminal opening, as the extension sees it: the event fires and the editor
+// makes it the active one. `active` false is the case worth having — a terminal
+// that opened while another one holds the focus.
+vscode.__openTerminal = (name = 'Claude Code', { active = true } = {}) => {
+    const terminal = { name, shown: 0, show() { this.shown++; } };
+    if (active) vscode.window.activeTerminal = terminal;
+    for (const cb of [...listeners.terminal]) cb(terminal);
+    return terminal;
+};
 vscode.__setSettings = (next) => { settings = next; };
 vscode.__setSaveTarget = (uri) => { saveTarget = uri; };
 vscode.__setWorkspace = (folder) => {
@@ -175,10 +197,13 @@ vscode.__reset = () => {
     commands.clear();
     executed.length = 0;
     executeFails.clear();
+    executeEffects.clear();
     installed.clear();
     views.clear();
     listeners.config.length = 0;
     listeners.window.length = 0;
+    listeners.terminal.length = 0;
+    vscode.window.activeTerminal = undefined;
     settings = {};
     saveTarget = undefined;
     vscode.workspace.workspaceFolders = undefined;
