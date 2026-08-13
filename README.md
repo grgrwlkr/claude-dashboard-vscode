@@ -364,13 +364,12 @@ placeholders · and, from a row of the workflow view, Open the workflow script a
 Copy the workflow run id.
 
 **Open Claude Code in a tab** is also a button in the editor's title bar, next to
-Claude Code's own. Both start the same terminal session — this one asks for it in
-the panel and then moves it into the editor, so it lands as a tab in the group
-you are looking at, among the files already open. Claude Code's own button splits
-a new editor group off to the right and keeps the session there, half a window
-wide. Right-click the title bar to hide whichever of the two you would rather not
-have. The button appears only where the Claude Code extension is installed; the
-CLI on its own has no session to open.
+Claude Code's own. Both start a terminal session; what differs is where it lands.
+Claude Code's button splits a new editor group off to the right and keeps the
+session there, half a window wide. This one opens it as a tab in the group you
+are already looking at, among the files open there, and runs `claude` — whatever
+the shell's `PATH` finds. Right-click the title bar to hide whichever of the two
+you would rather not have.
 
 <a name="where-the-data-comes-from"></a><a name="user-content-where-the-data-comes-from"></a>
 

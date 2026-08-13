@@ -16,8 +16,9 @@ grew out of, and a version that shipped nothing is worth saying so.
 - **Open Claude Code in a tab** — a button in the editor's title bar, and a
   command, that starts a Claude Code session as a tab in the group you are
   looking at, next to the files already open there. Claude Code's own button
-  splits a new editor group off to the right instead. The button shows only where
-  the Claude Code extension is installed.
+  splits a new editor group off to the right instead. The session runs `claude`
+  from the shell's `PATH`; the tab closes with it when it ends cleanly and stays
+  when it fails, so the reason is still on screen.
 
 ## [0.24.0] — 2026-08-13
 

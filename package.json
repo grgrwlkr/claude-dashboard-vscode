@@ -96,7 +96,6 @@
       "editor/title": [
         {
           "command": "claudeStatusline.openClaude",
-          "when": "claudeStatusline.claudeCodeInstalled",
           "group": "navigation"
         }
       ],

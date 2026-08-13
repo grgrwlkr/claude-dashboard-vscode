@@ -24,10 +24,9 @@ const STALE_AFTER = 600;
 // often than the limits — those hit the network and stay on their minute tick.
 const CONTEXT_TICK = 10;
 
-// The extension this one reads after — the id VS Code knows it by, publisher
-// included. Everything this repo touches of Claude Code is on disk except one
-// thing: the command behind `openClaude` below.
-const CLAUDE_CODE = 'Anthropic.claude-code';
+// What the button types into the terminal it opens. A bare name, resolved by the
+// shell's PATH like any other command — no path of ours to go stale.
+const CLAUDE_COMMAND = 'claude';
 
 // StatusBarItem has no arbitrary colors — only these three states — so the
 // 50/80 thresholds from statusline.sh map onto them one to one.
@@ -1155,15 +1154,6 @@ function applyConfig(state) {
 }
 
 function activate(context) {
-    // The button sits in every editor's title bar, so it is worth showing only
-    // where there is a Claude Code to open: with the CLI installed but not the
-    // VS Code extension, it could do nothing but apologise.
-    vscode.commands.executeCommand(
-        'setContext',
-        'claudeStatusline.claudeCodeInstalled',
-        !!vscode.extensions.getExtension(CLAUDE_CODE),
-    );
-
     const cfg = vscode.workspace.getConfiguration('claudeStatusline');
 
     const state = {
@@ -1338,18 +1328,19 @@ async function showPlaceholders(state) {
     vscode.window.showInformationMessage(`${picked.label} copied — put it in claudeStatusline.segments`);
 }
 
-// How long to wait for the new terminal to become the active one before giving
-// up on moving it. Claude Code creates and shows it synchronously, so this is
-// slack for the editor rather than a real wait.
-const CLAUDE_TERMINAL_WAIT = 500;
+// Shell integration is what lets a command be sent as a command rather than as
+// typing, and it arrives a moment after the shell starts. This is how long to
+// wait for it before typing the line instead — the number Claude Code uses for
+// the same wait in its own terminal.
+const SHELL_INTEGRATION_WAIT = 3000;
 
 /**
  * Claude Code as a tab in the group you are already looking at.
  *
- * Its own title-bar button runs `claude-vscode.terminal.open` with no arguments,
- * and the argument it omits is the one that places the session. That command
- * reads a third parameter, and none of the three values it knows is the one
- * wanted here — read from `extension.js` of anthropic.claude-code 2.1.231:
+ * This opens the terminal itself rather than asking Claude Code's extension for
+ * one, because that command cannot place a session where this button wants it.
+ * It takes a third parameter, and each of the three values it knows lands
+ * somewhere else — read from `extension.js` of anthropic.claude-code 2.1.231:
  *
  *     let s = o === "beside" || o === void 0 ? { viewColumn: gr.ViewColumn.Beside }
  *           : o === "window" ? { viewColumn: gr.ViewColumn.One }
@@ -1357,57 +1348,59 @@ const CLAUDE_TERMINAL_WAIT = 500;
  *     ... l.show(), o === "window")
  *         await gr.commands.executeCommand("workbench.action.moveEditorToNewWindow");
  *
- * `beside` splits a new editor group off to the right; `window` reaches the
- * first group and is then carried out of the window entirely — the tail of that
- * function is easy to miss, and missing it is how this command first shipped
- * opening a floating window. Which leaves `bottom`: no location at all, so the
- * terminal opens in the panel, out of the editor's way.
+ * `beside` splits a new editor group off to the right, `window` carries the
+ * editor out of the window entirely, and `bottom` — no location at all — leaves
+ * it in the panel. Two of those shipped from this button before the third value
+ * was ruled out too: first the floating window, then the panel, because moving
+ * a panel terminal into the editor afterwards is a second thing that has to work
+ * and did not.
  *
- * From the panel it can be moved as a terminal rather than as an editor.
- * `workbench.action.terminal.moveToEditor` runs `service.moveToEditor(instance)`
- * with no view column, which opens it in the active group — a tab beside the
- * files already there — and its `activeInstanceType: "view"` means it can only
- * ever take a terminal out of the panel, never somebody's open file.
+ * `{ viewColumn: ViewColumn.Active }` is the whole of it in one argument. What
+ * is given up by not calling their command is its own resolution of the
+ * executable — `claude` here is whatever the shell's PATH finds, the same one a
+ * terminal would run — and its progress notification.
  */
-async function openClaude() {
-    const claude = vscode.extensions.getExtension(CLAUDE_CODE);
-    if (!claude) {
-        vscode.window.showWarningMessage('Claude Code for VS Code is not installed, so there is no session to open.');
-        return;
-    }
-    // A command exists only once the extension registering it has run. Both wake
-    // on startup, but this one can be asked for from the palette in the second
-    // before that, and "command not found" is not what the user did wrong.
-    if (!claude.isActive) await claude.activate();
+function openClaude() {
+    const terminal = vscode.window.createTerminal({
+        // The same env var Claude Code reads for its own terminal, so a machine
+        // that renames one renames both.
+        name: process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code',
+        iconPath: new vscode.ThemeIcon('sparkle'),
+        // The tab lands in the group holding the editor being looked at. This is
+        // the entire point of the button.
+        location: { viewColumn: vscode.ViewColumn.Active },
+        // A session is not worth restoring on the next window: what it was doing
+        // is in its transcript, not in a dead terminal.
+        isTransient: true,
+    });
+    terminal.show();
 
-    // The last one to open, not the first: Claude Code shows its terminal as the
-    // final step of creating it, so anything that opened before it was somebody
-    // else's. Paired with the focus check below, the only terminal that can be
-    // moved is one that both appeared during this call and holds the focus.
-    let opened = null;
-    const watch = vscode.window.onDidOpenTerminal((t) => { opened = t; });
-    try {
-        await vscode.commands.executeCommand('claude-vscode.terminal.open', undefined, undefined, 'bottom');
-    } catch (e) {
-        vscode.window.showWarningMessage(`Claude Code did not open: ${e && e.message ? e.message : e}`);
-        return;
-    } finally {
-        watch.dispose();
-    }
+    // Sent through shell integration when it is there, typed when it is not.
+    // Typing into a shell that has not finished starting is how the first line
+    // gets lost, which is the failure the wait exists for.
+    let sent = false;
+    const send = (run) => { if (!sent) { sent = true; run(); } };
+    const integration = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+        if (e.terminal === terminal) send(() => e.shellIntegration.executeCommand(CLAUDE_COMMAND));
+    });
+    setTimeout(() => send(() => terminal.sendText(CLAUDE_COMMAND)), SHELL_INTEGRATION_WAIT);
 
-    // Everything below is about the move, and the session is already running: a
-    // terminal left in the panel is worse than what was asked for, never worse
-    // than nothing. That is why none of this warns.
-    if (!opened) return;
-    for (let waited = 0; waited < CLAUDE_TERMINAL_WAIT && vscode.window.activeTerminal !== opened; waited += 50) {
-        await new Promise((r) => setTimeout(r, 50));
-    }
-    // The move acts on whichever terminal is active, so an active one that is not
-    // ours means the wrong session would travel. Leave it where it is instead.
-    if (vscode.window.activeTerminal !== opened) return;
-    try {
-        await vscode.commands.executeCommand('workbench.action.terminal.moveToEditor');
-    } catch { /* already an editor tab, or the command is gone; the session runs either way */ }
+    // A session that ended cleanly leaves a shell nobody asked for sitting in a
+    // tab, so the tab goes with it. A session that failed keeps its terminal:
+    // `claude: command not found` is the answer to why the button did nothing,
+    // and closing the tab would take it away.
+    const ended = vscode.window.onDidEndTerminalShellExecution((e) => {
+        if (e.terminal === terminal && e.execution.commandLine.value.trim() === CLAUDE_COMMAND && e.exitCode === 0) {
+            terminal.dispose();
+        }
+    });
+    const closed = vscode.window.onDidCloseTerminal((t) => {
+        if (t !== terminal) return;
+        integration.dispose();
+        ended.dispose();
+        closed.dispose();
+    });
+    return terminal;
 }
 
 function deactivate() {}

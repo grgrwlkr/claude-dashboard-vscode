@@ -10,16 +10,20 @@ const errors = [];
 const warnings = [];
 const updates = [];
 const commands = new Map();
-const executed = [];
-const executeFails = new Map();
-const executeEffects = new Map();
-const installed = new Map();
+const terminals = [];
 const views = new Map();
-const listeners = { config: [], window: [], terminal: [] };
+const listeners = { config: [], window: [], integration: [], ended: [], closed: [] };
 let settings = {};
 let saveTarget;
 
 const disposable = () => ({ dispose() {} });
+// A real subscription stops being called once disposed, and code that disposes
+// its listeners is exactly what a stub handing out no-op disposables cannot
+// check.
+const subscribe = (list, cb) => {
+    list.push(cb);
+    return { dispose() { const at = list.indexOf(cb); if (at !== -1) list.splice(at, 1); } };
+};
 
 const vscode = {
     StatusBarAlignment: { Left: 1, Right: 2 },
@@ -64,11 +68,31 @@ const vscode = {
             return item;
         },
         onDidChangeWindowState(cb) { listeners.window.push(cb); return disposable(); },
-        activeTerminal: undefined,
-        onDidOpenTerminal(cb) {
-            listeners.terminal.push(cb);
-            return { dispose() { listeners.terminal.splice(listeners.terminal.indexOf(cb), 1); } };
+        // A terminal as the extension uses it: what it was created with, whether
+        // it was shown, and what was run in it. The three terminal events are
+        // driven by the helpers below, so a test can play the shell's half.
+        createTerminal(options) {
+            const terminal = {
+                options,
+                name: options.name,
+                shown: 0,
+                sent: [],
+                executed: [],
+                disposed: false,
+                shellIntegration: undefined,
+                show() { this.shown++; },
+                sendText(text) { this.sent.push(text); },
+                dispose() {
+                    this.disposed = true;
+                    for (const cb of [...listeners.closed]) cb(this);
+                },
+            };
+            terminals.push(terminal);
+            return terminal;
         },
+        onDidChangeTerminalShellIntegration: (cb) => subscribe(listeners.integration, cb),
+        onDidEndTerminalShellExecution: (cb) => subscribe(listeners.ended, cb),
+        onDidCloseTerminal: (cb) => subscribe(listeners.closed, cb),
         createTreeView(id, opts) { views.set(id, opts.treeDataProvider); return disposable(); },
         showQuickPick: async () => undefined,
         showInformationMessage: async () => undefined,
@@ -121,24 +145,6 @@ const vscode = {
     },
     commands: {
         registerCommand(id, fn) { commands.set(id, fn); return disposable(); },
-        // Recorded rather than dispatched: the calls that matter here go to
-        // another extension's commands, which no stub can run. A test asserts
-        // what was asked for and with which arguments — that is the whole
-        // contract this side owns.
-        executeCommand: async (id, ...args) => {
-            executed.push({ id, args });
-            if (executeFails.has(id)) throw new Error(executeFails.get(id));
-            // A command of another extension's is a black box with a side effect,
-            // and the side effect is what the caller waits for. This is where a
-            // test plays that half — opening a terminal, say — so the sequence
-            // after it is the real one and not a mock of itself.
-            const effect = executeEffects.get(id);
-            if (effect) await effect(...args);
-            return undefined;
-        },
-    },
-    extensions: {
-        getExtension: (id) => installed.get(id),
     },
     env: { clipboard: { writeText: async () => {} } },
 };
@@ -151,26 +157,16 @@ vscode.__errors = errors;
 vscode.__warnings = warnings;
 vscode.__updates = updates;
 vscode.__commands = commands;
-vscode.__executed = executed;
+vscode.__terminals = terminals;
 vscode.__views = views;
-// A second extension, as VS Code hands it over: `isActive` and an `activate()`
-// that records having been called, which is what a caller waiting for another
-// extension's command has to do before asking for it.
-vscode.__installExtension = (id, { isActive = true } = {}) => {
-    const ext = { id, isActive, activated: 0, activate: async () => { ext.activated++; ext.isActive = true; } };
-    installed.set(id, ext);
-    return ext;
+// The shell's half of a terminal's life, in the order a real one goes through
+// it: integration appears, a command ends with a status.
+vscode.__shellIntegrationArrives = (terminal) => {
+    terminal.shellIntegration = { executeCommand: (line) => terminal.executed.push(line) };
+    for (const cb of [...listeners.integration]) cb({ terminal, shellIntegration: terminal.shellIntegration });
 };
-vscode.__failCommand = (id, message) => { executeFails.set(id, message); };
-vscode.__whenCommand = (id, effect) => { executeEffects.set(id, effect); };
-// A terminal opening, as the extension sees it: the event fires and the editor
-// makes it the active one. `active` false is the case worth having — a terminal
-// that opened while another one holds the focus.
-vscode.__openTerminal = (name = 'Claude Code', { active = true } = {}) => {
-    const terminal = { name, shown: 0, show() { this.shown++; } };
-    if (active) vscode.window.activeTerminal = terminal;
-    for (const cb of [...listeners.terminal]) cb(terminal);
-    return terminal;
+vscode.__shellExecutionEnds = (terminal, commandLine, exitCode = 0) => {
+    for (const cb of [...listeners.ended]) cb({ terminal, execution: { commandLine: { value: commandLine } }, exitCode });
 };
 vscode.__setSettings = (next) => { settings = next; };
 vscode.__setSaveTarget = (uri) => { saveTarget = uri; };
@@ -195,15 +191,13 @@ vscode.__reset = () => {
     warnings.length = 0;
     updates.length = 0;
     commands.clear();
-    executed.length = 0;
-    executeFails.clear();
-    executeEffects.clear();
-    installed.clear();
+    terminals.length = 0;
     views.clear();
     listeners.config.length = 0;
     listeners.window.length = 0;
-    listeners.terminal.length = 0;
-    vscode.window.activeTerminal = undefined;
+    listeners.integration.length = 0;
+    listeners.ended.length = 0;
+    listeners.closed.length = 0;
     settings = {};
     saveTarget = undefined;
     vscode.workspace.workspaceFolders = undefined;
