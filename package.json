@@ -64,7 +64,10 @@
       {
         "command": "claudeStatusline.openClaude",
         "title": "Claude: Open Claude Code in a tab",
-        "icon": "$(sparkle)"
+        "icon": {
+          "light": "media/open-claude-light.svg",
+          "dark": "media/open-claude-dark.svg"
+        }
       },
       {
         "command": "claudeStatusline.reindex",

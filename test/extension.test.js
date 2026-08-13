@@ -1179,6 +1179,29 @@ test('the tab closes when the session ends cleanly and stays when it fails', asy
     } finally { run.dispose(); }
 });
 
+// An icon that does not resolve costs nothing at build time and nothing at load
+// time: the button simply draws blank, and only looking at it says so. Two ways
+// to get there, and the second one happened — `media/**` is excluded from the
+// package, so a file that is right here in the repository shipped as nothing.
+test('every icon the manifest names exists and ships with the package', () => {
+    const root = path.join(__dirname, '..');
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const paths = manifest.contributes.commands
+        .map((c) => c.icon)
+        .filter((icon) => icon && typeof icon === 'object')
+        .flatMap((icon) => Object.values(icon));
+    assert.ok(paths.length > 0, 'this checks the file-based icons; a codicon string has nothing to resolve');
+
+    const rules = fs.readFileSync(path.join(root, '.vscodeignore'), 'utf8')
+        .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    for (const rel of paths) {
+        assert.ok(fs.existsSync(path.join(root, rel)), `${rel} is named in package.json but not on disk`);
+        const excluded = rules.some((r) => r.endsWith('/**') && rel.startsWith(r.slice(0, -2)));
+        assert.ok(!excluded || rules.includes(`!${rel}`),
+            `${rel} is excluded from the .vsix by .vscodeignore — add !${rel}`);
+    }
+});
+
 test('another terminal ending does not take this tab with it', async () => {
     const run = activate({ segments: ['{today}'] });
     try {
