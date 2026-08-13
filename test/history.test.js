@@ -138,3 +138,44 @@ test('past the threshold the file is rewritten to the newest MAX_ROWS', () => st
     // Rewritten via tmp+rename, so nothing of the temporary file is left behind.
     assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
 }));
+
+// The mark: the one fact about a week that cannot be recomputed afterwards.
+test('a window that ran out is marked once, with the plan of that moment', () => store((dir) => {
+    assert.equal(h.recordMark(dir, { reset: RESET, at: T0, plan: 43 }).written, true);
+    // Every tick after the first sees the same 100% and must not move the date.
+    assert.equal(h.recordMark(dir, { reset: RESET, at: T0 + 3600000, plan: 61 }).written, false);
+
+    const marks = h.readMarks(dir);
+    assert.equal(marks.length, 1);
+    assert.deepEqual(marks[0], { reset: RESET, at: T0, plan: 43 });
+    // The reset the endpoint reports wanders by a second or two between calls,
+    // which must not read as a second window.
+    assert.ok(h.markFor(marks, RESET + 4));
+    assert.equal(h.markFor(marks, RESET + 604800), null, 'next week is not this one');
+}));
+
+test('marks are kept per window, oldest dropped past the limit', () => store((dir) => {
+    for (let i = 0; i < 4; i++) {
+        h.recordMark(dir, { reset: RESET + i * 604800, at: T0 + i * 604800000, plan: 50 + i }, 3);
+    }
+    const marks = h.readMarks(dir);
+    assert.equal(marks.length, 3, 'the limit is honoured');
+    assert.deepEqual(marks.map((m) => m.reset), [RESET + 604800, RESET + 2 * 604800, RESET + 3 * 604800]);
+}));
+
+// The fallback for a window that ran out before this extension started marking
+// them — and the reason a mark is written at all, since this one can go away.
+test('the moment is recovered from the readings, and refused when they start too late', () => store((dir) => {
+    h.recordLimits(dir, limits(96), T0);
+    h.recordLimits(dir, limits(99), T0 + 3600000);
+    h.recordLimits(dir, limits(100), T0 + 7200000);
+    h.recordLimits(dir, limits(100), T0 + 10800000);
+    assert.equal(h.ranOutAt(h.readHistory(dir), RESET), T0 + 7200000, 'the first sighting, not the latest');
+
+    // Readings that begin at 100% cannot say when it started: the window was
+    // already spent when the record opens, and a date taken from the first row
+    // would be a fact this bar states out loud.
+    const late = h.readHistory(dir).filter((r) => r.weekly >= 100);
+    assert.equal(h.ranOutAt(late, RESET), null);
+    assert.equal(h.ranOutAt([], RESET), null);
+}));

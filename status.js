@@ -264,6 +264,17 @@ function statusMetrics(d = {}) {
             dry: d.pace ? pos(d.pace.dryAt) : null,
             beforeReset: Boolean(d.pace && d.pace.beforeReset),
             resetIn: Math.max(0, w.reset - d.now),
+            // The window as dates rather than as fractions: the bar writes both
+            // of its ends and the forecast in full, and a position cannot be
+            // turned back into a timestamp without the origin.
+            opened: start,
+            reset: w.reset,
+            at: d.now,
+            dryAt: d.pace ? d.pace.dryAt : null,
+            // Filled by the caller from the marks file: the moment this window
+            // ran out, which no formula here can recover — see history.js.
+            ranOut: null,
+            ranOutPlan: null,
         };
     }
     if (d.session) out.session5h = { pct: d.session.pct, resetIn: Math.max(0, d.session.reset - d.now) };

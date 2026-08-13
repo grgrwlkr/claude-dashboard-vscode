@@ -63,7 +63,7 @@
       },
       {
         "command": "claudeStatusline.openClaude",
-        "title": "Claude: Open Claude Code in a tab",
+        "title": "Claude: Open Claude Code",
         "icon": {
           "light": "media/open-claude-light.svg",
           "dark": "media/open-claude-dark.svg"
@@ -188,10 +188,27 @@
           "default": false,
           "markdownDescription": "Ask each plugin's marketplace whether a newer version exists.\n\n**Off by default, and off means nothing leaves the machine.** With it off the Health tab still lists every installed plugin, its version and what actually ran — it simply cannot tell you which of them is out of date, because that answer only exists on a server.\n\nWith it on, the extension fetches the marketplace manifest each plugin was installed from, at most once an hour, and compares versions. No credentials are sent and nothing about your usage is transmitted — only a request for a public manifest."
         },
+        "claudeStatusline.openLocation": {
+          "type": "string",
+          "enum": [
+            "activeGroup",
+            "beside",
+            "panel",
+            "newWindow"
+          ],
+          "enumDescriptions": [
+            "A tab in the editor group you are looking at, among the files open there.",
+            "A tab in a new editor group split off to the right — where Claude Code's own button puts it.",
+            "The terminal panel at the bottom, beside the other terminals.",
+            "A tab that is moved straight out into a window of its own."
+          ],
+          "default": "activeGroup",
+          "markdownDescription": "Where **Open Claude Code** puts the session — the button in the status bar, the one in the editor's title bar, and the command, all three.\n\nThe session is the same everywhere: a terminal running `claude` from the shell's `PATH`. Only the place differs, and it is read at the moment you press the button, so changing it needs no reload."
+        },
         "claudeStatusline.renameTabs": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Name each tab opened by **Open Claude Code in a tab** after the session running in it, following `/rename` and the generated title as they change.\n\nOnly tabs this extension opened are renamed, and only while one of them is the active terminal — VS Code's rename acts on the active terminal, so a background tab could only be renamed by first switching to it. A tab opened by the button is active from the start, and any tab is renamed the moment you switch back to it.\n\nOff, tabs keep the name they were opened with."
+          "markdownDescription": "Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title as they change.\n\nOnly terminals this extension opened are renamed, and only while one of them is the active terminal — VS Code's rename acts on the active terminal, so a background one could only be renamed by first switching to it. A terminal opened by the button is active from the start, and any of them is renamed the moment you switch back to it.\n\nOff, they keep the name they were opened with."
         },
         "claudeStatusline.refreshInterval": {
           "type": "number",

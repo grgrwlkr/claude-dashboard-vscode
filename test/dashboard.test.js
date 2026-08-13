@@ -54,7 +54,10 @@ test('stackedDays draws one rect per model per day and labels them', () => {
     };
     const svg = db.stackedDays(days, ['claude-opus-5', 'claude-fable-5'], dayModels);
     assert.equal((svg.match(/<rect /g) || []).length, 3);
-    assert.match(svg, /08\.07/);
+    // Day first, month second — 7 August, the way every other date on the page
+    // and in the bar is written.
+    assert.match(svg, /07\.08/);
+    assert.ok(!/08\.07/.test(svg), 'the axis is not writing the American order');
     // The axis runs in round steps up to the first one clearing the data — a
     // busiest day of $30 gets 0/10/20/30, not four quarters of 30.
     assert.match(svg, /class="grid"/);
@@ -104,62 +107,113 @@ test('barList sorts by the caller and caps the list', () => {
     assert.ok(!html.includes('>c<'));
 });
 
-// `now` and `dry` are positions in the window: 0 when it opened, 1 at the reset.
+// The week bar. Positions on it are timestamps rather than fractions: the rail
+// is the window, so everything on it — the fill, the marks, the day cells — is
+// placed from the same two dates.
+const WEEK_S = 604800;
+const NOON = Math.floor(new Date('2026-08-10T12:00:00').getTime() / 1000);
+// Opened Monday noon, four days in, 62% spent against a plan of 57%.
 const week = (over = {}) => ({
-    pct: 62, plan: 50, now: 0.5, dry: 0.806, beforeReset: true, resetIn: 3.5 * 86400, ...over,
+    pct: 62, plan: 57, opened: NOON, reset: NOON + WEEK_S, at: NOON + 4 * 86400,
+    dryAt: NOON + 5.5 * 86400, ranOut: null, ranOutPlan: null, ...over,
 });
 const widthOf = (html, cls) => {
     const m = html.match(new RegExp(`class="${cls}[^"]*"[^>]*style="[^"]*width:([\\d.]+)%`));
     return m ? Number(m[1]) : null;
 };
+const leftOf = (html, cls) => {
+    const m = html.match(new RegExp(`class="${cls}[^"]*"[^>]*style="left:([\\d.]+)%`));
+    return m ? Number(m[1]) : null;
+};
 
-test('paceTrack: the rail measures time, so spend never moves anything on it', () => {
-    // The bug this replaced: the fill was drawn from pct while the marks were
-    // drawn from the calendar, and the two were compared by eye. Spend now lives
-    // in the header as a sentence, and the geometry must not react to it at all.
-    const lean = db.paceTrack(week({ pct: 20 }));
-    const heavy = db.paceTrack(week({ pct: 95 }));
-    for (const cls of ['track-past', 'track-alive', 'track-tail']) {
-        assert.equal(widthOf(lean, cls), widthOf(heavy, cls), `${cls} moved with spend`);
-    }
-    assert.match(lean, /20% spent/);
-    assert.match(heavy, /95% spent/);
+test('the bar puts spend and time on one axis, so the gap between them is the overspend', () => {
+    // 62% spent, 57% of the week elapsed: the fill runs to the plan, the excess
+    // covers exactly the five points between them, and the mark stands at the
+    // share of the window that has passed — four days of seven.
+    const html = db.paceTrack(week());
+    // Four days of seven is 57.14% of the rail, and every edge here is that
+    // same number: the fill stops at the mark, the excess starts at it. Drawn to
+    // the printed `plan 57%` instead, the zone would end four pixels short of
+    // the line it is measured against.
+    assert.equal(widthOf(html, 'wk-spent'), 57.14);
+    assert.equal(leftOf(html, 'wk-excess'), 57.14);
+    assert.equal(widthOf(html, 'wk-excess'), 4.86);
+    assert.equal(Math.round(leftOf(html, 'wk-now')), Math.round((4 / 7) * 100));
+    assert.match(html, /62% spent · 5% over/);
+    assert.match(html, />62%<i> \+5%<\/i>/);
+    assert.ok(!html.includes('wk-slack'), 'nothing is under the plan here');
 });
 
-test('paceTrack: both marks keep their names however close they sit', () => {
-    // 1.8% apart — the distance at which the old track suppressed one label,
-    // which took a name off the screen exactly when the forecast was closest.
-    const html = db.paceTrack(week({ pct: 98, plan: 88, now: 0.88, dry: 0.898, resetIn: 20 * 3600 }));
-    assert.match(html, /class="track-lbl"[^>]*>dry</);
-    assert.match(html, /class="track-lbl"[^>]*>now</);
+test('under the plan the gap is drawn the other way and signed the other way', () => {
+    const html = db.paceTrack(week({ pct: 40 }));
+    assert.equal(widthOf(html, 'wk-spent'), 40);
+    assert.equal(leftOf(html, 'wk-slack'), 40);
+    assert.equal(widthOf(html, 'wk-slack'), 17.14, 'the gap reaches the mark, not the rounded figure');
+    assert.match(html, />40%<i> −17%<\/i>/);
+    assert.ok(!html.includes('wk-excess'));
 });
 
-test('paceTrack: the two durations add up to the time left', () => {
-    const html = db.paceTrack(week({ pct: 92, plan: 84, now: 0.846, dry: 0.92, resetIn: 25 * 3600 }));
-    // 12h25m on quota + 12h34m without it == the 1d1h printed beside them. Read
-    // off the positions instead, and the pair drifts from it by tens of minutes.
-    assert.match(html, /12h25m of quota left · 12h34m without it/);
-    assert.match(html, /resets in 1d1h/);
-});
+test('the forecast is stated in every state, and only stands on the rail when it lands on it', () => {
+    // Inside the window: a mark of its own, with how long until it and the day.
+    const soon = db.paceTrack(week());
+    assert.match(soon, /class="wk-lbl wk-dry-t"/);
+    assert.match(soon, /dry 1d12h → Sun 16\.08, ~00h/);
+    assert.match(soon, /runs out Sun 16\.08, ~00h, in 1d12h/);
 
-test('paceTrack: the states that are not the ordinary one', () => {
-    const early = db.paceTrack(week({ pct: 2, plan: 3, now: 0.03, dry: null, resetIn: 6.8 * 86400 }));
+    // Past the reset: no position on this rail, so it is pinned to the edge it
+    // lies beyond and drawn quiet — not running out is not an alarm.
+    const far = db.paceTrack(week({ pct: 20, dryAt: NOON + 20 * 86400 }));
+    assert.match(far, /class="wk-lbl wk-beyond"/);
+    assert.match(far, /dry 16d0h → Sun 30\.08, ~12h ⟶/);
+    assert.match(far, /lasts to the reset/);
+    assert.ok(!far.includes('class="wk-dry"'), 'a forecast off the rail draws no line on it');
+
+    // Too early to say anything: the pace module hands over no date at all.
+    const early = db.paceTrack(week({ pct: 1, dryAt: null }));
     assert.match(early, /too early to forecast/);
-    assert.ok(!early.includes('track-alive'), 'no forecast, no zones');
-    assert.ok(!early.includes('track-flag'));
+    assert.ok(!early.includes('wk-dry-t'));
+});
 
-    const safe = db.paceTrack(week({ pct: 54, plan: 61, now: 0.61, dry: 1.4, resetIn: 2.6 * 86400 }));
-    assert.match(safe, /lasts to the reset/);
-    assert.ok(!safe.includes('track-tail'), 'nothing to sit out');
-    assert.ok(!safe.includes('track-flag'), 'a flag past the reset is not a warning');
+test('out of quota the bar stops forecasting and states the moment it happened', () => {
+    const ranOut = (NOON + 3 * 86400) * 1000;
+    const html = db.paceTrack(week({ pct: 100, plan: 57, ranOut, ranOutPlan: 43 }));
 
-    // Out of quota: the forecast has collapsed onto now, so there is no living
-    // block and no second mark — the rest of the week is the wait.
-    const dry = db.paceTrack(week({ pct: 100, plan: 50, now: 0.5, dry: 0.5, resetIn: 3.5 * 86400 }));
-    assert.match(dry, /track-tail is-dead/);
-    assert.match(dry, /3d12h without quota/);
-    assert.ok(!dry.includes('track-alive'));
-    assert.equal(widthOf(dry, 'track-tail'), 50);
+    // The recorded moment, not the present: the forecast at 100% is `now`
+    // forever, which is the reason the moment is written down at all.
+    assert.match(html, /ran out Thu 13\.08, ~12h/);
+    assert.equal(Math.round(leftOf(html, 'wk-dry')), Math.round((3 / 7) * 100));
+    // And `now` keeps moving, which is what says how long the wait has been.
+    assert.equal(Math.round(leftOf(html, 'wk-now')), Math.round((4 / 7) * 100));
+    assert.match(html, /out of quota · 3d0h until the reset/);
+    assert.ok(!/runs out/.test(html), 'nothing left to forecast');
+});
+
+test('out of quota with nothing recorded says so rather than pointing at now', () => {
+    const html = db.paceTrack(week({ pct: 100, ranOut: null }));
+    assert.match(html, />out of quota</);
+    assert.ok(!html.includes('ran out'), 'no date is invented for a moment nobody wrote down');
+    assert.ok(!html.includes('class="wk-dry"'), 'and no line stands where it did not happen');
+});
+
+test('the cells are calendar days, named as far as each one has room for', () => {
+    const html = db.paceTrack(week());
+    // A window opened at noon has seven midnights inside it, so eight cells:
+    // two half days at the ends and six whole ones between them.
+    assert.equal((html.match(/class="wk-date/g) || []).length, 8);
+    assert.match(html, /class="wk-date"[^>]*>Tue 11\.08</);
+    // Half a day is 7.1% of the rail — under the width the full label needs, so
+    // it drops a step rather than being cut by the edge.
+    assert.match(html, /class="wk-date"[^>]*>Mon 10</);
+    // Today is the cell `at` falls in, and it is the one drawn bold.
+    assert.match(html, /class="wk-date today"[^>]*>Fri 14\.08</);
+});
+
+test('a day tick that would sit under a mark is dropped rather than smeared', () => {
+    // `at` on the stroke of midnight: the day boundary and the plan mark are the
+    // same position, and two lines there read as one thick dirty one.
+    const html = db.paceTrack(week({ at: NOON + 3.5 * 86400 }));
+    const ticks = (html.match(/class="wk-day"/g) || []).length;
+    assert.equal(ticks, 5, 'six boundaries, one of them under the mark');
 });
 
 test('dayModelMatrix splits a file across its days without inventing spend', () => {
@@ -1084,4 +1138,64 @@ test('the countdown the page runs is the one under test', () => {
     });
     assert.match(html, /function countdown\(due, now, every/);
     assert.match(html, /const state = countdown\(due, Date\.now\(\), every\);/);
+});
+
+// The env panels of the Claude Code tab. Both complaints that produced this were
+// about the same markup: the sentence lived in a `title`, where the browser drew
+// all of it on one line over the panel beside it, and the documented default was
+// nowhere on the page at all.
+test('an env variable says what it does on the page, and what it would be unset', () => {
+    const html = db.clientTab({
+        checkedAt: '2026-08-13',
+        chain: [], set: [], unknown: [], differs: [], unset: [],
+        env: {
+            fromSettings: [{
+                key: 'CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS',
+                value: '40',
+                known: true,
+                description: 'How many subagents can run at once (default: 20).',
+                default: '20',
+                differs: true,
+            }],
+            fromHost: [],
+            shadowed: [],
+        },
+        counts: { set: 0, unknown: 0, differs: 0, unset: 0 },
+    });
+
+    assert.match(html, /How many subagents can run at once/, 'the sentence is on the page, not in a tooltip');
+    assert.match(html, /default 20/);
+    assert.ok(!/title="How many subagents/.test(html), 'the description is no longer a native tooltip');
+    // A value that is not the documented one is marked, the same red the
+    // settings table uses for the same fact.
+    assert.match(html, /envrow-def o-failed/);
+});
+
+test('a window too young to judge states the share and nothing about pace', () => {
+    // Twenty minutes in, 1% spent, plan 0%: every fraction of a percent is
+    // "over", and a week would open on an alarm about nothing.
+    const fresh = db.paceTrack(week({ pct: 1, plan: 0, at: NOON + 20 * 60, dryAt: null }));
+    assert.match(fresh, /1% spent/);
+    assert.ok(!/over|under/.test(fresh.replace(/wk-over|wk-under/g, '')), 'no verdict yet');
+    assert.ok(!fresh.includes('plan 0%'), 'and no mark claiming what was allowed');
+
+    // An hour in and past 2%, the comparison starts.
+    const settled = db.paceTrack(week({ pct: 3, plan: 1, at: NOON + 3600, dryAt: null }));
+    assert.match(settled, /3% spent · 2% over/);
+    assert.match(settled, /plan 1%/);
+});
+
+// The defect this pins: `plan` is floored to a whole percent by pace(), so a
+// zone drawn to it stopped short of the mark it is measured against — visible
+// as daylight between the fill and the line at the width the page renders at.
+test('the zone always reaches the mark, whatever the printed plan rounds to', () => {
+    // 6.43% of the week elapsed, reported as a plan of 6%.
+    const at = NOON + Math.round(0.0643 * WEEK_S);
+    for (const pct of [3, 5, 9, 20, 62, 100]) {
+        const html = db.paceTrack(week({ pct, plan: 6, at, dryAt: null }));
+        const mark = leftOf(html, 'wk-now');
+        const zone = html.includes('wk-slack') ? 'wk-slack' : 'wk-excess';
+        const edge = pct < 6.43 ? leftOf(html, zone) + widthOf(html, zone) : leftOf(html, zone);
+        assert.ok(Math.abs(edge - mark) < 0.02, `${pct}%: the ${zone} edge sits ${edge} against a mark at ${mark}`);
+    }
 });

@@ -65,10 +65,26 @@ test('the readers answer emptily rather than throwing when there is no ~/.claude
 test('every status-bar item hides itself instead of showing a zero', () => {
     const run = activate();
     try {
-        assert.ok(vscode.__items.length > 0, 'the items are created either way');
-        assert.deepEqual(vscode.__items.map((i) => i.visible), vscode.__items.map(() => false));
-        assert.deepEqual(vscode.__items.map((i) => i.text), vscode.__items.map(() => ''));
+        // The segments only; the button beside them reports nothing, so there is
+        // no reading it could be missing and it stays where it is.
+        const segments = vscode.__items.filter((i) => String(i.id).startsWith('claudeStatusline.segment'));
+        assert.ok(segments.length > 0, 'the items are created either way');
+        assert.deepEqual(segments.map((i) => i.visible), segments.map(() => false));
+        assert.deepEqual(segments.map((i) => i.text), segments.map(() => ''));
         assert.deepEqual(vscode.__errors, []);
+    } finally { run.dispose(); }
+});
+
+// A machine with no ~/.claude is exactly the one where the button matters: there
+// is nothing to report yet, so an empty bar with nothing on it would be the whole
+// of the extension until a first session exists.
+test('the button is there on a machine that has never run Claude Code', () => {
+    const run = activate();
+    try {
+        const btn = vscode.__items.find((i) => i.id === 'claudeStatusline.open');
+        assert.ok(btn, 'the button is created without reading anything');
+        assert.equal(btn.visible, true);
+        assert.equal(btn.command, 'claudeStatusline.openClaude');
     } finally { run.dispose(); }
 });
 

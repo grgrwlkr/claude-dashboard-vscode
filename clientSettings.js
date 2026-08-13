@@ -121,6 +121,26 @@ function sameAsDefault(value, def) {
     try { return JSON.stringify(value) === def; } catch { return false; }
 }
 
+/**
+ * The default of an environment variable, which the reference states in prose
+ * rather than in a field: every `default` in the registry's `env` group is
+ * empty, while 32 of its 315 descriptions carry a `(default: 20)` — measured
+ * against `claude-settings-registry.json` on 2026-08-13.
+ *
+ * So it is read out of the sentence, and only in that one shape. The prose also
+ * says "defaults to the value of X" twenty more times, which is a rule and not
+ * a value: pulling a number out of those would put a wrong figure in a column
+ * headed Default, and a dash is the honest answer instead.
+ *
+ * What follows the number is trimmed off — `30000; maximum: 150000`,
+ * `120000, or 2 minutes` — because the column holds the default and nothing else.
+ */
+function defaultFromDoc(description) {
+    const found = /\(default:?\s*([^)]{1,40})\)/i.exec(String(description || ''));
+    if (!found) return '';
+    return found[1].split(/[;,]/)[0].trim().replace(/^[`"']|[`"']$/g, '');
+}
+
 function indexRegistry(registry) {
     const out = new Map();
     for (const group of ['settings', 'globalConfig', 'env']) {
@@ -228,6 +248,7 @@ function clientSettings({ chain = [], registry = {}, hostEnv = {} } = {}) {
         for (const [key, value] of Object.entries(envAt.value).sort()) {
             const rendered = renderValue(key, value);
             const doc = known.get(key);
+            const fallback = defaultFromDoc(doc ? doc.description : '');
             fromSettings.push({
                 key,
                 value: rendered.text,
@@ -236,6 +257,11 @@ function clientSettings({ chain = [], registry = {}, hostEnv = {} } = {}) {
                 path: envAt.path,
                 known: Boolean(doc),
                 description: doc ? doc.description : '',
+                default: fallback,
+                // An env value is always a string, and the documented default is
+                // written as prose, so the two are compared as text: `40` against
+                // `20`, never JSON against JSON.
+                differs: Boolean(fallback) && String(rendered.text) !== fallback,
             });
         }
     }
@@ -249,12 +275,15 @@ function clientSettings({ chain = [], registry = {}, hostEnv = {} } = {}) {
         if (!/^(CLAUDE|ANTHROPIC|AWS_BEARER_TOKEN|DISABLE_|MAX_THINKING|OTEL_|VERTEX|CLOUD_ML)/.test(key)) continue;
         const rendered = renderValue(key, hostEnv[key]);
         const doc = known.get(key);
+        const fallback = defaultFromDoc(doc ? doc.description : '');
         fromHost.push({
             key,
             value: rendered.text,
             masked: rendered.masked,
             known: Boolean(doc),
             description: doc ? doc.description : '',
+            default: fallback,
+            differs: Boolean(fallback) && String(rendered.text) !== fallback,
         });
     }
 

@@ -60,7 +60,10 @@ const vscode = {
         appendMarkdown(text) { this.value += text; return this; }
     },
     ProgressLocation: { Notification: 15 },
-    ViewColumn: { Active: -1 },
+    // The values VS Code gives them, so a test comparing what the extension
+    // passed to createTerminal is comparing the same things it would there.
+    ViewColumn: { Active: -1, Beside: -2, One: 1 },
+    TerminalLocation: { Panel: 1, Editor: 2 },
     window: {
         createStatusBarItem(id, alignment, priority) {
             const item = {

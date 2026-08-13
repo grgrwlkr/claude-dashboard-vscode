@@ -57,6 +57,13 @@ function activate({ segments, workspace = '', settings = {} } = {}) {
     };
 }
 
+// The bar holds one item per segment and one that is no segment at all — the
+// button that opens Claude Code. Everything about templates filters by id, so
+// neither the button nor the order the two are created in can move a test that
+// is about the segment list.
+const segmentItems = () => vscode.__items.filter((i) => String(i.id).startsWith('claudeStatusline.segment'));
+const openButtons = () => vscode.__items.filter((i) => i.id === 'claudeStatusline.open');
+
 // A pinned limits cache. `u.readCache` reads ~/.claude/statusline-usage.json,
 // which exists only where Claude Code has run — so the two tests below were
 // asserting that this machine had used Claude Code today, and on a runner that
@@ -79,11 +86,34 @@ function pinLimits() {
 test('activate creates one status-bar item per configured segment', () => {
     const run = activate({ segments: ['claude', 'second one', 'third'] });
     try {
-        assert.equal(vscode.__items.length, 3);
-        assert.deepEqual(vscode.__items.map((i) => i.text), ['claude', 'second one', 'third']);
+        assert.equal(segmentItems().length, 3);
+        assert.deepEqual(segmentItems().map((i) => i.text), ['claude', 'second one', 'third']);
         // Priority descends along the list, so they read left to right in order.
-        assert.deepEqual(vscode.__items.map((i) => i.priority), [100, 99, 98]);
-        assert.ok(vscode.__items.every((i) => i.command === 'claudeStatusline.dashboard'));
+        assert.deepEqual(segmentItems().map((i) => i.priority), [100, 99, 98]);
+        assert.ok(segmentItems().every((i) => i.command === 'claudeStatusline.dashboard'));
+    } finally { run.dispose(); }
+});
+
+// The button is the one item that reports nothing, so nothing in the collectors
+// or in render() would notice if it stopped being created, stopped being shown,
+// or drifted to the right of the numbers.
+test('the bar opens with a button left of every segment', () => {
+    const run = activate({ segments: ['claude', 'second one'] });
+    try {
+        assert.equal(openButtons().length, 1);
+        const [btn] = openButtons();
+        assert.equal(btn.command, 'claudeStatusline.openClaude');
+        assert.equal(btn.text, '$(terminal)$(sparkle)');
+        // A created item is hidden until it is shown, and this one is not on
+        // render()'s show/hide path — miss the show() and the button never appears.
+        assert.equal(btn.visible, true);
+        // Higher priority is further left on either side of the bar.
+        assert.ok(btn.priority > segmentItems()[0].priority);
+        // The name is what the bar's own context menu offers to hide, beside
+        // every other extension's — so it names this one rather than reading as
+        // an entry of Claude Code's, which sits in that same list.
+        assert.equal(btn.name, 'Claude Statusline: Open');
+        assert.deepEqual(segmentItems().map((i) => i.name), ['Claude Statusline 1', 'Claude Statusline 2']);
     } finally { run.dispose(); }
 });
 
@@ -134,7 +164,7 @@ test('left at its default the refresh command does ask for limits', async () => 
 test('with no segments configured the bar falls back to the built-in four', () => {
     const run = activate({ segments: undefined });
     try {
-        assert.equal(vscode.__items.length, seg.DEFAULT_SEGMENTS.length);
+        assert.equal(segmentItems().length, seg.DEFAULT_SEGMENTS.length);
     } finally { run.dispose(); }
 });
 
@@ -142,7 +172,7 @@ test('a segment whose placeholders have nothing to say hides itself', () => {
     // No workspace, so there is no session: every session-scoped field is empty.
     const run = activate({ segments: ['ctx {ctx}', 'literal text'] });
     try {
-        const [dynamic, literal] = vscode.__items;
+        const [dynamic, literal] = segmentItems();
         assert.equal(dynamic.visible, false, 'nothing to report, so nothing is shown');
         assert.equal(literal.visible, true, 'text with no placeholders is the user\'s own decoration');
     } finally { run.dispose(); }
@@ -151,16 +181,24 @@ test('a segment whose placeholders have nothing to say hides itself', () => {
 test('changing the configuration rebuilds the items without a reload', () => {
     const run = activate({ segments: ['one'] });
     try {
-        assert.equal(vscode.__items.length, 1);
-        const first = vscode.__items[0];
+        assert.equal(segmentItems().length, 1);
+        const first = segmentItems()[0];
+        const oldButton = openButtons()[0];
 
         vscode.__setSettings({ segments: ['a', 'b'], alignment: 'left', priority: 50, refreshInterval: 3600 });
         vscode.__changeConfiguration();
 
         assert.equal(first.disposed, true, 'the old item is disposed, not left behind');
-        assert.equal(vscode.__items.length, 2);
-        assert.deepEqual(vscode.__items.map((i) => i.text), ['a', 'b']);
-        assert.equal(vscode.__items[0].alignment, vscode.StatusBarAlignment.Left);
+        assert.equal(segmentItems().length, 2);
+        assert.deepEqual(segmentItems().map((i) => i.text), ['a', 'b']);
+        assert.equal(segmentItems()[0].alignment, vscode.StatusBarAlignment.Left);
+        // The button is rebuilt here too — it carries the alignment and follows
+        // the priority — and this runs on every settings change, so an old one
+        // left behind would pile up a button per keystroke on the Settings tab.
+        assert.equal(oldButton.disposed, true);
+        assert.equal(openButtons().length, 1);
+        assert.equal(openButtons()[0].alignment, vscode.StatusBarAlignment.Left);
+        assert.ok(openButtons()[0].priority > segmentItems()[0].priority);
     } finally { run.dispose(); }
 });
 
@@ -172,6 +210,19 @@ test('the manifest ships the same default bar as the module', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const declared = manifest.contributes.configuration.properties['claudeStatusline.segments'].default;
     assert.deepEqual(declared, seg.DEFAULT_SEGMENTS);
+});
+
+// The places are written twice as well — as the enum a user picks from and as
+// the table the button reads — and a value in one and not the other is a
+// setting that silently does nothing.
+test('the manifest offers exactly the places the button knows', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const property = manifest.contributes.configuration.properties['claudeStatusline.openLocation'];
+    assert.deepEqual(property.enum, Object.keys(ext.__PLACES));
+    // And the cards on the Settings tab are that same list, in that same order.
+    assert.deepEqual(property.enum, db.PLACES.map(([value]) => value));
+    assert.equal(property.enum.length, property.enumDescriptions.length);
+    assert.ok(ext.__PLACES[property.default], 'the default is one of them');
 });
 
 test('the commands the package manifest promises are all registered', () => {
@@ -1135,6 +1186,60 @@ test('the tab button opens the session in the active editor group', async () => 
         assert.equal(terminal.options.isTransient, true);
         assert.equal(terminal.shown, 1, 'a tab nobody is shown is not opened');
     } finally { run.dispose(); }
+});
+
+// The other three places, each one argument away from the first. They are worth
+// a test apiece because none of them is visible from anywhere else: a wrong
+// location opens a session all the same, in the wrong half of the window.
+test('openLocation puts the session where it names', async () => {
+    for (const [openLocation, location] of [
+        ['beside', { viewColumn: vscode.ViewColumn.Beside }],
+        ['panel', vscode.TerminalLocation.Panel],
+        ['newWindow', { viewColumn: vscode.ViewColumn.Active }],
+        // Anything else is the default, including a value from a settings file
+        // written by hand.
+        ['nonsense', { viewColumn: vscode.ViewColumn.Active }],
+    ]) {
+        const run = activate({ segments: ['{today}'], settings: { openLocation } });
+        try {
+            await openClaude();
+            assert.deepEqual(lastTerminal().options.location, location, openLocation);
+        } finally { run.dispose(); }
+    }
+});
+
+// A terminal cannot be created in another window, so this one is the odd case:
+// opened like the first, then carried out by a command that acts on whatever
+// editor is active — which is why the terminal is shown before it runs.
+test('a new window is asked for after the terminal is shown, and only for that setting', async () => {
+    const moves = () => vscode.__executed.filter((e) => e.id === 'workbench.action.moveEditorToNewWindow');
+    let run = activate({ segments: ['{today}'], settings: { openLocation: 'newWindow' } });
+    try {
+        await openClaude();
+        assert.equal(moves().length, 1);
+        assert.equal(lastTerminal().shown, 1);
+    } finally { run.dispose(); }
+
+    run = activate({ segments: ['{today}'], settings: { openLocation: 'panel' } });
+    try {
+        await openClaude();
+        assert.deepEqual(moves(), [], 'nothing is carried anywhere for the other places');
+    } finally { run.dispose(); }
+});
+
+// The button says where it will put the session, and that is a setting now — so
+// the sentence is built where the button is, on every configuration change.
+test('the button hover names the place the setting chose', async () => {
+    const tooltipWith = (openLocation) => {
+        const run = activate({ segments: ['{today}'], settings: { openLocation } });
+        try { return openButtons()[0].tooltip; } finally { run.dispose(); }
+    };
+    // The words are the Settings tab's, so this asserts against that list rather
+    // than against a copy of it written here.
+    for (const [key, label] of db.PLACES) {
+        assert.equal(tooltipWith(key), `Open Claude Code ${label}`);
+    }
+    assert.equal(tooltipWith(undefined), tooltipWith('activeGroup'));
 });
 
 // Shell integration is the difference between running a command and typing at a

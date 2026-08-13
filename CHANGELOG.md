@@ -13,18 +13,84 @@ grew out of, and a version that shipped nothing is worth saying so.
 
 ### Added
 
-- **Open Claude Code in a tab** — a button in the editor's title bar, and a
-  command, that starts a Claude Code session as a tab in the group you are
-  looking at, next to the files already open there. Claude Code's own button
-  splits a new editor group off to the right instead. The session runs `claude`
-  from the shell's `PATH`; the tab closes with it when it ends cleanly and stays
-  when it fails, so the reason is still on screen. The tab carries this
-  extension's own icon — the same one as the button.
+- **Open Claude Code** — a button in the editor's title bar, and a command, that
+  starts a Claude Code session as a tab in the group you are looking at, next to
+  the files already open there. Claude Code's own button splits a new editor
+  group off to the right instead. The session runs `claude` from the shell's
+  `PATH`; the tab closes with it when it ends cleanly and stays when it fails, so
+  the reason is still on screen. The tab carries this extension's own icon — the
+  same one as the button.
+- `claudeStatusline.openLocation` chooses where that session lands: a tab in the
+  group you are looking at (the default), a tab beside it, the terminal panel at
+  the bottom, or a window of its own. It governs all three ways in — both buttons
+  and the command — is read at the moment you press one, and the status-bar
+  button's hover names the place it will use. Also on the dashboard's Settings
+  tab, under Behaviour.
 - The tab is named after the session running in it, following `/rename` and the
   generated title as they change — `claudeStatusline.renameTabs`, on by default.
   Only tabs this extension opened are renamed, and only while one of them is the
   active terminal: VS Code's rename acts on the active terminal, so a background
   tab could only be renamed by switching to it first.
+- The same button in the status bar, left of every segment: `$(terminal)$(sparkle)`,
+  one click for a session in the group you are looking at. The status bar takes
+  codicons only, so it wears the extension's icon as the two glyphs that exist —
+  the prompt and the spark. It is drawn whether or not anything has been read, so
+  it is there on a machine that has never run Claude Code, and the bar's own
+  right-click menu hides it like any other item.
+
+### Changed
+
+- **The week bar on the Now tab draws spend on the week's own axis.** An even
+  burn puts x% of the limit at x% of the week, so the fill is the spend, the mark
+  is where the week stands, and the gap between them is the over- or underspend
+  itself — red past the mark, green short of it — with the figure and its
+  distance from the plan written on the fill: `72% +17%`. The cells are calendar
+  days with their dates, today in bold, so the rail reads as a week rather than
+  as a bar that happens to be full. Both ends of the window carry their date and
+  hour, and the forecast is stated in every state the way the terminal states it
+  — `dry 1d12h → Sat 15.08, ~13h` — pinned quietly to the right edge when it
+  lands past the reset. This replaces a rail that measured time alone.
+- The moment a week runs out is now recorded, because it is the one fact here
+  that cannot be recomputed: the forecast divides by what is left, so at 100% it
+  collapses onto the present and answers "now" for the rest of the window. It is
+  written once, on the first reading that sees the quota gone, together with the
+  plan of that moment — 100% reached with 54% of the week elapsed is a different
+  week from 100% reached on the last evening. Kept in `week-marks.json` beside
+  the reading log, which is trimmed by design; a window that ran out before this
+  shipped has its moment recovered from the readings, and one whose readings do
+  not reach back that far says the moment is unknown rather than inventing a
+  date. After that the mark stays where it happened while `now` keeps moving, so
+  the distance between them is how long you have been without quota — and the
+  delta on the fill melts towards zero as the plan catches up.
+- The bar says nothing about pace in the first half hour of a window or below 2%
+  spent: with a plan of 0% every fraction of a percent is "over", and a fresh
+  week used to open on an alarm about one percent.
+- The zone between the fill and the plan mark is measured to the mark itself
+  rather than to the whole percent printed under it. The plan arrives floored —
+  6.43% of the week elapsed is reported as 6% — so the zone stopped just short of
+  the line it exists to reach, and the gap was visible on screen.
+- The Settings tab's Behaviour panel shows every choice at once instead of
+  hiding all but one behind a dropdown: the side of the bar and where Claude
+  Code opens are a card per option, each with a line saying what picking it
+  does, and the save target is a pair of buttons. A setting whose alternatives
+  are invisible is a setting nobody changes.
+- Reading and the network is built from the same rows: the name and the sentence
+  above the control rather than beside it, so the two panels of that tab read as
+  one form. The switches themselves are unchanged, and still write immediately.
+- The environment panels of the Claude Code tab say what each variable does on
+  the page instead of in a tooltip — the browser drew that whole sentence on one
+  line across the panel next to it — and show the documented default beside the
+  value, marked when what is set differs from it. Defaults come from the
+  reference's own prose, which states one for 32 of the 315 documented
+  variables; the rest keep a dash rather than a guess.
+- Dates on this page are written day first — `11.08`, and `Tue 11.08` in Busiest
+  days. They were `08.11`, the only place on the page or in the bar that put the
+  month first.
+- The status bar's own context menu names this extension's items after it:
+  **Claude Statusline: Open** for the button and **Claude Statusline 1**, **2**,
+  … for the segments. They read as `Claude Code` and `Claude 4` before, sitting
+  in one list with Claude Code's own entry, where neither said whose they were.
+  VS Code remembers a hidden item by id, so nothing you had hidden comes back.
 
 ## [0.24.0] — 2026-08-13
 

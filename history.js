@@ -159,6 +159,81 @@ function weeklyWindows(rows, limit = 6) {
     return windows.sort((a, b) => a.reset - b.reset).slice(-limit);
 }
 
+// When a week ran out, one line per window.
+//
+// This is the one fact on the week bar that cannot be recomputed. The forecast
+// runs on `(100 - pct) / pct`, so at 100% it collapses onto the present and says
+// "now" forever after: the moment the quota actually ended is only knowable to
+// whoever wrote it down at the time. The reading history above would answer it —
+// but it is trimmed at MAX_ROWS, and a window that ran out is exactly the window
+// worth remembering after the readings behind it are gone.
+//
+// Kept apart from the readings for that reason: a handful of lines that no trim
+// touches, against a log that is rotated by design.
+const MARKS = 'week-marks.json';
+const marksPath = (dir) => path.join(dir, MARKS);
+
+/** Every window that ran out, oldest first. */
+function readMarks(dir) {
+    try {
+        const rows = JSON.parse(fs.readFileSync(marksPath(dir), 'utf8'));
+        return Array.isArray(rows) ? rows.filter((r) => r && r.reset > 0).sort((a, b) => a.reset - b.reset) : [];
+    } catch { return []; }
+}
+
+/** The mark for one window, matched with the same slack as the grouping above. */
+function markFor(marks, reset) {
+    return (marks || []).find((m) => Math.abs(m.reset - reset) <= RESET_SLACK_S) || null;
+}
+
+/**
+ * Write the moment this window ran out — once. A later call for the same window
+ * changes nothing: the first sighting is the answer, and every one after it is
+ * the same 100% seen again a minute later.
+ *
+ * `plan` is stored beside it because it is the other half of the fact: 100%
+ * reached when only 54% of the week had elapsed is a different week from 100%
+ * reached on the last evening, and by the time anyone looks, the plan has moved
+ * on and cannot be recovered either.
+ */
+function recordMark(dir, { reset, at, plan }, limit = 26) {
+    if (!reset || !at) return { written: false, reason: 'incomplete' };
+    const marks = readMarks(dir);
+    if (markFor(marks, reset)) return { written: false, reason: 'already-marked' };
+
+    const kept = [...marks, { reset, at, plan: Number.isFinite(plan) ? plan : null }]
+        .sort((a, b) => a.reset - b.reset)
+        .slice(-limit);
+    const tmp = `${marksPath(dir)}.${process.pid}.tmp`;
+    try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(tmp, JSON.stringify(kept));
+        fs.renameSync(tmp, marksPath(dir));
+    } catch {
+        try { fs.unlinkSync(tmp); } catch { /* already gone */ }
+        return { written: false, reason: 'write-failed' };
+    }
+    return { written: true, reason: 'marked' };
+}
+
+/**
+ * The moment a window first read 100%, recovered from the readings — the
+ * fallback for a window that ran out before this extension started marking
+ * them, and the way the very first mark of all gets its date.
+ *
+ * Returns null when the readings do not reach back to it: if the oldest one this
+ * window has is already 100%, the moment is older than the record, and a date
+ * invented from the first row would be a lie about a fact this bar states.
+ */
+function ranOutAt(rows, reset) {
+    const window = (rows || [])
+        .filter((r) => r.reset && Math.abs(r.reset - reset) <= RESET_SLACK_S && typeof r.weekly === 'number')
+        .sort((a, b) => a.at - b.at);
+    if (window.length === 0 || window[0].weekly >= 100) return null;
+    const hit = window.find((r) => r.weekly >= 100);
+    return hit ? hit.at : null;
+}
+
 /** The 5-hour session limit over time — a sawtooth, one tooth per session. */
 function sessionSeries(rows, sinceMs = 0) {
     return rows.filter((r) => r.at >= sinceMs && typeof r.session === 'number')
@@ -166,6 +241,7 @@ function sessionSeries(rows, sinceMs = 0) {
 }
 
 module.exports = {
-    FILE, HEARTBEAT_MS, MAX_ROWS, WEEK_MS,
+    FILE, MARKS, HEARTBEAT_MS, MAX_ROWS, WEEK_MS,
     historyPath, readHistory, recordLimits, pointOf, weeklyWindows, sessionSeries,
+    marksPath, readMarks, recordMark, markFor, ranOutAt,
 };

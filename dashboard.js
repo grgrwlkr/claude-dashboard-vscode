@@ -42,11 +42,24 @@ function fmtDur(ms) {
     return h < 24 ? `${h}h${m % 60}m` : `${Math.floor(h / 24)}d${h % 24}h`;
 }
 
-const fmtDay = (key) => key.slice(5).replace('-', '.');
+// A day key — `2026-08-11` — as a date. Day first, because everything else on
+// this page and in the status bar writes one that way (`dayLabel` in usage.js,
+// `Thu 13.08`), and the old `08.11` read as the eighth of November to anyone
+// not told it was the American order.
+const fmtDay = (key) => `${String(key).slice(8, 10)}.${String(key).slice(5, 7)}`;
 
-// Weekdays come from usage.js so the tooltips and these tables name a day the
-// same way; nothing else of that module is used here.
-const { WEEKDAYS, fmtLeft } = require('./usage');
+// The same day with its weekday, for a list that has room for it: a row of
+// figures next to `Tue 11.08` says which of the peaks are weekends. The axis
+// ticks of a chart do not get this — there the labels sit a few pixels apart.
+const fmtDayLong = (key) => {
+    const at = new Date(`${key}T00:00:00`);
+    return Number.isNaN(at.getTime()) ? fmtDay(key) : `${WEEKDAYS[at.getDay()]} ${fmtDay(key)}`;
+};
+
+// Weekdays, durations and the way a forecast is written all come from usage.js,
+// so the bar in the corner of the editor and this page name a day, a length of
+// time and a forecast identically.
+const { WEEKDAYS, fmtLeft, fmtWhen } = require('./usage');
 
 function fmtDateTime(ms) {
     if (!ms) return '—';
@@ -836,7 +849,7 @@ function contentTab(total, sys) {
         { limit: 10, label: (v) => String(v) },
     ), { note: 'From <code>~/.claude/history.jsonl</code>, which keeps every prompt typed on this machine across every project. Only counts are read here — the text stays in the file.' })}
           ${panel('Busiest days', barList(
-        Object.entries(log.byDay).sort((a, b) => b[1] - a[1]).map(([k, n]) => [fmtDay(k), { cost: n, msgs: n }]),
+        Object.entries(log.byDay).sort((a, b) => b[1] - a[1]).map(([k, n]) => [fmtDayLong(k), { cost: n, msgs: n }]),
         { limit: 10, label: (v) => String(v) },
     ))}
         </div>` : ''}
@@ -1719,92 +1732,172 @@ function filesTab(total, sys) {
 // means high-contrast and light themes get their own without a second palette.
 const meterTone = (pct) => (pct >= 80 ? 'hot' : pct >= 50 ? 'warm' : 'cool');
 
-const TRACK_WEEK_S = 604800;
-// A block narrower than this cannot hold its own duration, so the number moves
-// to the foot line. The name of a mark never moves.
-const TRACK_MIN_LABEL = 13;
-
 /**
- * The week as a length of time — and only that.
+ * The week: how much of the quota is gone, how much of it was allowed by now,
+ * and when it runs out — on one rail whose axis is the window itself.
  *
- * This used to draw two scales on one rail: the fill measured money while the
- * marks measured time, so "92% of the width" meant the limit for one element
- * and the calendar for another. Nothing could be compared against anything, and
- * the question it invited — does the fill crossing the flag mean the quota is
- * gone — has no answer, because no event happens there.
+ * Spend and time share that axis because an even burn puts x% of the limit at
+ * x% of the week. So the fill is the spend, the mark is where the week stands,
+ * and the gap between them IS the over- or underspend: no second number to
+ * compare, no arithmetic. Red past the mark is spend ahead of the plan; green
+ * short of it is plan not yet used.
  *
- * So the rail is time, end to end. The grey fill is the part of the week
- * already gone and its right edge *is* now, which is why there is no separate
- * notch to collide with anything. What follows is the answer in two lengths:
- * how long the quota still lasts, then how long the week runs on without it.
- * The second one is the alarm — no tail, nothing to fear — and it cannot be
- * mistaken for the first, because both carry their duration in words.
+ * This replaces a rail that measured time alone. That one was written after an
+ * earlier version drew the fill from spend while the marks came from the
+ * calendar and left the reader to compare them by eye — the fix then was to take
+ * spend off the rail entirely. It is back, deliberately: the cells are calendar
+ * days with their dates, so the rail reads as a week rather than as a bar that
+ * happens to be full, and the two quantities are told apart by shape rather than
+ * by the reader.
  *
- * Spend keeps the header, as a sentence. It has the tiles and the Limits meters
- * for its geometry; the rail was the only place the week itself lived.
+ * At 100% the forecast is worthless — `(100 - pct) / pct` collapses onto now —
+ * so the moment the quota ended comes from the marks file instead, and the mark
+ * stays where it happened while `now` keeps moving. The distance between them is
+ * how long you have been without quota, and the delta on the fill melts towards
+ * zero as the plan catches up: 100% four days early reads +46%, then +32%, then
+ * nothing on the day of the reset.
  */
+// A day cell narrower than this cannot hold the label at its side of the
+// cascade, and a label wider than its cell is one the rail's edge cuts in half.
+const DAY_LABELS = [
+    { min: 7.5, of: (d) => `${WEEKDAYS[d.getDay()]} ${p2(d.getDate())}.${p2(d.getMonth() + 1)}` },
+    { min: 5.0, of: (d) => `${WEEKDAYS[d.getDay()]} ${p2(d.getDate())}` },
+    { min: 3.2, of: (d) => `${p2(d.getDate())}.${p2(d.getMonth() + 1)}` },
+];
+
+// A day tick this close to a mark is not read as a boundary — it is read as the
+// mark being smeared. The mark wins: it is one midnight of seven.
+const TICK_CLEARANCE = 0.9;
+
+// Below this share of the rail the figure has no room inside the fill and is
+// written just past its edge instead. The delta rides with it, so the threshold
+// is wider than the figure alone would need.
+const FIGURE_INSIDE = 20;
+
+const p2 = (n) => String(n).padStart(2, '0');
+const trackAt = (x) => `${Math.max(0, Math.min(100, x)).toFixed(2)}%`;
+
+// Centred on its position and clamped to the rail, in `ch` of the label's own
+// length: the exact width is a webview font away, half a character of slack is
+// not. Written this way rather than pinned to the edge, because a mark names a
+// position and a label sitting off it names the wrong one.
+const trackLabel = (x, text) => {
+    const half = `${(String(text).length / 2 + 0.5).toFixed(1)}ch`;
+    return `left:clamp(${half}, ${trackAt(x)}, calc(100% - ${half}))`;
+};
+
+// Every local midnight strictly inside the window. Calendar days, not sevenths:
+// a fixed window opens at whatever hour it opens, and cells bounded at 14:59
+// would be days nobody keeps.
+function trackMidnights(opened, reset) {
+    const out = [];
+    const d = new Date(opened * 1000);
+    d.setHours(24, 0, 0, 0);
+    for (let ts = Math.floor(d.getTime() / 1000); ts < reset; ts += 86400) out.push(ts);
+    return out;
+}
+
 function paceTrack(w) {
-    if (!w) return '';
-    const now = Math.max(0, Math.min(1, w.now || 0)) * 100;
-    const has = w.dry !== null && w.dry !== undefined;
-    const inside = has && w.dry <= 1;
-    const dryAt = inside ? Math.max(0, Math.min(100, w.dry * 100)) : null;
+    if (!w || !w.reset || !w.opened) return '';
+    const at = Number.isFinite(w.at) ? w.at : Math.floor(Date.now() / 1000);
+    const span = Math.max(1, w.reset - w.opened);
+    const pos = (ts) => ((ts - w.opened) / span) * 100;
 
-    // Both durations are cut out of the time that is actually left, never
-    // computed from the positions: derived from positions they drift from the
-    // "resets in" figure printed beside them by tens of minutes.
-    const aliveS = has ? Math.min(w.resetIn, Math.max(0, w.dry - w.now) * TRACK_WEEK_S) : 0;
-    const tailS = inside ? Math.max(0, w.resetIn - aliveS) : 0;
-    // Out of quota: the forecast has collapsed onto now. There is no living
-    // block to draw and no second mark worth naming — the rest of the week is
-    // the wait, and it says so inside itself.
-    const dead = inside && aliveS < 60;
-    const aliveW = has && !dead ? Math.max(0, (inside ? dryAt : 100) - now) : 0;
-    const tailW = inside ? Math.max(0, 100 - (dead ? now : dryAt)) : 0;
-    const aliveText = has ? fmtLeft(aliveS, 0) : '';
-    const tailText = inside ? fmtLeft(tailS || w.resetIn, 0) : '';
+    const pct = Math.max(0, Math.min(100, Number(w.pct) || 0));
+    // The same guard the terminal puts on its forecast, applied to the
+    // comparison as well: in the first half hour of a window the plan is 0% and
+    // any spend at all is "over", so a fresh week opens on an alarm about one
+    // percent. Under either threshold the bar states the share and says nothing
+    // about pace, which is all that is honestly known yet.
+    const settled = at - w.opened >= 1800 && pct >= 2;
+    const plan = settled && Number.isFinite(w.plan) ? w.plan : null;
+    const nowPos = pos(at);
+    // The zone between spend and plan is measured to the mark itself, not to the
+    // rounded percentage printed under it. `plan` arrives floored to a whole
+    // percent — 6.43% of the week elapsed is reported as 6 — so a zone drawn to
+    // 6% while the mark stood at 6.43% left a gap of nearly half a percent
+    // between the two, which is four pixels of daylight where the whole point is
+    // that the fill and the mark meet.
+    const over = plan !== null && pct > nowPos;
+    const under = plan !== null && pct < nowPos;
 
-    const drift = w.plan === null || w.plan === undefined ? '' : w.pct - w.plan;
-    const spend = `${w.pct}% spent${drift === '' ? ''
-        : drift === 0 ? ' · on plan'
-            : drift > 0 ? ` · ${drift}% ahead of plan` : ` · ${-drift}% behind plan`}`;
+    // The quota is gone when the account says 100%, whatever the forecast makes
+    // of it. `ranOut` is the recorded moment; without one the mark has no place
+    // to stand and says so rather than standing on now and implying it.
+    const spent = pct >= 100;
+    const ranOutPos = spent && w.ranOut ? pos(Math.floor(w.ranOut / 1000)) : null;
+    const dryPos = !spent && w.dryAt ? pos(w.dryAt) : null;
+    const dryInside = dryPos !== null && dryPos <= 100;
 
-    // Labels live on different floors — now under the rail, dry over it — so
-    // they cannot overprint however close the two marks are. That is what
-    // replaced suppressing the one that was in the way, which used to hide the
-    // name of a mark exactly when the forecast had come closest.
-    const labelAt = (at) => (at < 7 ? 'left:0'
-        : at > 93 ? 'right:0;left:auto'
-            : `left:${at.toFixed(2)}%;transform:translateX(-50%)`);
+    const marks = [nowPos];
+    if (ranOutPos !== null) marks.push(ranOutPos);
+    if (dryInside) marks.push(dryPos);
 
-    const inBlock = (text, width) => (width >= TRACK_MIN_LABEL ? `<span>${esc(text)}</span>` : '');
-    const spill = [];
-    if (!has) spill.push('too early to forecast');
-    else if (dead) { if (tailW < TRACK_MIN_LABEL) spill.push(`out of quota · ${tailText} to the reset`); else spill.push('out of quota'); }
-    else {
-        if (!inside) spill.push('lasts to the reset');
-        else {
-            if (aliveW < TRACK_MIN_LABEL) spill.push(`${aliveText} of quota left`);
-            if (tailW < TRACK_MIN_LABEL) spill.push(`${tailText} without it`);
-        }
+    const cells = [w.opened, ...trackMidnights(w.opened, w.reset)].map((ts, i, all) => {
+        const end = i + 1 < all.length ? all[i + 1] : w.reset;
+        return { ts, left: pos(ts), width: ((end - ts) / span) * 100, today: at >= ts && at < end };
+    });
+
+    // The figure and its distance from the plan, in the one place the eye is
+    // already looking. The sign carries the meaning; the colour under it has
+    // said the same thing already.
+    const delta = plan === null || pct === plan ? ''
+        : over ? ` +${pct - plan}%` : ` −${plan - pct}%`;
+    const verdict = plan === null ? `${pct}% spent`
+        : over ? `<span class="wk-over-t">${pct}% spent · ${pct - plan}% over</span>`
+            : under ? `<span class="wk-under-t">${pct}% spent · ${plan - pct}% under</span>`
+                : `${pct}% spent · exactly on plan`;
+
+    // The forecast is stated in every state, the way the terminal states it —
+    // how long until it, then the day and hour. "You will not run out" is worth
+    // far more with the date that would have been.
+    let mark = '';
+    if (spent) {
+        mark = w.ranOut
+            ? `<span class="wk-lbl wk-dry-t" style="${trackLabel(ranOutPos, `ran out ${fmtWhen(Math.floor(w.ranOut / 1000))}`)}">ran out ${esc(fmtWhen(Math.floor(w.ranOut / 1000)))}</span>`
+            : '<span class="wk-lbl wk-dry-t" style="right:0;left:auto">out of quota</span>';
+    } else if (dryInside) {
+        const text = `dry ${fmtLeft(w.dryAt, at)} → ${fmtWhen(w.dryAt)}`;
+        mark = `<span class="wk-lbl wk-dry-t" style="${trackLabel(dryPos, text)}">${esc(text)}</span>`;
+    } else if (w.dryAt) {
+        // Past the reset it has no position on this rail at all, so it is pinned
+        // to the edge it lies beyond, and drawn quiet: not running out is not an
+        // alarm.
+        const text = `dry ${fmtLeft(w.dryAt, at)} → ${fmtWhen(w.dryAt)} ⟶`;
+        mark = `<span class="wk-lbl wk-beyond" style="right:0;left:auto">${esc(text)}</span>`;
     }
 
-    return `<div class="track">
-        <div class="track-head"><b>this week</b><span>${esc(spend)}</span></div>
-        <div class="track-over">${inside && !dead ? `<span class="track-lbl" style="${labelAt(dryAt)}">dry</span>` : ''}</div>
-        <div class="track-rail">
-          <div class="track-past" style="width:${now.toFixed(2)}%"></div>
-          ${aliveW > 0 ? `<div class="track-alive" style="left:${now.toFixed(2)}%;width:${aliveW.toFixed(2)}%">${inBlock(aliveText, aliveW)}</div>` : ''}
-          ${tailW > 0 ? `<div class="track-tail${dead ? ' is-dead' : ''}" style="left:${(dead ? now : dryAt).toFixed(2)}%;width:${tailW.toFixed(2)}%">${inBlock(dead ? `${tailText} without quota` : tailText, tailW)}</div>` : ''}
-          ${inside && !dead ? `<div class="track-flag" style="left:${dryAt.toFixed(2)}%"></div>` : ''}
+    const foot = spent
+        ? `out of quota · ${fmtLeft(w.reset, at)} until the reset`
+        : !w.dryAt ? 'too early to forecast'
+            : dryInside ? `runs out ${fmtWhen(w.dryAt)}, in ${fmtLeft(w.dryAt, at)}`
+                : 'lasts to the reset';
+
+    return `<div class="wk">
+        <div class="wk-head"><b>this week</b><span>${verdict}</span></div>
+        <div class="wk-over">${mark}</div>
+        <div class="wk-rail">
+          <div class="wk-spent" style="width:${trackAt(over ? nowPos : pct)}"></div>
+          ${over ? `<div class="wk-excess" style="left:${trackAt(nowPos)};width:${trackAt(pct - nowPos)}"></div>` : ''}
+          ${under ? `<div class="wk-slack" style="left:${trackAt(pct)};width:${trackAt(nowPos - pct)}"></div>` : ''}
+          ${cells.slice(1).map((c) => c.left).filter((x) => marks.every((m) => Math.abs(m - x) > TICK_CLEARANCE))
+        .map((x) => `<div class="wk-day" style="left:${trackAt(x)}"></div>`).join('')}
+          <div class="wk-now" style="left:${trackAt(nowPos)}"></div>
+          ${dryInside ? `<div class="wk-dry" style="left:${trackAt(dryPos)}"></div>` : ''}
+          ${ranOutPos !== null ? `<div class="wk-dry" style="left:${trackAt(ranOutPos)}"></div>` : ''}
+          ${cells.map((c) => {
+        const fit = DAY_LABELS.find((f) => c.width >= f.min);
+        return fit ? `<span class="wk-date${c.today ? ' today' : ''}" style="left:${trackAt(c.left + c.width / 2)}">${esc(fit.of(new Date(c.ts * 1000)))}</span>` : '';
+    }).join('')}
+          <span class="wk-in${pct < FIGURE_INSIDE ? ' outside' : ''}" style="left:${trackAt(pct)}">${pct}%<i>${esc(delta)}</i></span>
         </div>
-        <div class="track-under"><span class="track-lbl" style="${labelAt(now)}">now</span></div>
-        <div class="track-feet">
-          <span>window opened</span>
-          <span>${esc(spill.join(' · '))}</span>
-          <span>resets in ${esc(fmtLeft(w.resetIn, 0))}</span>
+        <div class="wk-under">${plan === null ? '' : `<span class="wk-lbl" style="${trackLabel(nowPos, `plan ${plan}%`)}">plan ${plan}%</span>`}</div>
+        <div class="wk-feet">
+          <span>opened ${esc(fmtDateTime(w.opened * 1000))}</span>
+          <span>${esc(foot)}</span>
+          <span>resets ${esc(fmtDateTime(w.reset * 1000))} · in ${esc(fmtLeft(w.reset, at))}</span>
         </div>
-    </div>`;
+      </div>`;
 }
 
 // A tone is meaning, not colour: status.js says what a note means and each
@@ -1913,6 +2006,61 @@ function nowTab(sections, workflows, metrics) {
     </section>`;
 }
 
+// Every choice on this tab, with the sentence that says what picking it does.
+// A dropdown hides all but one of these behind a click, which is the whole
+// reason they are drawn open: a setting nobody can see the alternatives to is a
+// setting nobody changes.
+const ALIGNMENTS = [
+    ['right', 'right', 'the usual side, beside the notifications bell'],
+    ['left', 'left', 'the other end, past the branch and the problem counts'],
+];
+const PLACES = [
+    ['activeGroup', 'in a tab here', 'among the files you are looking at'],
+    ['beside', 'in a tab beside', 'a new editor group to the right'],
+    ['panel', 'in the terminal panel', 'at the bottom, with the other terminals'],
+    ['newWindow', 'in a new window', 'opened here, then carried out of this one'],
+];
+const SCOPES = [['global', 'my settings'], ['workspace', 'this workspace']];
+
+/**
+ * One setting: what it is called, what it does, and the control for it.
+ *
+ * A radio group carries the name on the group rather than on a label, because
+ * the thing being named is the choice and not any one option of it; a single
+ * input takes an ordinary `for`.
+ */
+const field = (label, hint, control, forId) => `<div class="field"${forId ? '' : ' role="radiogroup" aria-label="' + esc(label) + '"'}>
+        <div class="field-head">${forId ? `<label for="${forId}">${esc(label)}</label>` : `<span class="field-label">${esc(label)}</span>`}
+          <span class="dim">${hint}</span></div>
+        ${control}
+      </div>`;
+
+// A choice whose options need a sentence each: the option is the card, the
+// sentence is under its name, and the whole card is the click target.
+const cards = (name, options, chosen) => `<div class="cards">${options.map(([value, label, about]) => `
+        <label class="card-opt">
+          <input type="radio" name="${name}" value="${esc(value)}"${value === chosen ? ' checked' : ''}>
+          <span class="card-body"><span class="card-name">${esc(label)}</span><span class="card-about">${esc(about)}</span></span>
+        </label>`).join('')}</div>`;
+
+// A switch with nothing written beside it: on this tab the name and the sentence
+// are the field's own head, the same as for a choice or a number, so the switch
+// is only the control. Everywhere else on the page `toggle()` still carries its
+// own label, because there it sits alone beside the thing it governs.
+const switchOnly = (key, on) => `<label class="switch bare">
+        <input type="checkbox" data-set="${esc(key)}"${on ? ' checked' : ''}>
+        <span class="switch-box" aria-hidden="true"></span>
+      </label>`;
+
+// A choice whose options explain themselves in their own two words.
+//
+// `chip-`, not `opt-`: `.opt` is already the class every table puts on a column
+// it drops when the page is narrow, and styling that name here reached forty
+// cells across the dashboard — the sessions table went three pixels past its
+// panel at 910 px, on a tab this work never touched.
+const chips = (name, options, chosen) => `<div class="chip-opts">${options.map(([value, label]) => `
+        <label class="chip-opt"><input type="radio" name="${name}" value="${esc(value)}"${value === chosen ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('')}</div>`;
+
 /**
  * The extension's own settings, edited here rather than in settings.json. The
  * bar is a template, and a template is written by trying it — so each segment
@@ -1924,7 +2072,7 @@ function settingsTab(config) {
     const segments = (cfg.segments || []).length ? cfg.segments : (cfg.defaults || []);
     const palette = cfg.palette || [];
     const byTopic = {};
-    for (const field of palette) (byTopic[field.topic] || (byTopic[field.topic] = [])).push(field);
+    for (const item of palette) (byTopic[item.topic] || (byTopic[item.topic] = [])).push(item);
 
     const row = (template, i) => `<li class="seg" data-index="${i}">
         <div class="seg-head">
@@ -1971,44 +2119,38 @@ function settingsTab(config) {
         note: 'Click one to insert it into the segment you last edited. The value beside each name is what it says on this machine right now.',
     })}
         ${panel('Reading and the network', [
-        toggle('autoRefresh', 'Refresh on a timer', cfg.autoRefresh !== false,
-            `Redraw the page and the bar every ${esc(String(Number(cfg.refreshInterval) || 60))} seconds. Off, the expensive pass happens only when you press Reindex.`),
-        toggle('fetchLimits', 'Ask Anthropic for the account limits', cfg.fetchLimits !== false,
-            'The one request this extension makes, at most once a minute per machine. Off, nothing leaves the machine and the limit fields stay empty unless something else has already written the shared cache.'),
-        toggle('checkPluginUpdates', 'Check the marketplaces for newer plugin versions', Boolean(cfg.checkPluginUpdates),
-            'Off by default. Off means the Versions panel compares against the marketplace copy already on this disk.'),
-        numberField('monthlyBudget', 'Monthly budget', Number(cfg.monthlyBudget) || 0,
-            'Dollars. Above zero, the month is drawn against it and you are told once at 80% and once at 100%. Zero turns both off.'),
+        field('Refresh on a timer',
+            `Redraw the page and the bar every ${esc(String(Number(cfg.refreshInterval) || 60))} seconds. Off, the expensive pass happens only when you press Reindex.`,
+            switchOnly('autoRefresh', cfg.autoRefresh !== false)),
+        field('Ask Anthropic for the account limits',
+            'The one request this extension makes, at most once a minute per machine. Off, nothing leaves the machine and the limit fields stay empty unless something else has already written the shared cache.',
+            switchOnly('fetchLimits', cfg.fetchLimits !== false)),
+        field('Check the marketplaces for newer plugin versions',
+            'Off by default. Off means the Versions panel compares against the marketplace copy already on this disk.',
+            switchOnly('checkPluginUpdates', Boolean(cfg.checkPluginUpdates))),
+        field('Monthly budget',
+            'Dollars. Above zero, the month is drawn against it and you are told once at 80% and once at 100%. Zero turns both off.',
+            `<input type="number" class="num-set" data-set="monthlyBudget" value="${Number(cfg.monthlyBudget) || 0}" min="0" id="monthlyBudget">`,
+            'monthlyBudget'),
     ].join(''), {
         note: 'The same switches that sit beside the things they govern — changing one here changes it there, and both write your own settings straight away.',
     })}
-        ${panel('Behaviour', `<table class="kv form">
-          <tbody>
-            <tr><th scope="row"><label for="alignment">Side of the bar</label></th>
-              <td><select id="alignment">
-                <option value="right"${cfg.alignment === 'right' ? ' selected' : ''}>right</option>
-                <option value="left"${cfg.alignment === 'left' ? ' selected' : ''}>left</option>
-              </select></td>
-              <td class="dim">where the items sit</td></tr>
-            <tr><th scope="row"><label for="priority">Priority</label></th>
-              <td><input id="priority" type="number" value="${Number(cfg.priority) || 100}"></td>
-              <td class="dim">higher means further left</td></tr>
-            <tr><th scope="row"><label for="refreshInterval">Refresh interval</label></th>
-              <td><input id="refreshInterval" type="number" min="15" value="${Number(cfg.refreshInterval) || 60}"></td>
-              <td class="dim">seconds between the expensive reads</td></tr>
-            <tr><th scope="row"><label for="scope">Save to</label></th>
-              <td><select id="scope">
-                <option value="global">my settings</option>
-                <option value="workspace">this workspace</option>
-              </select></td>
-              <td class="dim">workspace settings live in the repository's <code>.vscode/settings.json</code></td></tr>
-          </tbody>
-        </table>
-
-        <div class="btns">
+        ${panel('Behaviour', [
+        field('Side of the bar', 'where the items sit',
+            cards('alignment', ALIGNMENTS, cfg.alignment || 'right')),
+        field('Open Claude Code', 'where the button and the command put a session',
+            cards('openLocation', PLACES, cfg.openLocation || 'activeGroup')),
+        field('Priority', 'higher means further left',
+            `<input id="priority" type="number" value="${Number(cfg.priority) || 100}">`, 'priority'),
+        field('Refresh interval', 'seconds between the expensive reads',
+            `<input id="refreshInterval" type="number" min="15" value="${Number(cfg.refreshInterval) || 60}">`, 'refreshInterval'),
+        field('Save to', "workspace settings live in the repository's <code>.vscode/settings.json</code>",
+            chips('scope', SCOPES, 'global')),
+        `<div class="btns">
           <button class="btn primary" id="save">Save</button>
           <span class="saved" id="saved" hidden>Saved</span>
-        </div>`)}
+        </div>`,
+    ].join(''))}
     </section>`;
 }
 
@@ -2326,24 +2468,26 @@ code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity
 .kv th[scope="row"] label { overflow-wrap: break-word; }
 .kv td { font-variant-numeric: tabular-nums; }
 /* An environment variable is an identifier, not prose: the longest one here is
-   40 characters and cannot wrap into half a panel without either widening the
-   table past it or breaking mid-word. So this one is clipped with an ellipsis
-   and says the whole of itself on hover, which is what [data-clipped] already
-   does everywhere else on the page. Fixed layout is what makes the clip
-   possible at all — under auto layout the cell asks for its content's width and
-   the panel gives it. */
-.envkv { width: 100%; table-layout: fixed; }
-.envkv th[scope="row"] { width: 55%; }
-.envkv th[scope="row"] span, .envkv td span {
-  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: none;
-}
-/* The marker is drawn, not placed. An element inside the clipped span keeps
-   reporting its full rectangle however hidden it is — overflow: hidden clips
-   what you see, not what geometry measures — so a marker written as a <i> was
-   both invisible and 161 px outside the panel, which is exactly the shape of
-   defect the probe exists to catch. A pseudo-element is part of the text and is
-   cut by the same ellipsis as the value it follows. */
-.envkv td[data-undoc] span::after { content: ' · undocumented'; opacity: 0.55; }
+   40 characters. It gets the whole width of its own line, and what it means is
+   written under it — the sentence used to live in a title attribute, where the
+   browser drew all 180 characters of it on one line across the panel beside it. */
+.envrows { list-style: none; margin: 0; padding: 0; }
+.envrow { padding: 6px 0; border-top: 1px solid var(--vscode-panel-border); }
+.envrow:first-child { border-top: none; }
+.envrow-head { display: flex; align-items: baseline; gap: 10px; }
+/* The name gets the room: it is what the row is about, and a variable broken
+   across two lines mid-word — CLAUDE_CODE_EXECP / ATH — is unreadable in a way a
+   wrapped path is not. */
+.envrow-key { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* Values are mostly numbers, but some are a path — kept on one line, one of
+   those ran 63 px past the panel at 800 px. It breaks anywhere rather than
+   widening the row, since a path has no spaces to break at. */
+.envrow-val { flex: 0 1 auto; max-width: 55%; margin-left: auto;
+  font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.envrow-val.undoc::after { content: ' · undocumented'; opacity: .55; }
+.envrow-about { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; margin-top: 2px; }
+.envrow-about .dim { flex: 1 1 auto; }
+.envrow-def { flex: none; white-space: nowrap; opacity: .7; font-variant-numeric: tabular-nums; }
 /* Right-aligned, but allowed to wrap: the last cell of a .kv table is a figure
    on some tabs and a file path on others, and kept on one line the path was
    what pushed Health past its panel in a narrow window. */
@@ -2380,43 +2524,63 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .t-warm { background: var(--vscode-charts-yellow, hsl(35 72% 55%)); }
 .t-hot { background: var(--vscode-charts-red, hsl(0 60% 57%)); }
 
-/* The signature: the week as a length of time, and only that. The grey is the
-   part already gone, and what follows it is the answer in two lengths — how
-   long the quota lasts, then how long the week runs on without it. A forecast
-   past the right edge is not drawn at all: the window resets before it
-   arrives, which is to say it never happens. */
-.track { margin: 0 0 20px; max-width: 980px; }
-.track-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-.track-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
+/* The signature: the week as its own axis, with the spend drawn on it. An even
+   burn puts x% of the limit at x% of the week, so the gap between the fill and
+   the plan mark is the over- or underspend itself, and needs no legend.
+
+   Every vertical is centred on its position by the same rule. Drawn any other
+   way — a day tick from its position rightwards while a mark sits around its
+   own — they land half a pixel apart and the ticks read as sliding against the
+   fill. Text is drawn after the lines and therefore over them, because a mark
+   landing on a date used to eat its first letter. */
+.wk { margin: 0 0 20px; max-width: 980px; }
+.wk-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.wk-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
   opacity: .5; font-weight: 600; }
-.track-head span { font-size: 11px; opacity: .5; }
-.track-rail { position: relative; height: 22px; border-radius: 4px;
-  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); overflow: hidden; }
-/* Two floors for two names: dry above the rail, now below it. Neither can ever
-   overprint the other, which is what lets both survive at any distance — the
-   old track hid whichever label was in the way. */
-.track-over, .track-under { position: relative; height: 13px; }
-.track-lbl { position: absolute; top: 0; font-size: 9.5px; text-transform: uppercase;
-  letter-spacing: .08em; white-space: nowrap; opacity: .8; }
-/* The week already gone is background, not news: it carries no number and the
-   lightest weight on the rail. Its right edge is now. */
-.track-past { position: absolute; inset: 0 auto 0 0;
-  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
-.track-alive, .track-tail { position: absolute; top: 0; bottom: 0; display: flex;
-  align-items: center; justify-content: center; overflow: hidden; }
-.track-alive { background: color-mix(in srgb, var(--vscode-charts-green, hsl(160 50% 45%)) 32%, transparent); }
-.track-tail { background: color-mix(in srgb, var(--vscode-charts-red, hsl(0 60% 57%)) 32%, transparent);
-  min-width: 3px; }
-/* Out of quota is a different state, not a longer stripe of the same one. */
-.track-tail.is-dead { background: color-mix(in srgb, var(--vscode-charts-red, hsl(0 60% 57%)) 52%, transparent); }
-.track-alive span, .track-tail span { font-size: 10px; font-family: var(--vscode-editor-font-family);
-  white-space: nowrap; padding: 0 8px; }
-.track-flag { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+.wk-head span { font-size: 12px; opacity: .75; }
+.wk-over-t { color: var(--vscode-charts-red, hsl(0 60% 57%)); }
+.wk-under-t { color: var(--vscode-charts-green, hsl(160 50% 45%)); }
+/* Two floors for the names: the forecast above the rail, the plan below it, so
+   neither can overprint the other however close the two positions get. */
+.wk-over, .wk-under { position: relative; height: 15px; }
+.wk-lbl { position: absolute; top: 0; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: .06em; white-space: nowrap; opacity: .8; transform: translateX(-50%); }
+.wk-dry-t { color: var(--vscode-charts-red, hsl(0 60% 57%)); opacity: 1; }
+/* A forecast landing past the reset is not a warning: it is stated quietly,
+   pinned to the edge it lies beyond, and it names no position on this rail. */
+.wk-beyond { opacity: .5; transform: none; }
+/* Tall enough for two floors of text inside it: the dates on the ceiling, the
+   spent figure on the floor. */
+.wk-rail { position: relative; height: 34px; border-radius: 4px; overflow: hidden;
+  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
+.wk-spent { position: absolute; top: 0; bottom: 0; left: 0;
+  background: color-mix(in srgb, var(--vscode-charts-blue, hsl(210 80% 55%)) 42%, transparent); }
+.wk-excess { position: absolute; top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--vscode-charts-red, hsl(0 60% 57%)) 45%, transparent); }
+.wk-slack { position: absolute; top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--vscode-charts-green, hsl(160 50% 45%)) 26%, transparent); }
+.wk-day { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -0.5px;
+  background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
+/* Centred in its own day, so a boundary line can never sit inside the label. */
+.wk-date { position: absolute; top: 3px; font-size: 9px; opacity: .5;
+  white-space: nowrap; transform: translateX(-50%); }
+.wk-date.today { opacity: .95; font-weight: 600; }
+.wk-in { position: absolute; bottom: 2px; transform: translateX(-100%); padding-right: 5px;
+  font-size: 10px; font-weight: 600; font-family: var(--vscode-editor-font-family);
+  white-space: nowrap; }
+.wk-in.outside { transform: none; padding: 0 0 0 5px; opacity: .8; }
+/* The distance from the plan rides with the figure it belongs to, set apart by
+   weight rather than by colour: it sits on the fill, where red on red and green
+   on green would both be unreadable. */
+.wk-in i { font-style: normal; font-weight: 400; opacity: .8; }
+.wk-now { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+  background: var(--vscode-foreground); }
+.wk-dry { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
   background: var(--vscode-charts-red, hsl(0 60% 57%)); }
-.track-feet { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px;
+.wk-feet { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px;
   font-size: 11px; opacity: .5; }
-.track-feet span:nth-child(2) { flex: 1; text-align: center; }
-.track-feet span:last-child { text-align: right; }
+.wk-feet span:nth-child(2) { flex: 1; text-align: center; }
+.wk-feet span:last-child { text-align: right; }
 
 /* Columns rather than a grid: panels of wildly different heights leave a grid
    row half empty, and multicol packs them. A panel may not be split across a
@@ -2495,6 +2659,35 @@ ul.log li { margin: 2px 0; opacity: .85; }
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
 .form input[type="number"] { width: 8ch; }
 .form td:first-of-type { width: 1%; }
+/* A switch with no text of its own sits on the field's own line. */
+.switch.bare { display: inline-flex; padding: 0; }
+.field { padding: 8px 0; border-top: 1px solid var(--vscode-panel-border); }
+.field:first-child { border-top: none; padding-top: 0; }
+.field-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; flex-wrap: wrap; }
+.field-head label, .field-head .field-label { font-weight: 600; }
+.field-head .dim { font-size: 12px; }
+/* The radio itself is the click target, laid over its own label: hiding it with
+   display:none would take it out of the tab order with it. */
+.chip-opts { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip-opt { position: relative; display: inline-flex; }
+.chip-opt input, .card-opt input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.chip-opt span { padding: 3px 10px; border-radius: 4px; font-size: 12px; white-space: nowrap;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  background: var(--vscode-input-background, var(--vscode-editorWidget-background)); }
+.chip-opt input:hover + span { background: var(--vscode-list-hoverBackground); }
+.chip-opt input:checked + span { background: var(--vscode-button-background); border-color: transparent;
+  color: var(--vscode-button-foreground); }
+.chip-opt input:focus-visible + span, .card-opt input:focus-visible + .card-body {
+  outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.cards { display: grid; gap: 6px; }
+.card-opt { position: relative; display: block; }
+.card-body { display: block; padding: 7px 10px; border-radius: 6px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+.card-opt input:hover + .card-body { background: var(--vscode-list-hoverBackground); }
+.card-opt input:checked + .card-body { border-color: var(--vscode-button-background);
+  background: var(--vscode-list-hoverBackground); }
+.card-name { display: block; font-weight: 600; font-size: 12px; }
+.card-about { display: block; font-size: 11px; opacity: .6; }
 footer { margin-top: 28px; opacity: .5; font-size: 11px; }
 `;
 
@@ -2667,7 +2860,7 @@ window.addEventListener('scroll', () => {
 // fallback — this only marks the ones actually clipped at the current width, so
 // the hover panel never appears over a name that is already whole.
 function markClipped() {
-  for (const el of document.querySelectorAll('.bars th span, .kv th[scope="row"] span, .envkv td span, td.wrap')) {
+  for (const el of document.querySelectorAll('.bars th span, .kv th[scope="row"] span, td.wrap')) {
     const cut = el.scrollWidth > el.clientWidth + 1;
     const cell = el.closest('th, td');
     if (cut) cell.setAttribute('data-clipped', '');
@@ -2781,15 +2974,24 @@ if (list && api) {
     });
   });
 
+  // Every choice on the tab is a radio group now, so the value is whichever of
+  // them is checked. The fallback is for a group that somehow has none — a
+  // saved settings file naming a value the page does not offer.
+  const picked = (name, fallback) => {
+    const on = document.querySelector('input[name="' + name + '"]:checked');
+    return on ? on.value : fallback;
+  };
+
   document.getElementById('save').addEventListener('click', () => {
     api.postMessage({
       type: 'save',
-      scope: document.getElementById('scope').value,
+      scope: picked('scope', 'global'),
       settings: {
         segments: templates().filter((t) => t.trim().length > 0),
-        alignment: document.getElementById('alignment').value,
+        alignment: picked('alignment', 'right'),
         priority: Number(document.getElementById('priority').value) || 100,
         refreshInterval: Number(document.getElementById('refreshInterval').value) || 60,
+        openLocation: picked('openLocation', 'activeGroup'),
       },
     });
   });
@@ -2916,11 +3118,28 @@ function clientTab(client, cfg = {}) {
     // is the point. The block in settings.json is what every session gets; the
     // window's own environment is what this extension host happens to have, and
     // a session started from a terminal inherits the shell instead.
+    // The reference writes its prose in markdown, and the only markup that
+    // survives into these sentences is `code`. Escaped first, so the tags are
+    // this function's and never the document's.
+    const docText = (text) => esc(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // What each variable says, written under it rather than hidden in a `title`.
+    // The native tooltip put the whole sentence on one line, over the row below
+    // it and past the edge of the panel — unreadable exactly where the text
+    // mattered, since a name like CLAUDE_CODE_MAX_CONCURRENT_AGENTS explains
+    // nothing on its own. The documented default sits beside the value, because
+    // the question a set variable raises is what it would have been unset.
     const envTable = (rows, empty) => (rows.length
-        ? `<table class="kv envkv"><tbody>${rows.map((r) => `<tr>
-            <th scope="row" title="${esc(r.key)}${r.description ? ` — ${esc(r.description)}` : ''}"><span>${esc(r.key)}</span></th>
-            <td title="${esc(r.value)}"${r.known ? '' : ' data-undoc'}><span>${esc(r.value)}</span></td>
-        </tr>`).join('')}</tbody></table>`
+        ? `<ul class="envrows">${rows.map((r) => `<li class="envrow">
+            <div class="envrow-head">
+              <span class="envrow-key mono">${esc(r.key)}</span>
+              <span class="envrow-val${r.known ? '' : ' undoc'}">${esc(r.value)}</span>
+            </div>
+            ${r.description || r.default ? `<div class="envrow-about">
+              ${r.description ? `<span class="dim">${docText(r.description)}</span>` : ''}
+              ${r.default ? `<span class="envrow-def${r.differs ? ' o-failed' : ''}">default ${esc(r.default)}</span>` : ''}
+            </div>` : ''}
+        </li>`).join('')}</ul>`
         : `<p class="empty">${empty}</p>`);
 
     const envBody = `<div class="pair">
@@ -3095,6 +3314,9 @@ module.exports = {
     agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab,
     limitsTab, weekLabel, nowTab, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
+    // The places a session can be opened in — the cards on the Settings tab and,
+    // through extension.js, the button's own table of what each one means.
+    PLACES,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

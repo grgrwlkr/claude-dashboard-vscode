@@ -20,8 +20,41 @@ const REGISTRY = {
     env: [
         { key: 'ANTHROPIC_API_KEY', file: 'env', type: '', default: '', defaultNote: '', description: 'API key.', managedOnly: false, since: '' },
         { key: 'MAX_THINKING_TOKENS', file: 'env', type: '', default: '', defaultNote: '', description: 'Thinking budget.', managedOnly: false, since: '' },
+        // Written the way the reference writes it: the default is a phrase in
+        // the sentence, and the `default` field of every env entry is empty.
+        { key: 'CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS', file: 'env', type: '', default: '', defaultNote: '', description: 'How many subagents can run at once (default: 20). Accepts a positive whole number.', managedOnly: false, since: '' },
+        { key: 'BASH_MAX_OUTPUT_LENGTH', file: 'env', type: '', default: '', defaultNote: '', description: 'Characters of output a command may return (default: 30000; maximum: 150000).', managedOnly: false, since: '' },
+        { key: 'CLAUDE_CODE_SESSION_ID', file: 'env', type: '', default: '', defaultNote: '', description: 'Defaults to the id of the running session.', managedOnly: false, since: '' },
     ],
 };
+
+// The Default column of the env panel, which has no field to read: the registry
+// states an env default in prose or not at all.
+test('an env default is read out of the sentence, and only where it is a value', () => {
+    const out = cs.clientSettings({
+        chain: [file('user', {
+            env: {
+                CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '40',
+                BASH_MAX_OUTPUT_LENGTH: '30000',
+                CLAUDE_CODE_SESSION_ID: '99ed2bbb-112f-4486-b479-96ce294db365',
+                MAX_THINKING_TOKENS: '0',
+            },
+        })],
+        registry: REGISTRY,
+        hostEnv: {},
+    });
+    const row = (key) => out.env.fromSettings.find((e) => e.key === key);
+
+    assert.equal(row('CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS').default, '20');
+    assert.equal(row('CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS').differs, true);
+    // What follows the number is not part of it.
+    assert.equal(row('BASH_MAX_OUTPUT_LENGTH').default, '30000');
+    assert.equal(row('BASH_MAX_OUTPUT_LENGTH').differs, false, 'set to exactly the documented default');
+    // "Defaults to the id of the running session" is a rule, not a value: a
+    // column headed Default would be stating something false.
+    assert.equal(row('CLAUDE_CODE_SESSION_ID').default, '');
+    assert.equal(row('MAX_THINKING_TOKENS').default, '', 'no default in the sentence, no default in the column');
+});
 
 test('the highest file wins, and false is an answer', () => {
     const chain = [

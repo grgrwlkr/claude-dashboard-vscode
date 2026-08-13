@@ -142,9 +142,26 @@ function statusNow(state) {
     });
 }
 
-/** The same state as numbers, for the meters and the track the page draws. */
-function statusMetrics(state) {
-    return state ? status.statusMetrics(state.data) : {};
+/**
+ * The same state as numbers, for the meters and the bar the page draws.
+ *
+ * The moment a window ran out is added here rather than computed in status.js:
+ * it is not derived from the reading at all, it is remembered — from the marks
+ * file first, and from the reading log for a window that ran out before this
+ * extension started marking them. Neither of those is state.data's business.
+ */
+function statusMetrics(state, storageDir) {
+    const out = state ? status.statusMetrics(state.data) : {};
+    if (!out.weekly || !storageDir) return out;
+
+    const mark = hist.markFor(hist.readMarks(storageDir), out.weekly.reset);
+    if (mark) {
+        out.weekly.ranOut = mark.at;
+        out.weekly.ranOutPlan = mark.plan;
+    } else if (out.weekly.pct >= 100) {
+        out.weekly.ranOut = hist.ranOutAt(hist.readHistory(storageDir), out.weekly.reset);
+    }
+    return out;
 }
 
 function sectionFor(state, id) {
@@ -425,7 +442,23 @@ function collectSlow(state) {
     // the first one to see a change writes a row — the rest find it unchanged.
     // The endpoint keeps no history, so if nobody writes it down, the shape of
     // the week is gone.
-    if (lim && lim.weekly && state.storageDir) hist.recordLimits(state.storageDir, lim);
+    if (lim && lim.weekly && state.storageDir) {
+        hist.recordLimits(state.storageDir, lim);
+        // The one fact about a week that cannot be worked out later. The forecast
+        // divides by what is left, so at 100% it collapses onto the present and
+        // answers "now" for the rest of the window; the reading log would answer
+        // it but is trimmed by design. Written once, on the first tick that sees
+        // the quota gone, together with the plan of that moment — 100% reached
+        // with 54% of the week elapsed is a different week from 100% reached on
+        // the last evening, and by the time anyone looks the plan has moved on.
+        if (lim.weekly.pct >= 100) {
+            hist.recordMark(state.storageDir, {
+                reset: lim.weekly.reset,
+                at: Date.now(),
+                plan: d.pace ? d.pace.plan : null,
+            });
+        }
+    }
 
     if (state.session && state.workspace) {
         // The whole transcript is parsed for this, so it only happens when some
@@ -818,6 +851,7 @@ function configView(state) {
         presets: seg.PRESETS,
         alignment: cfg.get('alignment'),
         priority: cfg.get('priority'),
+        openLocation: cfg.get('openLocation'),
         refreshInterval: cfg.get('refreshInterval'),
         monthlyBudget: cfg.get('monthlyBudget'),
         checkPluginUpdates: cfg.get('checkPluginUpdates'),
@@ -835,7 +869,8 @@ function configView(state) {
 // exists only in settings.json — which is the thing the Setup tab was built to
 // avoid. The list is the gate: a message naming anything else is dropped.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
-    'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog'];
+    'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog',
+    'openLocation'];
 
 // The full changelog, when the user has allowed the fetch. One public file, no
 // credentials, and at most once an hour — kept in the extension's own storage
@@ -1076,7 +1111,7 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
         // The same sections the tooltips are cut from, so the Now tab and the
         // hover cannot disagree about a number.
         now: statusNow(barState),
-        metrics: statusMetrics(barState),
+        metrics: statusMetrics(barState, storageDir),
         // Read from the state the ticks fill rather than scanned here: the panel
         // and the tree then show one reading of the machine, and opening the
         // dashboard does not pay for a second walk of every project directory.
@@ -1145,16 +1180,49 @@ function applyConfig(state) {
     const priority = cfg.get('priority');
 
     for (const item of state.items) item.dispose();
+    if (state.openBtn) state.openBtn.dispose();
     // Priority descends along the list, so segments appear left to right in the
     // order they are written whichever side of the bar they sit on.
     state.items = state.segments.map((template, i) => {
         const bar = vscode.window.createStatusBarItem(`claudeStatusline.segment${i}`, align, priority - i);
-        bar.name = `Claude ${i + 1}`;
-        // Every item opens the dashboard: each number raises the same question —
-        // where did this go — and the answer is one page, not four destinations.
+        // The bar's own context menu lists items by this name, next to every
+        // other extension's — so it says which extension, not just "Claude 4",
+        // which read as one of Claude Code's own entries sitting right above it.
+        // VS Code remembers a hidden item by id, so renaming unhides nothing.
+        bar.name = `Claude Statusline ${i + 1}`;
+        // Every segment opens the dashboard: each number raises the same question
+        // — where did this go — and the answer is one page, not four destinations.
         bar.command = 'claudeStatusline.dashboard';
         return bar;
     });
+
+    // The one item that reports nothing: a button, the same one the editor title
+    // bar carries, because the bar is on every screen a title bar is not — and
+    // wanting a session is not a reason to first find an editor to stand next to.
+    //
+    // It sits one priority above segment 0, which is left of the whole group on
+    // either side of the bar, and it is drawn once here rather than in render():
+    // nothing it says depends on a reading.
+    //
+    // The status bar takes codicons and nothing else, so it cannot wear the
+    // extension's own SVG the way the editor button does. `$(terminal)$(sparkle)`
+    // is that icon in the two glyphs that exist: the prompt, and the spark over it.
+    //
+    // No setting hides it. VS Code already hides any status-bar item from the
+    // bar's own context menu, keyed by the name below and remembered per window,
+    // and a switch of ours would be a second way to do that — worse, because it
+    // would live somewhere the user is not right-clicking.
+    const btn = vscode.window.createStatusBarItem('claudeStatusline.open', align, priority + 1);
+    btn.name = 'Claude Statusline: Open';
+    btn.text = '$(terminal)$(sparkle)';
+    // The hover says where the session will land, because that is a setting now
+    // and a button that says "in a tab" while opening a panel is worse than one
+    // that says nothing. applyConfig runs on every settings change, so the two
+    // cannot drift.
+    btn.tooltip = (PLACES[cfg.get('openLocation')] || PLACES.activeGroup).says;
+    btn.command = 'claudeStatusline.openClaude';
+    btn.show();
+    state.openBtn = btn;
 }
 
 function activate(context) {
@@ -1188,6 +1256,9 @@ function activate(context) {
         segments: [],
         needs: new Set(),
         items: [],
+        // The button, kept out of `items` because render() pairs items[i] with
+        // segments[i] and a fifth item in that list would shift the pairing.
+        openBtn: null,
         // Everything the templates read, refilled by the two collectors.
         data: { now: 0, scoped: [], bar: '', machine: null },
     };
@@ -1235,7 +1306,7 @@ function activate(context) {
     const fast = setInterval(() => fastTick(state), CONTEXT_TICK * 1000);
 
     context.subscriptions.push(
-        { dispose: () => { if (slow) clearInterval(slow); clearInterval(fast); for (const i of state.items) i.dispose(); } },
+        { dispose: () => { if (slow) clearInterval(slow); clearInterval(fast); for (const i of state.items) i.dispose(); if (state.openBtn) state.openBtn.dispose(); } },
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (!e.affectsConfiguration('claudeStatusline')) return;
             applyConfig(state);
@@ -1362,7 +1433,29 @@ function claudeIcon(context) {
 }
 
 /**
- * Claude Code as a tab in the group you are already looking at.
+ * The four places a session can land, keyed by what `claudeStatusline.openLocation`
+ * is set to, with the sentence each one puts on the button.
+ *
+ * The first three are a `location` for createTerminal and nothing more. The
+ * fourth is not a location at all — a terminal cannot be created in another
+ * window — so it opens where the first one does and is carried out afterwards.
+ *
+ * The list itself belongs to `dashboard.js`, which draws a card per place and
+ * cannot require('vscode'); this adds what only this side knows. Two lists would
+ * mean a place the page offers and the button has never heard of.
+ */
+const PLACES = Object.fromEntries(dashboard.PLACES.map(([key, label]) => [key, {
+    location: key === 'beside' ? { viewColumn: vscode.ViewColumn.Beside }
+        : key === 'panel' ? vscode.TerminalLocation.Panel
+            : { viewColumn: vscode.ViewColumn.Active },
+    newWindow: key === 'newWindow',
+    // The hover is the Settings tab's own wording — "in a tab here", "in the
+    // terminal panel" — so the two cannot describe the same setting differently.
+    says: `Open Claude Code ${label}`,
+}]));
+
+/**
+ * Claude Code as a terminal, in the place `claudeStatusline.openLocation` names.
  *
  * This opens the terminal itself rather than asking Claude Code's extension for
  * one, because that command cannot place a session where this button wants it.
@@ -1387,15 +1480,14 @@ function claudeIcon(context) {
  * executable — `claude` here is whatever the shell's PATH finds, the same one a
  * terminal would run — and its progress notification.
  */
-function openClaude(context) {
+async function openClaude(context) {
+    const where = PLACES[vscode.workspace.getConfiguration('claudeStatusline').get('openLocation')] || PLACES.activeGroup;
     const terminal = vscode.window.createTerminal({
         // The same env var Claude Code reads for its own terminal, so a machine
         // that renames one renames both.
         name: process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code',
         iconPath: claudeIcon(context),
-        // The tab lands in the group holding the editor being looked at. This is
-        // the entire point of the button.
-        location: { viewColumn: vscode.ViewColumn.Active },
+        location: where.location,
         // A session is not worth restoring on the next window: what it was doing
         // is in its transcript, not in a dead terminal.
         isTransient: true,
@@ -1435,6 +1527,15 @@ function openClaude(context) {
         ended.dispose();
         closed.dispose();
     });
+
+    // The one place with no location of its own: a terminal cannot be created in
+    // another window, so it is opened here and the editor carried out — which is
+    // what `show()` above is for, since the command acts on the active editor and
+    // nothing names a terminal to it. Claude Code's own extension does the same.
+    if (where.newWindow) {
+        try { await vscode.commands.executeCommand('workbench.action.moveEditorToNewWindow'); }
+        catch { /* the session is open and usable; only the window it sits in is not the asked-for one */ }
+    }
     return terminal;
 }
 
@@ -1481,6 +1582,9 @@ module.exports = {
     deactivate,
     __render: render,
     __collectWorkflowsFast: collectWorkflowsFast,
+    // The places the button can put a session, exported for the one test that
+    // holds them against the enum the manifest offers.
+    __PLACES: PLACES,
     // The section list behind both the tooltips and the Now tab, exported so a
     // test can hold the two renderings against each other.
     __statusNow: statusNow,

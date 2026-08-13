@@ -354,23 +354,35 @@ All of these apply the moment they change — none needs a window reload.
 | `claudeStatusline.fetchChangelog` | `false` | Refresh Anthropic's published changelog and settings reference. Off means those requests are never made and the packaged copy is used, dated |
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
-| `claudeStatusline.renameTabs` | `true` | Name each tab opened by **Open Claude Code in a tab** after the session running in it, following `/rename` and the generated title. Only tabs this extension opened, and only while one of them is the active terminal — VS Code's rename acts on the active terminal |
+| `claudeStatusline.openLocation` | `activeGroup` | Where **Open Claude Code** puts the session: `activeGroup` a tab in the group you are looking at, `beside` a tab in a new group to the right, `panel` the terminal panel at the bottom, `newWindow` a tab moved out into its own window |
+| `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal — VS Code's rename acts on the active terminal |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |
 
-**Commands:** Claude: Open dashboard · Open Claude Code in a tab · Rebuild the
+**Commands:** Claude: Open dashboard · Open Claude Code · Rebuild the
 usage index · Export usage as CSV or JSON · Refresh now · List status-bar
 placeholders · and, from a row of the workflow view, Open the workflow script and
 Copy the workflow run id.
 
-**Open Claude Code in a tab** is also a button in the editor's title bar, next to
-Claude Code's own. Both start a terminal session; what differs is where it lands.
-Claude Code's button splits a new editor group off to the right and keeps the
-session there, half a window wide. This one opens it as a tab in the group you
-are already looking at, among the files open there, and runs `claude` — whatever
-the shell's `PATH` finds. Right-click the title bar to hide whichever of the two
-you would rather not have.
+**Open Claude Code** is also a button in the editor's title bar, next to Claude
+Code's own. Both start a terminal session; what differs is where it lands. Claude
+Code's button splits a new editor group off to the right and keeps the session
+there, half a window wide. This one goes where `claudeStatusline.openLocation`
+says — by default a tab in the group you are already looking at, among the files
+open there — and runs `claude`, whatever the shell's `PATH` finds. The other
+three places are a tab beside this one, the terminal panel at the bottom, and a
+window of its own; the setting is read at the moment you press the button, and
+the button's hover names the place it will use. Right-click the title bar to hide
+whichever of the two buttons you would rather not have.
+
+The same button sits in the status bar, left of every segment — on whichever side
+of the bar `claudeStatusline.alignment` puts them — as `$(terminal)$(sparkle)`,
+this extension's icon in the two glyphs the status bar allows, since it takes
+codicons and nothing else. It is there before anything has been read, so a
+machine that has never run Claude Code still has the one control that starts it.
+Right-click the status bar and untick **Claude Statusline: Open** to put it away;
+the segments are listed there as **Claude Statusline 1**, **2**, and so on.
 
 <a name="where-the-data-comes-from"></a><a name="user-content-where-the-data-comes-from"></a>
 
