@@ -9,51 +9,66 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
-## [0.22.2] — 2026-08-12
+## [Unreleased]
 
-Most of this was found by reading the code rather than by using it — three
-sessions reviewing each other's halves of it.
+## [0.24.0] — 2026-08-13
+
+Carries everything prepared as 0.22.2, which was never released.
+
+### Changed
+
+- The week track on the Now tab measures time end to end: grey is the part of
+  the week already gone and its right edge is now, then how long the quota lasts
+  and how long the week runs on without it, each block carrying its duration.
+- Out of quota is its own state on the track: one block from now to the reset
+  with the length of the wait in it.
+- Both marks on the track are always named — `now` under the rail, `dry` over
+  it. Neither is hidden when they sit close together.
+- Weekly spend moved off the track into the line above it, as a sentence.
+- Status-bar bar glyphs: `█` spent, `▓` spent past the plan, `▒` plan not yet
+  reached, `░` the rest.
+- The Pace tooltip says "behind plan" where it said "under plan", matching the
+  track.
+- The forecast tooltip carries how long the week runs on after the quota is
+  gone, and says "out of quota" instead of a time when there is none left.
 
 ### Fixed
 
-- **The Changelog tab stops at the end of the changelog, and nowhere else.** It
-  drew the newest 80 releases and said nothing about the rest, so the list ended
-  at an arbitrary version and read as though that was all there was. With the
-  full file fetched that hid 281 of 361 releases.
-- **"Refresh on a timer", switched off, now switches off the work it names.** It
-  stopped the dashboard from redrawing and nothing else: the full transcript
-  pass, the spend across every project and the request for limits carried on
-  every minute, and so did each return of focus to the window. The setting offers
-  itself for use on battery, which was the opposite of what it did. Off, all
-  three paths now redraw the bar from the cheap ten-second read and leave the
-  expensive work for when you ask.
-- **A new refresh interval takes effect when you set it**, instead of waiting for
-  the window to be reloaded. Ticking one of the other checkboxes no longer
-  restarts the countdown.
-- **"Releases ahead" counts what is ahead.** It counted every release on the
-  page, so a client running the newest version was told it had hundreds waiting.
-- **The links in the README's table of contents work on the listing pages.** They
-  were written in GitHub's anchor style, which neither marketplace shares, so
-  every one of them was dead anywhere but GitHub.
+- The status-bar bar no longer shows an overspend cell for a week that is behind
+  plan. 216 of the 10 201 possible spend/plan pairs were wrong.
+- The countdown in the page header no longer sits at zero when a redraw is
+  skipped — with the Settings tab open, or the panel hidden.
+- Credits print in the currency the endpoint named, instead of assuming dollars.
+- A meter in a tooltip no longer draws every filled cell as spend past the plan.
+- The Changelog tab lists every release in the file, not the newest 80. 281 of
+  361 were hidden.
+- "Refresh on a timer", switched off, now stops the transcript pass, the spend
+  across every project and the limits request — not only the redraw. Focus on
+  the window no longer triggers them either.
+- A new refresh interval takes effect when set, without a window reload. Ticking
+  another checkbox no longer restarts the countdown.
+- "Releases ahead" counts only releases ahead of the running client, not every
+  release on the page.
+- The links in the README's table of contents work on both listing pages.
 - The "Across all requests" figure on the Context tab reads the Opus rate from
-  the one file that holds rates, instead of a copy that would have gone stale on
-  the day it changed.
+  the file that holds rates, not a copy of it.
+- Settings values shaped like a credential are masked on the Client tab even
+  when the name gives nothing away — `GH_PAT` and a Sentry DSN were printed in
+  full.
 
 ### Internal
 
-Four pieces of code that were attached to nothing: a function with no caller, a
-filter on a field that does not exist, a shadowed import, and a chart axis built
-twice per drawing.
-
-The tool that checks the dashboard for clipped content could not have failed on
-the tab it was most needed for: it rendered the Changelog tab empty, and it
-priced every agent at zero, so it measured a page both shorter and narrower than
-the real one. Both fixed, and the probe now opens what is folded before it
-measures. Settings values that are shaped like a credential are masked on the
-Client tab even when their name gives nothing away — `GH_PAT` and a Sentry DSN
-were printed in full. The trim that keeps the limits history from growing without
-bound now has a test, and the comment above it carries a measured figure instead
-of one that was out by a factor of five.
+- Removed a function with no caller, a filter on a field that does not exist, a
+  shadowed import, and a chart axis built twice per drawing.
+- The overflow probe rendered the Changelog tab empty and priced every agent at
+  zero, so it measured a page shorter and narrower than the real one. It now
+  opens what is folded before measuring.
+- The week-track probe read a stylesheet from a file that no longer exists and
+  could not run. Rewritten to measure label rectangles in the browser, and
+  verified against a known-bad input.
+- Five tests for the week track, which had none.
+- The trim on the limits history has a test, and its comment carries a measured
+  figure instead of one out by a factor of five.
 
 ## [0.22.1] — 2026-08-12
 
