@@ -10,6 +10,7 @@ const errors = [];
 const warnings = [];
 const updates = [];
 const commands = new Map();
+const installed = new Map();
 const terminals = [];
 const views = new Map();
 const listeners = { config: [], window: [], integration: [], ended: [], closed: [] };
@@ -44,7 +45,10 @@ const vscode = {
 
         fire(value) { for (const cb of this.listeners) cb(value); }
     },
-    Uri: { file: (fsPath) => ({ fsPath, scheme: 'file' }) },
+    Uri: {
+        file: (fsPath) => ({ fsPath, scheme: 'file' }),
+        joinPath: (uri, ...parts) => ({ fsPath: [uri.fsPath, ...parts].join('/'), scheme: 'file' }),
+    },
     MarkdownString: class {
         constructor(value = '', supportThemeIcons = false) {
             this.value = value;
@@ -146,6 +150,9 @@ const vscode = {
     commands: {
         registerCommand(id, fn) { commands.set(id, fn); return disposable(); },
     },
+    extensions: {
+        getExtension: (id) => installed.get(id),
+    },
     env: { clipboard: { writeText: async () => {} } },
 };
 
@@ -159,6 +166,11 @@ vscode.__updates = updates;
 vscode.__commands = commands;
 vscode.__terminals = terminals;
 vscode.__views = views;
+// Another extension as VS Code hands it over. Only `extensionUri` is used here —
+// the tab icon is looked for inside it.
+vscode.__installExtension = (id, extensionPath) => {
+    installed.set(id, { id, extensionUri: { fsPath: extensionPath, scheme: 'file' } });
+};
 // The shell's half of a terminal's life, in the order a real one goes through
 // it: integration appears, a command ends with a status.
 vscode.__shellIntegrationArrives = (terminal) => {
@@ -191,6 +203,7 @@ vscode.__reset = () => {
     warnings.length = 0;
     updates.length = 0;
     commands.clear();
+    installed.clear();
     terminals.length = 0;
     views.clear();
     listeners.config.length = 0;

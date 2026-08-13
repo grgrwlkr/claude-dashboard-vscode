@@ -41,6 +41,9 @@ function activate({ segments, workspace = '', settings = {} } = {}) {
     const context = {
         subscriptions: [],
         globalStorageUri: { fsPath: storage },
+        // The real one points at the installed extension; here it points at the
+        // repository, which is the same tree the icons are read from.
+        extensionUri: { fsPath: path.join(__dirname, '..'), scheme: 'file' },
     };
     ext.activate(context);
     return {
@@ -1176,6 +1179,53 @@ test('the tab closes when the session ends cleanly and stays when it fails', asy
         const failed = lastTerminal();
         vscode.__shellExecutionEnds(failed, 'claude', 127);
         assert.equal(failed.disposed, false, 'command not found is the answer to why nothing happened');
+    } finally { run.dispose(); }
+});
+
+// The tab wears Claude Code's own logo where that extension is installed, and
+// this extension's icon where it is not. Both halves are worth a test because
+// both are silent when wrong: a tab icon that fails to resolve is simply blank,
+// and the path into their extension is private — a rename there has to land on
+// our icon rather than on nothing.
+const claudeCodeDir = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-claude-'));
+    fs.mkdirSync(path.join(dir, 'resources'));
+    fs.writeFileSync(path.join(dir, 'resources', 'claude-logo.svg'), '<svg/>');
+    test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    return dir;
+};
+
+test('the tab wears Claude Code’s own logo when their extension is installed', async () => {
+    const dir = claudeCodeDir();
+    const run = activate({ segments: ['{today}'] });
+    try {
+        vscode.__installExtension('Anthropic.claude-code', dir);
+        await openClaude();
+        assert.equal(lastTerminal().options.iconPath.fsPath, `${dir}/resources/claude-logo.svg`);
+    } finally { run.dispose(); }
+});
+
+test('without their extension the tab wears ours, one file per theme', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        await openClaude();
+        const icon = lastTerminal().options.iconPath;
+        assert.match(icon.light.fsPath, /media\/open-claude-light\.svg$/);
+        assert.match(icon.dark.fsPath, /media\/open-claude-dark\.svg$/);
+        for (const uri of [icon.light, icon.dark]) {
+            assert.ok(fs.existsSync(uri.fsPath), `${uri.fsPath} does not exist`);
+        }
+    } finally { run.dispose(); }
+});
+
+test('a logo that has moved inside their extension falls back to ours', async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-claude-gone-'));
+    test.after(() => fs.rmSync(empty, { recursive: true, force: true }));
+    const run = activate({ segments: ['{today}'] });
+    try {
+        vscode.__installExtension('Anthropic.claude-code', empty);
+        await openClaude();
+        assert.match(lastTerminal().options.iconPath.dark.fsPath, /media\/open-claude-dark\.svg$/);
     } finally { run.dispose(); }
 });
 

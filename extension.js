@@ -28,6 +28,12 @@ const CONTEXT_TICK = 10;
 // shell's PATH like any other command — no path of ours to go stale.
 const CLAUDE_COMMAND = 'claude';
 
+// Claude Code's extension, by the id VS Code knows it under, and where its own
+// logo sits inside it. Both are read only for the tab icon below, and neither is
+// depended on: see `claudeIcon`.
+const CLAUDE_CODE = 'Anthropic.claude-code';
+const CLAUDE_LOGO = ['resources', 'claude-logo.svg'];
+
 // StatusBarItem has no arbitrary colors — only these three states — so the
 // 50/80 thresholds from statusline.sh map onto them one to one.
 function background(pct) {
@@ -1270,7 +1276,7 @@ function activate(context) {
             slowTick(state);
         }),
         vscode.commands.registerCommand('claudeStatusline.placeholders', () => showPlaceholders(state)),
-        vscode.commands.registerCommand('claudeStatusline.openClaude', () => openClaude()),
+        vscode.commands.registerCommand('claudeStatusline.openClaude', () => openClaude(context)),
         vscode.commands.registerCommand('claudeStatusline.copyRunId', async (node) => {
             const run = node && node.run;
             if (!run) return;
@@ -1335,6 +1341,28 @@ async function showPlaceholders(state) {
 const SHELL_INTEGRATION_WAIT = 3000;
 
 /**
+ * What the terminal tab is marked with. The tab is a Claude Code session, so it
+ * wears Claude Code's own logo where that extension is installed — a file inside
+ * it, pointed at rather than copied.
+ *
+ * That path is a private one and is treated as such: an id and a file name of
+ * theirs, both checked before use, with this extension's own icon behind them.
+ * Nothing warns when it moves — the tab simply carries our mark instead, which
+ * is the right outcome for a detail this size.
+ */
+function claudeIcon(context) {
+    const theirs = vscode.extensions.getExtension(CLAUDE_CODE);
+    if (theirs) {
+        const logo = vscode.Uri.joinPath(theirs.extensionUri, ...CLAUDE_LOGO);
+        if (fs.existsSync(logo.fsPath)) return logo;
+    }
+    return {
+        light: vscode.Uri.joinPath(context.extensionUri, 'media', 'open-claude-light.svg'),
+        dark: vscode.Uri.joinPath(context.extensionUri, 'media', 'open-claude-dark.svg'),
+    };
+}
+
+/**
  * Claude Code as a tab in the group you are already looking at.
  *
  * This opens the terminal itself rather than asking Claude Code's extension for
@@ -1360,12 +1388,12 @@ const SHELL_INTEGRATION_WAIT = 3000;
  * executable — `claude` here is whatever the shell's PATH finds, the same one a
  * terminal would run — and its progress notification.
  */
-function openClaude() {
+function openClaude(context) {
     const terminal = vscode.window.createTerminal({
         // The same env var Claude Code reads for its own terminal, so a machine
         // that renames one renames both.
         name: process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code',
-        iconPath: new vscode.ThemeIcon('sparkle'),
+        iconPath: claudeIcon(context),
         // The tab lands in the group holding the editor being looked at. This is
         // the entire point of the button.
         location: { viewColumn: vscode.ViewColumn.Active },

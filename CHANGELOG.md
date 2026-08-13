@@ -18,7 +18,9 @@ grew out of, and a version that shipped nothing is worth saying so.
   looking at, next to the files already open there. Claude Code's own button
   splits a new editor group off to the right instead. The session runs `claude`
   from the shell's `PATH`; the tab closes with it when it ends cleanly and stays
-  when it fails, so the reason is still on screen.
+  when it fails, so the reason is still on screen. The tab carries Claude Code's
+  own logo where that extension is installed and this extension's icon where it
+  is not.
 
 ## [0.24.0] — 2026-08-13
 
