@@ -31,12 +31,16 @@ const wf = require('../workflows');
 const db = require('../dashboard');
 const u = require('../usage');
 
-function activate({ segments, workspace = '', settings = {} } = {}) {
+// `before` runs after the reset and before activate(), which is the only window
+// in which the world activate() reads can be arranged — anything set up outside
+// this helper is wiped by the reset at the top of it.
+function activate({ segments, workspace = '', settings = {}, before } = {}) {
     vscode.__reset();
     vscode.__setSettings({
         segments, alignment: 'right', priority: 100, refreshInterval: 3600, ...settings,
     });
     vscode.__setWorkspace(workspace);
+    if (before) before();
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-ext-'));
     const context = {
         subscriptions: [],
@@ -1106,5 +1110,86 @@ test('auto-refresh is on unless it was switched off', async () => {
             assert.equal(moved, expected, `autoRefresh=${autoRefresh} should ${expected ? '' : 'not '}redraw`);
             if (!expected) assert.equal(panel.webview.html, before, 'a page nobody asked to move must not move');
         } finally { if (panel) panel.dispose(); run.dispose(); }
+    }
+});
+
+// The one thing this extension asks of Claude Code that is not a file on disk:
+// the command behind its own title-bar button, called with the argument that
+// button leaves out. Nothing at runtime can tell that argument was understood —
+// an unrecognised location falls back to `beside`, the very split this exists to
+// avoid, without an error. So the contract is pinned here instead: the command
+// id, the third position, and the word in it.
+const openClaudeCalls = () => vscode.__executed.filter((c) => c.id === 'claude-vscode.terminal.open');
+const claudeCode = () => vscode.extensions.getExtension('Anthropic.claude-code');
+
+test('the tab button asks Claude Code for the first editor group', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        before: () => vscode.__installExtension('Anthropic.claude-code'),
+    });
+    const claude = claudeCode();
+    try {
+        await vscode.__commands.get('claudeStatusline.openClaude')();
+        assert.deepEqual(openClaudeCalls().map((c) => c.args), [[undefined, undefined, 'window']]);
+        // Already awake: nothing to start, and starting it again would be a
+        // second window's worth of work for a button press.
+        assert.equal(claude.activated, 0);
+        assert.deepEqual(vscode.__warnings, []);
+    } finally { run.dispose(); }
+});
+
+test('a Claude Code that has not woken up yet is started before it is asked', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        before: () => vscode.__installExtension('Anthropic.claude-code', { isActive: false }),
+    });
+    const claude = claudeCode();
+    try {
+        await vscode.__commands.get('claudeStatusline.openClaude')();
+        assert.equal(claude.activated, 1, 'its commands do not exist until it has run');
+        assert.equal(openClaudeCalls().length, 1);
+    } finally { run.dispose(); }
+});
+
+// Two ways this can be a button that cannot work, and both say so rather than
+// failing into the log: no Claude Code extension at all, and one whose command
+// has gone — which is what a rename in a release of theirs looks like from here.
+test('without Claude Code the button explains itself instead of throwing', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        await vscode.__commands.get('claudeStatusline.openClaude')();
+        assert.equal(openClaudeCalls().length, 0);
+        assert.match(vscode.__warnings.join('\n'), /not installed/);
+    } finally { run.dispose(); }
+});
+
+test('a command that has gone is reported, not swallowed', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        before: () => {
+            vscode.__installExtension('Anthropic.claude-code');
+            vscode.__failCommand('claude-vscode.terminal.open', "command 'claude-vscode.terminal.open' not found");
+        },
+    });
+    try {
+        await vscode.__commands.get('claudeStatusline.openClaude')();
+        assert.match(vscode.__warnings.join('\n'), /did not open.*not found/);
+    } finally { run.dispose(); }
+});
+
+// The button is contributed with `when: claudeStatusline.claudeCodeInstalled`,
+// so the context key is the only thing keeping it off the title bar of an editor
+// where it could do nothing. A key nobody sets is a key that is always false.
+test('the button context key follows whether Claude Code is there', async () => {
+    for (const present of [true, false]) {
+        const run = activate({
+            segments: ['{today}'],
+            before: () => { if (present) vscode.__installExtension('Anthropic.claude-code'); },
+        });
+        try {
+            const set = vscode.__executed.filter((c) => c.id === 'setContext'
+                && c.args[0] === 'claudeStatusline.claudeCodeInstalled');
+            assert.deepEqual(set.map((c) => c.args[1]), [present]);
+        } finally { run.dispose(); }
     }
 });

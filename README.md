@@ -358,9 +358,18 @@ All of these apply the moment they change — none needs a window reload.
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |
 
-**Commands:** Claude: Open dashboard · Rebuild the usage index · Export usage as
-CSV or JSON · Refresh now · List status-bar placeholders · and, from a row of the
-workflow view, Open the workflow script and Copy the workflow run id.
+**Commands:** Claude: Open dashboard · Open Claude Code in a tab · Rebuild the
+usage index · Export usage as CSV or JSON · Refresh now · List status-bar
+placeholders · and, from a row of the workflow view, Open the workflow script and
+Copy the workflow run id.
+
+**Open Claude Code in a tab** is also a button in the editor's title bar, next to
+Claude Code's own. Both start the same terminal session; what differs is where it
+lands. Claude Code's button splits a new editor group off to the right and keeps
+the session there, half a window wide. This one puts it in the first editor
+group, as a tab among the files already open — right-click the title bar to hide
+whichever of the two you would rather not have. The button appears only where the
+Claude Code extension is installed; the CLI on its own has no session to open.
 
 <a name="where-the-data-comes-from"></a><a name="user-content-where-the-data-comes-from"></a>
 

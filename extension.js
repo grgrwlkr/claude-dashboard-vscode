@@ -24,6 +24,11 @@ const STALE_AFTER = 600;
 // often than the limits — those hit the network and stay on their minute tick.
 const CONTEXT_TICK = 10;
 
+// The extension this one reads after — the id VS Code knows it by, publisher
+// included. Everything this repo touches of Claude Code is on disk except one
+// thing: the command behind `openClaude` below.
+const CLAUDE_CODE = 'Anthropic.claude-code';
+
 // StatusBarItem has no arbitrary colors — only these three states — so the
 // 50/80 thresholds from statusline.sh map onto them one to one.
 function background(pct) {
@@ -1150,6 +1155,15 @@ function applyConfig(state) {
 }
 
 function activate(context) {
+    // The button sits in every editor's title bar, so it is worth showing only
+    // where there is a Claude Code to open: with the CLI installed but not the
+    // VS Code extension, it could do nothing but apologise.
+    vscode.commands.executeCommand(
+        'setContext',
+        'claudeStatusline.claudeCodeInstalled',
+        !!vscode.extensions.getExtension(CLAUDE_CODE),
+    );
+
     const cfg = vscode.workspace.getConfiguration('claudeStatusline');
 
     const state = {
@@ -1266,6 +1280,7 @@ function activate(context) {
             slowTick(state);
         }),
         vscode.commands.registerCommand('claudeStatusline.placeholders', () => showPlaceholders(state)),
+        vscode.commands.registerCommand('claudeStatusline.openClaude', () => openClaude()),
         vscode.commands.registerCommand('claudeStatusline.copyRunId', async (node) => {
             const run = node && node.run;
             if (!run) return;
@@ -1321,6 +1336,44 @@ async function showPlaceholders(state) {
     if (!picked) return;
     await vscode.env.clipboard.writeText(picked.label);
     vscode.window.showInformationMessage(`${picked.label} copied — put it in claudeStatusline.segments`);
+}
+
+/**
+ * Claude Code in a tab of the group you are already looking at, rather than in a
+ * split of its own.
+ *
+ * Its own title-bar button runs `claude-vscode.terminal.open` with no arguments,
+ * and the argument it leaves out is the one that decides where the session
+ * lands: that command reads a third parameter of `beside | window | bottom`, and
+ * anything else — an absent one included — means `beside`, a new editor group
+ * split off to the right. `window` is the one that puts the terminal in the
+ * first editor group, next to the files already open there. Read from
+ * `extension.js` of anthropic.claude-code 2.1.231:
+ *
+ *     let s = o === "beside" || o === void 0 ? { viewColumn: gr.ViewColumn.Beside }
+ *           : o === "window" ? { viewColumn: gr.ViewColumn.One }
+ *           : void 0;
+ *
+ * That is a private contract, not an API, and it fails quietly in one direction:
+ * a release that renames the location leaves the argument unrecognised and the
+ * tab opens beside again, which looks like a button that did nothing rather than
+ * an error. The test on this command is what notices — nothing here can.
+ */
+async function openClaude() {
+    const claude = vscode.extensions.getExtension(CLAUDE_CODE);
+    if (!claude) {
+        vscode.window.showWarningMessage('Claude Code for VS Code is not installed, so there is no session to open.');
+        return;
+    }
+    // A command exists only once the extension registering it has run. Both wake
+    // on startup, but this one can be asked for from the palette in the second
+    // before that, and "command not found" is not what the user did wrong.
+    if (!claude.isActive) await claude.activate();
+    try {
+        await vscode.commands.executeCommand('claude-vscode.terminal.open', undefined, undefined, 'window');
+    } catch (e) {
+        vscode.window.showWarningMessage(`Claude Code did not open: ${e && e.message ? e.message : e}`);
+    }
 }
 
 function deactivate() {}

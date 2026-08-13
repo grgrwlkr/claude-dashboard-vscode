@@ -62,6 +62,11 @@
         "title": "Claude: Open dashboard"
       },
       {
+        "command": "claudeStatusline.openClaude",
+        "title": "Claude: Open Claude Code in a tab",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "claudeStatusline.reindex",
         "title": "Claude: Rebuild the usage index"
       },
@@ -88,6 +93,13 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "claudeStatusline.openClaude",
+          "when": "claudeStatusline.claudeCodeInstalled",
+          "group": "navigation"
+        }
+      ],
       "view/item/context": [
         {
           "command": "claudeStatusline.openWorkflowScript",

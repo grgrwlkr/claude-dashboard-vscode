@@ -7,8 +7,12 @@ const fs = require('node:fs');
 const items = [];
 const panels = [];
 const errors = [];
+const warnings = [];
 const updates = [];
 const commands = new Map();
+const executed = [];
+const executeFails = new Map();
+const installed = new Map();
 const views = new Map();
 const listeners = { config: [], window: [] };
 let settings = {};
@@ -62,7 +66,7 @@ const vscode = {
         createTreeView(id, opts) { views.set(id, opts.treeDataProvider); return disposable(); },
         showQuickPick: async () => undefined,
         showInformationMessage: async () => undefined,
-        showWarningMessage: async () => undefined,
+        showWarningMessage: async (message) => { warnings.push(message); },
         showTextDocument: async () => undefined,
         showSaveDialog: async () => saveTarget,
         withProgress: async (_opts, task) => task({ report() {} }),
@@ -111,6 +115,18 @@ const vscode = {
     },
     commands: {
         registerCommand(id, fn) { commands.set(id, fn); return disposable(); },
+        // Recorded rather than dispatched: the calls that matter here go to
+        // another extension's commands, which no stub can run. A test asserts
+        // what was asked for and with which arguments — that is the whole
+        // contract this side owns.
+        executeCommand: async (id, ...args) => {
+            executed.push({ id, args });
+            if (executeFails.has(id)) throw new Error(executeFails.get(id));
+            return undefined;
+        },
+    },
+    extensions: {
+        getExtension: (id) => installed.get(id),
     },
     env: { clipboard: { writeText: async () => {} } },
 };
@@ -120,9 +136,20 @@ const vscode = {
 vscode.__items = items;
 vscode.__panels = panels;
 vscode.__errors = errors;
+vscode.__warnings = warnings;
 vscode.__updates = updates;
 vscode.__commands = commands;
+vscode.__executed = executed;
 vscode.__views = views;
+// A second extension, as VS Code hands it over: `isActive` and an `activate()`
+// that records having been called, which is what a caller waiting for another
+// extension's command has to do before asking for it.
+vscode.__installExtension = (id, { isActive = true } = {}) => {
+    const ext = { id, isActive, activated: 0, activate: async () => { ext.activated++; ext.isActive = true; } };
+    installed.set(id, ext);
+    return ext;
+};
+vscode.__failCommand = (id, message) => { executeFails.set(id, message); };
 vscode.__setSettings = (next) => { settings = next; };
 vscode.__setSaveTarget = (uri) => { saveTarget = uri; };
 vscode.__setWorkspace = (folder) => {
@@ -143,8 +170,12 @@ vscode.__reset = () => {
     items.length = 0;
     panels.length = 0;
     errors.length = 0;
+    warnings.length = 0;
     updates.length = 0;
     commands.clear();
+    executed.length = 0;
+    executeFails.clear();
+    installed.clear();
     views.clear();
     listeners.config.length = 0;
     listeners.window.length = 0;

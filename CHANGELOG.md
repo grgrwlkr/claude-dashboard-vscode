@@ -11,6 +11,13 @@ grew out of, and a version that shipped nothing is worth saying so.
 
 ## [Unreleased]
 
+### Added
+
+- **Open Claude Code in a tab** — a button in the editor's title bar, and a
+  command, that starts a Claude Code session in the first editor group instead of
+  splitting a new group off to the right, which is what Claude Code's own button
+  does. The button shows only where the Claude Code extension is installed.
+
 ## [0.24.0] — 2026-08-13
 
 Carries everything prepared as 0.22.2, which was never released.
