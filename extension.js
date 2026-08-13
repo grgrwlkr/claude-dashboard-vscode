@@ -615,6 +615,9 @@ function fastTick(state) {
     collectWorkflowsFast(state);
     collectFast(state);
     render(state);
+    // A session is named a little after it starts and renamed at any point, so
+    // the tab follows on the same ten seconds as the rest of the cheap reads.
+    renameActiveTab(state);
 }
 
 // The window's session outlives ticks, but a panel can be closed and reopened —
@@ -1262,6 +1265,9 @@ function activate(context) {
             if (timerOn()) slowTick(state);
             else { collectFast(state); render(state); }
         }),
+        // Switching to a tab is the moment its name matters, and the moment the
+        // rename command can reach it at all.
+        vscode.window.onDidChangeActiveTerminal(() => renameActiveTab(state)),
         vscode.window.createTreeView('claudeStatusline.workflows', { treeDataProvider: state.tree }),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
@@ -1422,13 +1428,54 @@ function openClaude(context) {
             terminal.dispose();
         }
     });
+    // The pid is what ties this tab to a session: `claude` runs as a direct child
+    // of this shell. It is asked for once and kept, because the promise resolves
+    // after the process is up and the rename runs on a tick.
+    const tab = { terminal, pid: 0, named: '' };
+    ourTabs.add(tab);
+    terminal.processId.then((pid) => { tab.pid = pid || 0; }, () => { /* never started */ });
+
     const closed = vscode.window.onDidCloseTerminal((t) => {
         if (t !== terminal) return;
+        ourTabs.delete(tab);
         integration.dispose();
         ended.dispose();
         closed.dispose();
     });
     return terminal;
+}
+
+// Only the tabs this extension opened. Somebody else's terminal keeps whatever
+// name they gave it — this renames what it started, and nothing else.
+const ourTabs = new Set();
+
+/**
+ * The active tab, renamed to the title of the session running in it.
+ *
+ * Only the active one, because that is all VS Code offers: the rename command
+ * takes no terminal, it acts on whichever is active — so a background tab could
+ * only be renamed by first making it active, which moves the tab the user is
+ * looking at. Instead it is renamed the moment it becomes active, and a tab
+ * opened by the button is active from the start.
+ *
+ * The title is written into the transcript over and over as a session goes on,
+ * so this keeps up with `/rename` and with the generated one changing.
+ */
+async function renameActiveTab(state) {
+    if (vscode.workspace.getConfiguration('claudeStatusline').get('renameTabs') === false) return;
+    const active = vscode.window.activeTerminal;
+    const tab = active && [...ourTabs].find((t) => t.terminal === active);
+    if (!tab || !tab.pid) return;
+
+    const session = s.sessionForShell(tab.pid);
+    if (!session) return;
+    const title = s.titleOf(session.cwd || state.workspace, session.sessionId);
+    if (!title || title === tab.named) return;
+
+    try {
+        await vscode.commands.executeCommand('workbench.action.terminal.renameWithArg', { name: title });
+        tab.named = title;
+    } catch { /* the command is gone; the tab keeps the name it has */ }
 }
 
 function deactivate() {}

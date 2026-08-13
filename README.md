@@ -354,6 +354,7 @@ All of these apply the moment they change — none needs a window reload.
 | `claudeStatusline.fetchChangelog` | `false` | Refresh Anthropic's published changelog and settings reference. Off means those requests are never made and the packaged copy is used, dated |
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
+| `claudeStatusline.renameTabs` | `true` | Name each tab opened by **Open Claude Code in a tab** after the session running in it, following `/rename` and the generated title. Only tabs this extension opened, and only while one of them is the active terminal — VS Code's rename acts on the active terminal |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |

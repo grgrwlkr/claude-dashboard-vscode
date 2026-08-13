@@ -136,6 +136,34 @@ test("costSince drops yesterday's records from the same file", () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// The title is what the terminal tab is named after. It is written as its own
+// record and rewritten as a session goes on, so the last one in the file wins —
+// and a title the user typed outranks the generated one.
+test('titleIn takes the last title written, and a typed one over a generated one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-title-'));
+    const file = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, [
+        JSON.stringify({ type: 'title', sessionId: 'a', aiTitle: 'First guess at the topic' }),
+        JSON.stringify(rec()),
+        'not json — a junk line the parser has to survive',
+        JSON.stringify({ type: 'title', sessionId: 'a', aiTitle: 'What it turned out to be' }),
+        JSON.stringify({ type: 'title', sessionId: 'a', customTitle: 'What I called it' }),
+    ].join('\n') + '\n');
+
+    assert.equal(s.titleIn(file), 'What I called it');
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('titleIn is empty for a transcript with no title and for one that is not there', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-title-none-'));
+    const file = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, JSON.stringify(rec()) + '\n');
+
+    assert.equal(s.titleIn(file), '');
+    assert.equal(s.titleIn(path.join(dir, 'gone.jsonl')), '');
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('readTail skips subagent records and takes the most recent one', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
     const file = path.join(dir, 'session.jsonl');

@@ -30,6 +30,7 @@ const seg = require('../segments');
 const wf = require('../workflows');
 const db = require('../dashboard');
 const u = require('../usage');
+const s = require('../session');
 
 function activate({ segments, workspace = '', settings = {} } = {}) {
     vscode.__reset();
@@ -1250,6 +1251,95 @@ test('every icon the manifest names exists and ships with the package', () => {
         assert.ok(!excluded || rules.includes(`!${rel}`),
             `${rel} is excluded from the .vsix by .vscodeignore — add !${rel}`);
     }
+});
+
+// The tab is named after the session running in it. Two things make this worth
+// pinning: the rename can only reach the active terminal, so the wiring has to
+// pick the right tab out of whatever is active; and the title is re-read every
+// ten seconds, so a rename that does not compare against the last one it set
+// would fire a command six times a minute forever.
+const renames = () => vscode.__executed
+    .filter((c) => c.id === 'workbench.action.terminal.renameWithArg')
+    .map((c) => c.args[0].name);
+
+// The two session reads this depends on, both of which touch the machine: which
+// session runs under a shell, and what its transcript last called it.
+function withSession(session, title, run) {
+    const real = { sessionForShell: s.sessionForShell, titleOf: s.titleOf };
+    s.sessionForShell = (pid) => (session && pid === session.shellPid ? session : null);
+    s.titleOf = () => title;
+    try { return run(); } finally { Object.assign(s, real); }
+}
+
+const openActiveTab = async (pid = 4242) => {
+    vscode.__nextTerminalPid(pid);
+    await openClaude();
+    // The pid arrives through a promise the caller subscribes to as the terminal
+    // is created; let it land before anything reads it.
+    await new Promise((r) => setImmediate(r));
+    return lastTerminal();
+};
+
+test('the tab takes the name of the session running in it', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const terminal = await openActiveTab();
+        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Fix the terminal tab', async () => {
+            vscode.__activateTerminal(terminal);
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), ['Fix the terminal tab']);
+    } finally { run.dispose(); }
+});
+
+test('a title that has not changed is not set again', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const terminal = await openActiveTab();
+        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Same title', async () => {
+            for (let i = 0; i < 3; i++) {
+                vscode.__activateTerminal(terminal);
+                await new Promise((r) => setImmediate(r));
+            }
+        });
+        assert.deepEqual(renames(), ['Same title'], 'the tick asks every ten seconds; only a change is worth a command');
+    } finally { run.dispose(); }
+});
+
+test('a terminal this extension did not open is left alone', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        await openActiveTab();
+        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Someone else', async () => {
+            vscode.__activateTerminal({ name: 'not ours' });
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), []);
+    } finally { run.dispose(); }
+});
+
+test('renameTabs off leaves the tab as it was opened', async () => {
+    const run = activate({ segments: ['{today}'], settings: { renameTabs: false } });
+    try {
+        const terminal = await openActiveTab();
+        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Would have been this', async () => {
+            vscode.__activateTerminal(terminal);
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), []);
+    } finally { run.dispose(); }
+});
+
+test('a shell with no session under it is not renamed to nothing', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const terminal = await openActiveTab();
+        await withSession(null, '', async () => {
+            vscode.__activateTerminal(terminal);
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), []);
+    } finally { run.dispose(); }
 });
 
 test('another terminal ending does not take this tab with it', async () => {

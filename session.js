@@ -129,7 +129,9 @@ function readTail(file) {
     return null;
 }
 
-function scanTail(file, size, length) {
+// The last `length` bytes of a file, as text. Shared by the two scanners below
+// so that growing the window is one decision made in one place.
+function readChunk(file, size, length) {
     const buf = Buffer.alloc(length);
     let fd;
     try {
@@ -138,9 +140,15 @@ function scanTail(file, size, length) {
     } catch { return null; } finally {
         if (fd !== undefined) try { fs.closeSync(fd); } catch { /* already closed */ }
     }
+    return buf.toString('utf8');
+}
+
+function scanTail(file, size, length) {
+    const text = readChunk(file, size, length);
+    if (text === null) return null;
 
     let last = null;
-    for (const line of buf.toString('utf8').split('\n')) {
+    for (const line of text.split('\n')) {
         if (line.length < 50 || line[0] !== '{') continue;
         let r;
         try { r = JSON.parse(line); } catch { continue; }
@@ -149,6 +157,71 @@ function scanTail(file, size, length) {
         if (!last || Date.parse(r.timestamp) >= Date.parse(last.timestamp)) last = r;
     }
     return last;
+}
+
+/**
+ * The title the client shows for a session — the generated one, or the one the
+ * user typed, which wins.
+ *
+ * It is written as a record of its own and rewritten as the session goes on, so
+ * the last one in the file is the current one. Measured on a 5.5 MB transcript:
+ * 76 title records, roughly one per 70 KB, the last of them 3 KB from the end —
+ * which is why this reads the tail and grows the window only if that misses,
+ * exactly as `readTail` does for usage.
+ */
+function titleOf(workspace, sessionId) {
+    if (!workspace || !sessionId) return '';
+    return titleIn(transcriptPath(workspace, sessionId));
+}
+
+// The same read against a transcript by path — where the work is, and the half a
+// test can drive without a project tree around it.
+function titleIn(file) {
+    let size;
+    try { size = fs.statSync(file).size; } catch { return ''; }
+
+    for (const step of TAIL_STEPS) {
+        const length = Math.min(step, size);
+        const found = scanTitle(file, size, length);
+        if (found) return found;
+        if (length >= size) break;
+    }
+    return '';
+}
+
+function scanTitle(file, size, length) {
+    const text = readChunk(file, size, length);
+    if (text === null) return '';
+
+    let title = '';
+    for (const line of text.split('\n')) {
+        if (line[0] !== '{' || !line.includes('Title"')) continue;
+        let r;
+        try { r = JSON.parse(line); } catch { continue; }
+        // A record carries one or the other; `customTitle` is what the user
+        // typed and outranks the generated one when both have been written.
+        if (r.aiTitle) title = r.aiTitle;
+        if (r.customTitle) title = r.customTitle;
+    }
+    return title;
+}
+
+/**
+ * The live session running inside a given shell — the pid of a terminal, and the
+ * `claude` process is its direct child (verified against the process table:
+ * every session in the registry has a `/bin/zsh` parent).
+ *
+ * No fallback on purpose. `findOwnSession` above may guess by workspace because
+ * a window has exactly one panel session; a window can hold any number of
+ * terminals, and a guess there would label one tab with another tab's session.
+ */
+function sessionForShell(shellPid) {
+    if (!shellPid) return null;
+    const live = listSessions().filter((s) => alive(s.pid));
+    if (live.length === 0) return null;
+    const parents = parentsOf(live.map((s) => s.pid));
+    const mine = live.filter((s) => parents.get(s.pid) === shellPid);
+    return mine.length > 0 ? newest(mine) : null;
 }
 
 // Model context window. A [1m] suffix forces a million; Haiku and anything
@@ -452,7 +525,8 @@ function fmtDuration(ms) {
 
 module.exports = {
     SESSIONS, PROJECTS, TAIL,
-    slugFor, listSessions, findOwnSession, transcriptPath, readTail, contextOf,
+    slugFor, listSessions, findOwnSession, sessionForShell, titleOf, titleIn,
+    transcriptPath, readTail, contextOf,
     windowFor, sessionStats, costToday, costSince, peersOf, todoOf,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
     settingsFiles, settingsChain, resolveSetting, MANAGED,

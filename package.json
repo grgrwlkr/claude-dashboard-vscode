@@ -188,6 +188,11 @@
           "default": false,
           "markdownDescription": "Ask each plugin's marketplace whether a newer version exists.\n\n**Off by default, and off means nothing leaves the machine.** With it off the Health tab still lists every installed plugin, its version and what actually ran — it simply cannot tell you which of them is out of date, because that answer only exists on a server.\n\nWith it on, the extension fetches the marketplace manifest each plugin was installed from, at most once an hour, and compares versions. No credentials are sent and nothing about your usage is transmitted — only a request for a public manifest."
         },
+        "claudeStatusline.renameTabs": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Name each tab opened by **Open Claude Code in a tab** after the session running in it, following `/rename` and the generated title as they change.\n\nOnly tabs this extension opened are renamed, and only while one of them is the active terminal — VS Code's rename acts on the active terminal, so a background tab could only be renamed by first switching to it. A tab opened by the button is active from the start, and any tab is renamed the moment you switch back to it.\n\nOff, tabs keep the name they were opened with."
+        },
         "claudeStatusline.refreshInterval": {
           "type": "number",
           "default": 60,

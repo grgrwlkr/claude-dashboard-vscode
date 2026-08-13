@@ -10,12 +10,14 @@ const errors = [];
 const warnings = [];
 const updates = [];
 const commands = new Map();
+const executed = [];
 const installed = new Map();
 const terminals = [];
 const views = new Map();
-const listeners = { config: [], window: [], integration: [], ended: [], closed: [] };
+const listeners = { config: [], window: [], integration: [], ended: [], closed: [], activeTerminal: [] };
 let settings = {};
 let saveTarget;
+let nextPid;
 
 const disposable = () => ({ dispose() {} });
 // A real subscription stops being called once disposed, and code that disposes
@@ -75,6 +77,8 @@ const vscode = {
         // A terminal as the extension uses it: what it was created with, whether
         // it was shown, and what was run in it. The three terminal events are
         // driven by the helpers below, so a test can play the shell's half.
+        activeTerminal: undefined,
+        onDidChangeActiveTerminal: (cb) => subscribe(listeners.activeTerminal, cb),
         createTerminal(options) {
             const terminal = {
                 options,
@@ -84,6 +88,10 @@ const vscode = {
                 executed: [],
                 disposed: false,
                 shellIntegration: undefined,
+                // The real one resolves once the process is up, and a caller
+                // subscribes to it as the terminal is created — so the pid has
+                // to be decided before that, with `__nextTerminalPid`.
+                processId: Promise.resolve(nextPid),
                 show() { this.shown++; },
                 sendText(text) { this.sent.push(text); },
                 dispose() {
@@ -149,6 +157,10 @@ const vscode = {
     },
     commands: {
         registerCommand(id, fn) { commands.set(id, fn); return disposable(); },
+        // Recorded rather than dispatched: these go to VS Code's own commands,
+        // which no stub can run. What a test can check is that the right one was
+        // asked for, with the right argument.
+        executeCommand: async (id, ...args) => { executed.push({ id, args }); },
     },
     extensions: {
         getExtension: (id) => installed.get(id),
@@ -164,6 +176,7 @@ vscode.__errors = errors;
 vscode.__warnings = warnings;
 vscode.__updates = updates;
 vscode.__commands = commands;
+vscode.__executed = executed;
 vscode.__terminals = terminals;
 vscode.__views = views;
 // Another extension as VS Code hands it over. Only `extensionUri` is used here —
@@ -179,6 +192,13 @@ vscode.__shellIntegrationArrives = (terminal) => {
 };
 vscode.__shellExecutionEnds = (terminal, commandLine, exitCode = 0) => {
     for (const cb of [...listeners.ended]) cb({ terminal, execution: { commandLine: { value: commandLine } }, exitCode });
+};
+// The pid the next terminal's shell will report, which is what ties a tab to a
+// session. Set before opening one: the pid is subscribed to at creation.
+vscode.__nextTerminalPid = (pid) => { nextPid = pid; };
+vscode.__activateTerminal = (terminal) => {
+    vscode.window.activeTerminal = terminal;
+    for (const cb of [...listeners.activeTerminal]) cb(terminal);
 };
 vscode.__setSettings = (next) => { settings = next; };
 vscode.__setSaveTarget = (uri) => { saveTarget = uri; };
@@ -203,6 +223,7 @@ vscode.__reset = () => {
     warnings.length = 0;
     updates.length = 0;
     commands.clear();
+    executed.length = 0;
     installed.clear();
     terminals.length = 0;
     views.clear();
@@ -211,8 +232,11 @@ vscode.__reset = () => {
     listeners.integration.length = 0;
     listeners.ended.length = 0;
     listeners.closed.length = 0;
+    listeners.activeTerminal.length = 0;
+    vscode.window.activeTerminal = undefined;
     settings = {};
     saveTarget = undefined;
+    nextPid = undefined;
     vscode.workspace.workspaceFolders = undefined;
 };
 

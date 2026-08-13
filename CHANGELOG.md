@@ -21,6 +21,11 @@ grew out of, and a version that shipped nothing is worth saying so.
   when it fails, so the reason is still on screen. The tab carries Claude Code's
   own logo where that extension is installed and this extension's icon where it
   is not.
+- The tab is named after the session running in it, following `/rename` and the
+  generated title as they change — `claudeStatusline.renameTabs`, on by default.
+  Only tabs this extension opened are renamed, and only while one of them is the
+  active terminal: VS Code's rename acts on the active terminal, so a background
+  tab could only be renamed by switching to it first.
 
 ## [0.24.0] — 2026-08-13
 
