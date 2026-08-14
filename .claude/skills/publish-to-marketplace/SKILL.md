@@ -35,6 +35,12 @@ unzip -p "$SCRATCH/extension.vsix" extension.vsixmanifest | rg -o 'PreRelease[^/
 
 `PreRelease" Value="true"` → pre-release (odd minor). No output → stable.
 
+**Check this against what was asked, not against the tag you just made.**
+"Release" means stable — an even minor, the channel the Install button serves.
+Pre-release happens only when it was asked for in words. A stable release that
+went out odd reaches nobody who has not opted in, and the fix is another
+release: the version number is spent.
+
 ## The browser steps
 
 1. `tabs_context_mcp { createIfEmpty: true }`, then `navigate` to
@@ -69,6 +75,21 @@ until curl -s -H 'Content-Type: application/json' \
 ```
 
 Run it in the background and keep working; do not sit on a foreground sleep.
+
+The endpoint answers with an empty body often enough to matter — a bare parse of
+it throws, and the throw looks like "not published yet". Retry before drawing a
+conclusion:
+
+```bash
+for i in 1 2 3; do
+  R=$(curl -s --max-time 20 ... )
+  [ -n "$R" ] && printf '%s' "$R" | python3 -c '...' && break
+  sleep 3
+done
+```
+
+Verification took 7 minutes on 0.24.0 and 10 on 0.25.0 — the page shows
+`Verifying…` in the version column meanwhile, which is the honest status.
 
 The version badge in the README comes from badgen with `max-age=3600`, so it
 lags publication by up to an hour — never use it as the check.
