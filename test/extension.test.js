@@ -798,6 +798,35 @@ test('asking for the defaults returns the built-in bar, not the current one', as
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
+// The Disk tab offers to open a directory in the file manager. The page is a
+// webview: a message asking to reveal a path is only as trustworthy as the guard
+// behind it, so the extension opens nothing it did not itself measure and put on
+// that page.
+test('the disk tab reveals only the directories it measured', async () => {
+    const run = activate({ segments: ['{weekly}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const shown = () => vscode.__executed.filter((e) => e.id === 'revealFileInOS');
+
+        // Any path at all, including one that exists: not on the page, not opened.
+        await panel.__receive({ type: 'reveal', path: os.homedir() });
+        await panel.__receive({ type: 'reveal', path: '/etc/passwd' });
+        await panel.__receive({ type: 'reveal', path: '' });
+        assert.deepEqual(shown(), [], 'a path the page never showed is refused');
+
+        // And one the page does offer opens. Taken out of the rendered HTML
+        // rather than recomputed here: what the guard admits and what the page
+        // shows are the same list, and a test that rebuilt the list itself would
+        // pass while the two drifted apart.
+        const offered = [...panel.webview.html.matchAll(/data-reveal="([^"]+)"/g)].map((m) => m[1]);
+        assert.ok(offered.length > 0, 'the disk tab offers at least one directory to open');
+        await panel.__receive({ type: 'reveal', path: offered[0] });
+        assert.equal(shown().length, 1);
+        assert.equal(shown()[0].args[0].fsPath, offered[0]);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
 // The tooltip and the Now tab are two renderings of one list of sections. The
 // wording used to live in extension.js alone; a tab that copied it would have
 // been free to drift the moment either side changed.

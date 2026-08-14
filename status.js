@@ -58,7 +58,10 @@ function limits(d, h, env) {
     blocks.push({ kind: 'meters', rows });
 
     const pc = d.pace;
-    if (pc && lim.weekly) {
+    // `settled` gates the comparison the same way it gates the bar and the
+    // {drift} field: in the first half hour the plan is 0% and the sentence
+    // below would open a fresh week with "1% ahead of plan".
+    if (pc && pc.settled && lim.weekly) {
         // Pace as a sentence: spend against plan is a comparison, and a
         // comparison squeezed into a row label is what was hard to read.
         const diff = lim.weekly.pct - pc.plan;
@@ -270,6 +273,10 @@ function statusMetrics(d = {}) {
             opened: start,
             reset: w.reset,
             at: d.now,
+            // Whether this window is old enough to be compared against its plan
+            // at all — decided once, in pace(), for the bar, the drift field
+            // and this page alike.
+            settled: Boolean(d.pace && d.pace.settled),
             dryAt: d.pace ? d.pace.dryAt : null,
             // Filled by the caller from the marks file: the moment this window
             // ran out, which no formula here can recover — see history.js.

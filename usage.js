@@ -21,7 +21,12 @@ const CACHE_TTL = 1800;
 const DRY_MIN_ELAPSED = 1800;
 const DRY_MIN_PCT = 2;
 
-const BAR_WIDTH = 6;
+// One cell per day of the window. The bar and the week bar on the page draw the
+// same thing on the same axis — an even burn puts x% of the limit at x% of the
+// week — so seven cells make a cell a day: spending exactly to plan fills as
+// many of them as the week has days behind it. At six they were 28-hour blocks
+// standing for nothing, and the terminal's ten are neither.
+const BAR_WIDTH = 7;
 
 function mtime(file) {
     try { return Math.floor(fs.statSync(file).mtimeMs / 1000); } catch { return 0; }
@@ -167,11 +172,23 @@ function pace(weekly, now) {
     const elapsed = Math.min(WEEK, Math.max(0, WEEK - (weekly.reset - now)));
     const plan = Math.floor((elapsed * 100) / WEEK);
     let dryAt = null;
-    if (elapsed >= DRY_MIN_ELAPSED && weekly.pct >= DRY_MIN_PCT) {
+    // At 100% there is nothing left to forecast: the formula divides what
+    // remains by the rate and returns this instant, which the bar then printed
+    // as `dry ~03h` — the current hour, dressed as a prediction. The moment the
+    // quota actually ended is a recorded fact, not a forecast (history.js).
+    if (elapsed >= DRY_MIN_ELAPSED && weekly.pct >= DRY_MIN_PCT && weekly.pct < 100) {
         dryAt = now + Math.floor((elapsed * (100 - weekly.pct)) / weekly.pct);
     }
     const beforeReset = dryAt !== null && dryAt < weekly.reset;
-    return { elapsed, plan, dryAt, beforeReset, dry: beforeReset ? dryAt : null };
+    // Whether the window is old enough to be compared against its plan at all.
+    // The same two thresholds that gate the forecast, because they gate the same
+    // thing: in the first half hour the plan is 0% and every fraction of a
+    // percent is "ahead of schedule", so a fresh week opens with a red cell on
+    // the bar, a `+1%` drift beside it and an alarm on the page — about one
+    // percent. One flag rather than three copies of the arithmetic: the bar, the
+    // drift field and the week bar all ask this question.
+    const settled = elapsed >= DRY_MIN_ELAPSED && weekly.pct >= DRY_MIN_PCT;
+    return { elapsed, plan, dryAt, beforeReset, settled, dry: beforeReset ? dryAt : null };
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');

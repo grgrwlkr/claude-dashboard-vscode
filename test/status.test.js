@@ -26,7 +26,9 @@ const data = {
         credits: { used: 103.67, limit: 0, pct: 0, enabled: false, reason: 'out_of_credits' },
     },
     weekly: { pct: 52, reset: NOW + 2 * 86400 },
-    pace: { plan: 61, elapsed: 400000, dryAt: NOW + 4 * 86400, beforeReset: false },
+    // `settled` is pace()'s own verdict on whether this window can be compared
+    // against its plan yet — four and a half days in, it plainly can.
+    pace: { plan: 61, elapsed: 400000, settled: true, dryAt: NOW + 4 * 86400, beforeReset: false },
     ctx: { pct: 52, tokens: 529000, window: 1e6, cachePct: 99, model: 'claude-opus-5', effort: 'xhigh', branch: 'master', estimated: false },
     compactPct: 97,
     settings: { thinking: true, thinkingSummaries: true, advisor: 'claude-fable-5', outputStyle: '' },
@@ -88,6 +90,21 @@ test('the limits section reads every window and says which side of plan it is on
     const forecast = notes(limits).find((n) => n.label === 'Forecast');
     assert.equal(forecast.tone, 'safe');
     assert.match(forecast.text, /after the reset: you do not get there/);
+});
+
+// The same guard as the glyph bar and the {drift} field, in the third place the
+// comparison is written out.
+test('a window too young to judge is not judged in words either', () => {
+    const fresh = {
+        ...data,
+        weekly: { pct: 1, reset: NOW + 604800 - 600 },
+        pace: { plan: 0, elapsed: 600, settled: false, dryAt: null, beforeReset: false },
+    };
+    const [limits] = status.statusSections(fresh, helpers, {});
+    assert.equal(notes(limits).find((n) => n.label === 'Pace'), undefined, 'no verdict against a plan of zero');
+    assert.equal(notes(limits).find((n) => n.label === 'Forecast'), undefined);
+    // The windows themselves are still reported: what is missing is the opinion.
+    assert.deepEqual(metersOf(limits).map((r) => r.label), ['5h', '7d', 'fable']);
 });
 
 test('a forecast that lands before the reset is the alarming one', () => {

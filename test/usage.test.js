@@ -106,14 +106,16 @@ test('fmtLeft: days, hours, minutes, and the past', () => {
 });
 
 test('bar: cells beyond the plan are marked as spend ahead of schedule', () => {
-    assert.equal(u.bar(0, 0), '░░░░░░');
-    assert.equal(u.bar(100, 100), '██████');
-    // Fact 50% (3 cells) against a 17% plan (1 cell): two cells are ahead.
-    assert.equal(u.bar(50, 17), '█▓▓░░░');
+    // Seven cells, one per day of the window: spending exactly to plan fills as
+    // many of them as the week has days behind it.
+    assert.equal(u.bar(0, 0), '░░░░░░░');
+    assert.equal(u.bar(100, 100), '███████');
+    // Fact 50% (4 cells) against a 17% plan (1 cell): three cells are ahead.
+    assert.equal(u.bar(50, 17), '█▓▓▓░░░');
     // Fact behind the plan: plan cells the spending has not reached are light.
     // Fact takes two cells, not one — ceil lights a cell at any non-zero
     // percent, the same behaviour as (fact*w+99)/100 in statusline.sh.
-    assert.equal(u.bar(17, 50), '██▒░░░');
+    assert.equal(u.bar(17, 50), '██▒▒░░░');
 });
 
 test('bar: no overspend cell while spending is at or behind the plan', () => {
@@ -135,10 +137,10 @@ test('bar: no overspend cell while spending is at or behind the plan', () => {
 });
 
 test('bar: real overspend thinner than a cell still gets one', () => {
-    // 100% against a 99% plan rounds to six cells each, so the zone would come
+    // 100% against a 99% plan rounds to seven cells each, so the zone would come
     // out zero-wide exactly where it matters most. statusline.sh clamps the plan
     // to f-1 for this; so do we.
-    assert.equal(u.bar(100, 99), '█████▓');
+    assert.equal(u.bar(100, 99), '██████▓');
     assert.ok(u.bar(92, 84).includes('▓'), 'plainly ahead of plan');
 });
 
@@ -146,7 +148,7 @@ test('barText assembles the whole bar string', () => {
     const elapsed = Math.round(0.19 * WEEK);
     const weekly = { pct: 23, reset: NOW + WEEK - elapsed };
     const text = u.barText(weekly, u.pace(weekly, NOW), NOW_MS);
-    assert.match(text, /^✻ 7d 23% [█▓▒░]{6} dry [A-Z][a-z]{2} \d{2}\.\d{2} ~\d{2}h$/);
+    assert.match(text, /^✻ 7d 23% [█▓▒░]{7} dry [A-Z][a-z]{2} \d{2}\.\d{2} ~\d{2}h$/);
 });
 
 test('barText carries neither bar nor dry without a pace', () => {
@@ -225,4 +227,27 @@ test('creditsOf carries the currency the endpoint named', () => {
     assert.equal(u.creditsOf(spend('USD')).currency, 'USD');
     assert.equal(u.creditsOf(spend('EUR')).currency, 'EUR');
     assert.equal(u.creditsOf(spend(undefined)).currency, 'USD', 'a missing code is the one everything else assumes');
+});
+
+test('at 100% there is no forecast to make', () => {
+    // The formula divides what remains by the rate, so at 100% it returns this
+    // instant and the bar printed the current hour as a prediction: `dry ~03h`.
+    // When the quota is gone the useful fact is the moment it ended, which is
+    // recorded rather than computed — see history.js.
+    const weekly = { pct: 100, reset: NOW + Math.round(0.4 * WEEK) };
+    const pc = u.pace(weekly, NOW);
+    assert.equal(pc.dryAt, null);
+    assert.equal(pc.dry, null);
+    assert.equal(pc.settled, true, 'the window is still old enough to judge');
+
+    // One percent below it the forecast is back, and it is not "now".
+    assert.ok(u.pace({ pct: 99, reset: weekly.reset }, NOW).dryAt > NOW);
+});
+
+// One flag, three surfaces: the glyph bar, the {drift} field and the week bar on
+// the page all ask whether this window can be compared against its plan yet.
+test('a window too young to judge says so', () => {
+    assert.equal(u.pace({ pct: 1, reset: NOW + WEEK - 600 }, NOW).settled, false, 'ten minutes in');
+    assert.equal(u.pace({ pct: 1, reset: NOW + Math.round(0.5 * WEEK) }, NOW).settled, false, 'under 2% spent');
+    assert.equal(u.pace({ pct: 5, reset: NOW + Math.round(0.5 * WEEK) }, NOW).settled, true);
 });

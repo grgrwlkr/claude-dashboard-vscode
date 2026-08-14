@@ -9,7 +9,7 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
-## [Unreleased]
+## [0.25.0] — 2026-08-14
 
 ### Added
 
@@ -38,6 +38,13 @@ grew out of, and a version that shipped nothing is worth saying so.
   it is there on a machine that has never run Claude Code, and the bar's own
   right-click menu hides it like any other item.
 
+- Every row of the Disk tab now says where it is and offers to open it: the
+  full path on hover, and a **show** button that reveals the directory in
+  Finder. The extension still deletes nothing — the numbers say what is worth
+  removing, the file manager is where removing happens, and the decision stays
+  yours. A wildcard row like `plugins/cache/temp_subdir_*` has no single
+  directory of its own and opens the one holding them all.
+
 ### Changed
 
 - **The week bar on the Now tab draws spend on the week's own axis.** An even
@@ -62,9 +69,19 @@ grew out of, and a version that shipped nothing is worth saying so.
   date. After that the mark stays where it happened while `now` keeps moving, so
   the distance between them is how long you have been without quota — and the
   delta on the fill melts towards zero as the plan catches up.
-- The bar says nothing about pace in the first half hour of a window or below 2%
-  spent: with a plan of 0% every fraction of a percent is "over", and a fresh
-  week used to open on an alarm about one percent.
+- **The status-bar bar is seven cells — one per day of the window**, the same
+  axis the page draws: spending exactly to plan fills as many cells as the week
+  has days behind it. At six they were 28-hour blocks standing for nothing, and
+  a whole percent of the limit could not fit in one.
+- Nothing is said about pace in the first half hour of a window or below 2%
+  spent — not by the bar, not by `{drift}`, not by the hover, not by the page.
+  With a plan of 0% every fraction of a percent is "ahead of schedule", so a
+  fresh week opened red over one percent. One flag decided in `pace()` rather
+  than the same arithmetic in four places.
+- At 100% no forecast is offered at all. The formula divides what is left by the
+  rate, so it returned the present moment and the bar printed the current hour
+  as a prediction — `dry ~03h`. When the quota is gone the fact worth having is
+  when it ended, and that one is recorded rather than computed.
 - The zone between the fill and the plan mark is measured to the mark itself
   rather than to the whole percent printed under it. The plan arrives floored —
   6.43% of the week elapsed is reported as 6% — so the zone stopped just short of

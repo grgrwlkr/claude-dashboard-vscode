@@ -389,6 +389,10 @@ function disk(root = ROOT, known = null) {
         dirs.push({
             name: entry.name,
             bytes,
+            // Where it actually is. A page that says "905 MB · regenerates" and
+            // leaves you to work out which directory that was is a page you read
+            // and then go hunting from; the extension knows the path already.
+            path: full,
             kind: REGENERABLE.has(entry.name) ? 'regenerable'
                 : IRREPLACEABLE.has(entry.name) ? 'keep' : 'mixed',
         });
@@ -401,7 +405,16 @@ function disk(root = ROOT, known = null) {
     const hogs = [];
     for (const job of (known || jobs(root))) {
         if (job.tmpBytes > 50e6) {
-            hogs.push({ path: `jobs/${job.id}/tmp`, bytes: job.tmpBytes, note: `scratch of "${job.name || job.id}" (${job.state || 'unknown'})` });
+            hogs.push({
+                path: `jobs/${job.id}/tmp`,
+                // The directory to open. For the two wildcards below there is no
+                // single directory to point at, so they point at the one that
+                // holds them all — opening `plugins/cache` and reading the names
+                // beats opening nothing.
+                abs: path.join(root, 'jobs', job.id, 'tmp'),
+                bytes: job.tmpBytes,
+                note: `scratch of "${job.name || job.id}" (${job.state || 'unknown'})`,
+            });
         }
     }
     const cache = path.join(root, 'plugins', 'cache');
@@ -440,6 +453,7 @@ function disk(root = ROOT, known = null) {
     if (temps > 0) {
         hogs.push({
             path: 'plugins/cache/temp_subdir_*',
+            abs: cache,
             bytes: tempBytes,
             note: `${temps} abandoned marketplace ${temps === 1 ? 'clone' : 'clones'}`,
         });
@@ -447,6 +461,7 @@ function disk(root = ROOT, known = null) {
     if (stale > 0) {
         hogs.push({
             path: 'plugins/cache/*/*/<old versions>',
+            abs: cache,
             bytes: staleBytes,
             note: `${stale} superseded plugin ${stale === 1 ? 'copy' : 'copies'}`,
         });

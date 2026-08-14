@@ -277,7 +277,14 @@ function heatmap(days, { weeks = 27, cell = 12, now = Date.now() } = {}) {
  * there is one. `byModel` is the exception — there the colour is the model's
  * identity, carried over from the chart above the list.
  */
-function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12, byModel = false, scaleMax = 0 } = {}) {
+function barList(entries, {
+    value = (b) => b.cost, label = fmtCost, limit = 12, byModel = false, scaleMax = 0,
+    // What a row is about, for the hover — the key by default, a full path where
+    // the key is only its last component. And an optional cell after the figure:
+    // **markup**, like `panel`'s note, so a caller can put a control there. Both
+    // are opt-in; every existing list renders exactly as it did.
+    titleOf = null, after = null,
+} = {}) {
     const rows = entries.slice(0, limit);
     if (rows.length === 0) return '<p class="empty">Nothing here yet.</p>';
     // `scaleMax` is for a series that already has a scale of its own. A window
@@ -288,11 +295,13 @@ function barList(entries, { value = (b) => b.cost, label = fmtCost, limit = 12, 
         const v = value(b);
         const w = max > 0 ? (v / max) * 100 : 0;
         const fill = byModel ? `background:${modelColor(key, i)}` : '';
-        return `<tr><th scope="row" title="${esc(key)}"><span>${esc(key)}</span></th>`
+        return `<tr><th scope="row" title="${esc(titleOf ? titleOf(b, key) : key)}"><span>${esc(key)}</span></th>`
             + `<td class="bar-cell"><span class="bar-track">`
             + `<span class="bar-fill" style="width:${w.toFixed(1)}%${fill ? `;${fill}` : ''}"></span>`
             + `</span></td>`
-            + `<td class="bar-val">${esc(label(v, b))}</td></tr>`;
+            + `<td class="bar-val">${esc(label(v, b))}</td>`
+            + (after ? `<td class="bar-act">${after(b, key)}</td>` : '')
+            + '</tr>';
     }).join('')}</table>`;
 }
 
@@ -1501,9 +1510,15 @@ function diskTab(sys) {
     if (!d) return '<section class="tab" data-tab="disk" hidden><p class="empty">Disk usage has not been measured yet — press Reindex.</p></section>';
     const kindLabel = { keep: 'keep', regenerable: 'regenerates', mixed: '' };
     const junk = d.hogs.reduce((a, h) => a + h.bytes, 0);
-    const hogTable = `<table><thead><tr><th>Path</th><th>What it is</th><th class="num">Size</th></tr></thead><tbody>
-          ${d.hogs.map((h) => `<tr><td class="mono">${esc(h.path)}</td><td class="dim">${esc(h.note)}</td>
-            <td class="num">${esc(bytes(h.bytes))}</td></tr>`).join('')}
+    // Opens the directory in the OS file manager rather than in the editor: a
+    // folder is not a document, and what is wanted here is to look inside it —
+    // and, if it comes to that, to delete from there. This extension still
+    // deletes nothing itself.
+    const reveal = (abs) => (abs
+        ? `<button class="link" data-reveal="${esc(abs)}" title="${esc(abs)}">show</button>` : '');
+    const hogTable = `<table><thead><tr><th>Path</th><th>What it is</th><th class="num">Size</th><th></th></tr></thead><tbody>
+          ${d.hogs.map((h) => `<tr><td class="mono" title="${esc(h.abs || h.path)}">${esc(h.path)}</td><td class="dim">${esc(h.note)}</td>
+            <td class="num">${esc(bytes(h.bytes))}</td><td class="num">${reveal(h.abs)}</td></tr>`).join('')}
         </tbody></table>`;
 
     return `<section class="tab" data-tab="disk" hidden>
@@ -1515,7 +1530,9 @@ function diskTab(sys) {
         ${panel('By directory', barList(d.dirs.map((x) => [x.name, x]), {
         limit: 20, value: (x) => x.bytes,
         label: (v, x) => `${bytes(v)}${kindLabel[x.kind] ? ` · ${kindLabel[x.kind]}` : ''}`,
-    }), { note: 'Everything under <code>~/.claude</code>. Nothing here is deleted by this extension and there is no button that would — the numbers are the point, the decision is yours.' })}
+        titleOf: (x) => x.path || x.name,
+        after: (x) => reveal(x.path),
+    }), { note: 'Everything under <code>~/.claude</code>. Nothing here is deleted by this extension and there is no button that would — <b>show</b> opens the directory in Finder and the decision stays yours.' })}
         ${d.hogs.length ? panel('Named leftovers', hogTable, {
         flush: true,
         note: "A job's <code>tmp</code> is the working directory of a background agent that has since finished; a <code>temp_subdir_*</code> clone is what an interrupted marketplace update left behind.",
@@ -1804,12 +1821,10 @@ function paceTrack(w) {
     const pos = (ts) => ((ts - w.opened) / span) * 100;
 
     const pct = Math.max(0, Math.min(100, Number(w.pct) || 0));
-    // The same guard the terminal puts on its forecast, applied to the
-    // comparison as well: in the first half hour of a window the plan is 0% and
-    // any spend at all is "over", so a fresh week opens on an alarm about one
-    // percent. Under either threshold the bar states the share and says nothing
-    // about pace, which is all that is honestly known yet.
-    const settled = at - w.opened >= 1800 && pct >= 2;
+    // Whether the window can be judged against its plan at all — pace() decides
+    // it once for every surface (see `settled` there); the fallback covers a
+    // caller that built this object by hand, as the tests do.
+    const settled = w.settled !== undefined ? w.settled : (at - w.opened >= 1800 && pct >= 2);
     const plan = settled && Number.isFinite(w.plan) ? w.plan : null;
     const nowPos = pos(at);
     // The zone between spend and plan is measured to the mark itself, not to the
@@ -2358,6 +2373,12 @@ td.share.wide i { left: 0; right: auto; }
    from landing inside one. */
 .bar-val { opacity: .7; text-align: right; white-space: normal; word-break: keep-all;
   font-variant-numeric: tabular-nums; width: 30%; }
+/* The control a row can carry, in a column wide enough to hold it. This table is
+   laid out fixed, where a declared width is the whole story: content does not
+   widen a cell, it hangs out of it. At the 1% that shrink-to-fit would mean
+   anywhere else, the button stood 33 px outside its own cell and 17 px past the
+   panel — measured, not guessed. */
+.bar-act { width: 62px; text-align: right; white-space: nowrap; padding-left: 10px; }
 .hour-bar { fill: var(--vscode-charts-blue, hsl(200 60% 55%)); }
 table { width: 100%; border-collapse: collapse; }
 /* A path, a JSON setting or a hook command is one long unbreakable token as far
@@ -2838,6 +2859,14 @@ document.addEventListener('click', (e) => {
   if (more) {
     more.closest('.panel-body').classList.add('more-open');
     more.remove();
+    return;
+  }
+  // A directory: shown in the OS file manager rather than opened as a document.
+  const show = e.target.closest('[data-reveal]');
+  if (show && api) {
+    e.preventDefault();
+    e.stopPropagation();
+    api.postMessage({ type: 'reveal', path: show.dataset.reveal });
     return;
   }
   const open = e.target.closest('[data-open]');

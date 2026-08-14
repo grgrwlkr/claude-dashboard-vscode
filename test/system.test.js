@@ -154,6 +154,15 @@ test('disk names the leftovers rather than only the totals', () => tree(({ root,
     assert.equal(d.hogs[0].path, 'jobs/aaa/tmp');
     assert.match(d.hogs[0].note, /wasm experiment/);
     assert.equal(d.hogs[1].bytes, 2000);
+
+    // Every row carries the directory it is about, so the page can offer to open
+    // it. A wildcard row has no single directory of its own and points at the
+    // one holding them all.
+    assert.equal(d.dirs.find((x) => x.name === 'projects').path, `${root}/projects`);
+    assert.equal(d.hogs[0].abs, `${root}/jobs/aaa/tmp`);
+    assert.equal(d.hogs[1].abs, `${root}/plugins/cache`);
+    assert.ok(d.dirs.every((x) => x.path.startsWith(root)), 'nothing points outside ~/.claude');
+    assert.ok(d.hogs.every((x) => x.abs.startsWith(root)));
 }));
 
 test('context budget prices the instruction layer in tokens', () => tree(({ root, write }) => {

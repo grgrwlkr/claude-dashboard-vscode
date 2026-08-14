@@ -437,7 +437,11 @@ function collectSlow(state) {
     d.session = lim && lim.session ? lim.session : null;
     d.scoped = lim ? lim.scoped : [];
     d.pace = d.weekly ? u.pace(d.weekly, d.now) : null;
-    d.bar = d.weekly && d.pace ? u.bar(d.weekly.pct, d.pace.plan) : '';
+    // Before the window has settled the plan is 0% and every cell of spend is a
+    // cell "ahead of schedule": the bar opened a week red over one percent.
+    // Comparing spend against itself draws the fill and nothing else.
+    d.bar = d.weekly && d.pace
+        ? u.bar(d.weekly.pct, d.pace.settled ? d.pace.plan : d.weekly.pct) : '';
     // Every window in this VS Code session records the same reading, and only
     // the first one to see a change writes a row — the rest find it unchanged.
     // The endpoint keeps no history, so if nobody writes it down, the shape of
@@ -1016,6 +1020,24 @@ async function handleMessage(context, msg) {
         vscode.workspace.openTextDocument(vscode.Uri.file(wanted))
             .then((doc) => vscode.window.showTextDocument(doc),
                 (err) => vscode.window.showErrorMessage(`Cannot open ${wanted}: ${err.message}`));
+        return;
+    }
+
+    // A directory from the Disk tab, shown in the OS file manager. Same shape of
+    // guard as `open` above: the page may only name a path this extension itself
+    // measured and put on that page, so a message forged in the webview cannot
+    // reveal an arbitrary directory. Nothing is deleted here — the file manager
+    // is where that decision belongs, and it is the user's.
+    if (msg.type === 'reveal') {
+        const wanted = String(msg.path || '');
+        const disk = (systemCache && systemCache.disk) || { dirs: [], hogs: [] };
+        const known = [
+            ...(disk.dirs || []).map((x) => x.path),
+            ...(disk.hogs || []).map((x) => x.abs),
+        ].filter(Boolean);
+        if (!known.includes(wanted)) return;
+        vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(wanted))
+            .then(undefined, (err) => vscode.window.showErrorMessage(`Cannot show ${wanted}: ${err.message}`));
         return;
     }
 

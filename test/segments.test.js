@@ -22,8 +22,10 @@ const data = {
     weekly: { pct: 33, reset: NOW + 3 * 86400 },
     session: { pct: 12, reset: NOW + 3600 },
     scoped: [{ scope: 'Opus', pct: 84 }, { scope: 'Fable', pct: 20 }],
-    pace: { plan: 40, dry: NOW + 86400, dryAt: NOW + 86400 },
-    bar: '▒▒░░░░',
+    // `settled` is what pace() decides: past the first half hour and 2%, the
+    // window can be compared against its plan at all.
+    pace: { plan: 40, dry: NOW + 86400, dryAt: NOW + 86400, settled: true },
+    bar: '▒▒▒░░░░',
     ctx: { pct: 29, tokens: 294000, window: 1e6, cachePct: 91, model: 'claude-opus-5', effort: 'xhigh', thinking: true, branch: 'master', estimated: false },
     compactPct: 87,
     settings: { advisor: 'claude-fable-5', outputStyle: 'default' },
@@ -40,7 +42,7 @@ test('the default segments draw the limits, the context, the spend and the work'
     // The forecast is formatted in local time, so the expectation is built the
     // same way rather than pinned to the author's timezone. drift rides along
     // with the percentage: 33% spent against 40% elapsed is 7% under plan.
-    assert.equal(limits.text, `✻ 7d 33% -7% ▒▒░░░░ dry ${u.fmtDry(data.pace.dry, NOW * 1000)}`);
+    assert.equal(limits.text, `✻ 7d 33% -7% ▒▒▒░░░░ dry ${u.fmtDry(data.pace.dry, NOW * 1000)}`);
     assert.equal(ctx.text, '▤ 29% 294k/1.0M');
     assert.equal(money.text, '~$114.29 $5.18/h');
     assert.equal(work.text, '⧉ 2 ▸ 3/6');
@@ -49,9 +51,11 @@ test('the default segments draw the limits, the context, the spend and the work'
 test('an optional group disappears whole when its field has nothing to say', () => {
     // No forecast yet: the words "dry" and the date must both go, and the rest
     // of the segment must survive.
-    const early = { ...data, pace: { plan: 3, dry: null, dryAt: null } };
+    // Settled, so the drift is still stated — what is missing here is only the
+    // forecast, which is the group under test.
+    const early = { ...data, pace: { plan: 3, dry: null, dryAt: null, settled: true } };
     const r = seg.renderSegment(seg.DEFAULT_SEGMENTS[0], early, registry);
-    assert.equal(r.text, '✻ 7d 33% +30% ▒▒░░░░');
+    assert.equal(r.text, '✻ 7d 33% +30% ▒▒▒░░░░');
     assert.equal(r.visible, true);
 });
 
@@ -90,10 +94,14 @@ test('scoped takes every per-model window, or one by name', () => {
 });
 
 test('drift says which side of the plan the pace is on', () => {
+    const settled = (over) => ({ ...data, ...over, pace: { ...data.pace, ...over.pace } });
     assert.equal(registry.drift.get(data), '-7%');
-    assert.equal(registry.drift.get({ ...data, weekly: { pct: 55 }, pace: { plan: 40 } }), '+15%');
-    assert.equal(registry.drift.get({ ...data, weekly: { pct: 40 }, pace: { plan: 40 } }), '0%');
+    assert.equal(registry.drift.get(settled({ weekly: { pct: 55 }, pace: { plan: 40 } })), '+15%');
+    assert.equal(registry.drift.get(settled({ weekly: { pct: 40 }, pace: { plan: 40 } })), '0%');
     assert.equal(registry.drift.get({}), '');
+    // A window too young to judge: the plan is 0% and every percent spent would
+    // read as ahead of schedule, so the field says nothing at all.
+    assert.equal(registry.drift.get({ ...data, weekly: { pct: 1 }, pace: { plan: 0, settled: false } }), '');
 });
 
 // The bar said "thinking" only when the last reply happened to carry a thinking

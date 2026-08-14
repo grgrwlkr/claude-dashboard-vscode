@@ -44,7 +44,10 @@ function fields(helpers = {}) {
             topic: 'limits',
             doc: 'distance from an even pace (+ is ahead of plan, − is behind it)',
             get: (d) => {
-                if (!d.weekly || !d.pace) return '';
+                // Silent until the window can be judged at all: `pace.settled`
+                // is the same half hour and 2% that gate the forecast, and
+                // without it a fresh week reads `+1%` against a plan of zero.
+                if (!d.weekly || !d.pace || !d.pace.settled) return '';
                 const diff = d.weekly.pct - d.pace.plan;
                 return diff === 0 ? '0%' : `${diff > 0 ? '+' : ''}${diff}%`;
             },
