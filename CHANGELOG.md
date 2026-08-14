@@ -9,7 +9,11 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
-## [0.25.0] — 2026-08-14
+## [0.26.0] — 2026-08-14
+
+Everything below, in the stable channel. It went out an hour earlier as
+`0.25.0`, whose odd minor put it in pre-release by mistake — same code, same
+package, one number apart.
 
 ### Added
 
@@ -108,6 +112,12 @@ grew out of, and a version that shipped nothing is worth saying so.
   … for the segments. They read as `Claude Code` and `Claude 4` before, sitting
   in one list with Claude Code's own entry, where neither said whose they were.
   VS Code remembers a hidden item by id, so nothing you had hidden comes back.
+
+## [0.25.0] — 2026-08-14
+
+Published to the pre-release channel by mistake and superseded an hour later by
+0.26.0, which carries exactly the same code. Listed here because it exists on
+both storefronts: anyone running it is running 0.26.0 under an older number.
 
 ## [0.24.0] — 2026-08-13
 
