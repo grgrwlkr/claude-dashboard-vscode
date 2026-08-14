@@ -31,6 +31,7 @@ const wf = require('../workflows');
 const db = require('../dashboard');
 const u = require('../usage');
 const s = require('../session');
+const sys = require('../system');
 
 function activate({ segments, workspace = '', settings = {} } = {}) {
     vscode.__reset();
@@ -803,10 +804,28 @@ test('asking for the defaults returns the built-in bar, not the current one', as
 // behind it, so the extension opens nothing it did not itself measure and put on
 // that page.
 test('the disk tab reveals only the directories it measured', async () => {
+    // The disk figures are pinned rather than read from this machine: a runner
+    // that has never run Claude Code has no ~/.claude, so the tab renders empty
+    // and a test written against the real tree passes here and fails there —
+    // which is exactly how it failed in CI the first time.
+    const realSnapshot = sys.snapshot;
+    sys.snapshot = (args) => ({
+        ...realSnapshot(args),
+        disk: {
+            total: 1400,
+            dirs: [{ name: 'projects', bytes: 900, kind: 'keep', path: '/fake/claude/projects' }],
+            hogs: [{ path: 'jobs/x/tmp', abs: '/fake/claude/jobs/x/tmp', bytes: 500, note: 'scratch of "x"' }],
+        },
+    });
     const run = activate({ segments: ['{weekly}'] });
     let panel;
     try {
-        panel = await openDashboard();
+        // Reindex rather than the plain open: the snapshot is cached for an hour
+        // in a module variable that earlier tests have already filled, and only
+        // a forced rebuild reads the pinned figures above.
+        await vscode.__commands.get('claudeStatusline.reindex')();
+        panel = vscode.__panels[vscode.__panels.length - 1];
+        assert.ok(panel && panel.__receive, 'the dashboard must register a message listener');
         const shown = () => vscode.__executed.filter((e) => e.id === 'revealFileInOS');
 
         // Any path at all, including one that exists: not on the page, not opened.
@@ -820,11 +839,16 @@ test('the disk tab reveals only the directories it measured', async () => {
         // shows are the same list, and a test that rebuilt the list itself would
         // pass while the two drifted apart.
         const offered = [...panel.webview.html.matchAll(/data-reveal="([^"]+)"/g)].map((m) => m[1]);
-        assert.ok(offered.length > 0, 'the disk tab offers at least one directory to open');
+        assert.deepEqual(offered, ['/fake/claude/projects', '/fake/claude/jobs/x/tmp'],
+            'both tables offer their directory');
         await panel.__receive({ type: 'reveal', path: offered[0] });
         assert.equal(shown().length, 1);
         assert.equal(shown()[0].args[0].fsPath, offered[0]);
-    } finally { if (panel) panel.dispose(); run.dispose(); }
+    } finally {
+        sys.snapshot = realSnapshot;
+        if (panel) panel.dispose();
+        run.dispose();
+    }
 });
 
 // The tooltip and the Now tab are two renderings of one list of sections. The
