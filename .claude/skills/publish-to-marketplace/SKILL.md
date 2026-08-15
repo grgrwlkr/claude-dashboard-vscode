@@ -88,8 +88,29 @@ for i in 1 2 3; do
 done
 ```
 
-Verification took 7 minutes on 0.24.0 and 10 on 0.25.0 — the page shows
-`Verifying…` in the version column meanwhile, which is the honest status.
+Verification took 7 minutes on 0.24.0, 10 on 0.25.0 and 11 on 0.26.0 — the page
+shows `Verifying…` in the version column meanwhile, which is the honest status.
+
+To read the **channel** back off the gallery, ask for version properties or the
+answer is a lie of omission: `flags:103` omits `IncludeVersionProperties` (16),
+so every version comes back with no `Microsoft.VisualStudio.Code.PreRelease`
+key — which reads exactly like "published as stable". Use `flags:119`, and only
+then is an absent key the stable answer:
+
+```bash
+curl -s -H 'Content-Type: application/json' \
+  -H 'Accept: application/json;api-version=7.2-preview.1' \
+  -d '{"filters":[{"criteria":[{"filterType":7,"value":"grgrwlkr.claude-dashboard"}]}],"flags":119}' \
+  https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery \
+  | python3 -c 'import sys,json
+vs = json.load(sys.stdin)["results"][0]["extensions"][0]["versions"]
+for v in vs[:3]:
+    p = {x["key"]: x["value"] for x in v.get("properties", [])}
+    print(v["version"], p.get("Microsoft.VisualStudio.Code.PreRelease", "(absent -> stable)"), len(p), "props")'
+```
+
+18 properties on a stable version, 19 on a pre-release one — a count near zero
+means the flags were wrong, not that the package was.
 
 The version badge in the README comes from badgen with `max-age=3600`, so it
 lags publication by up to an hour — never use it as the check.
