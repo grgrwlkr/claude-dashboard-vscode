@@ -88,8 +88,10 @@ for i in 1 2 3; do
 done
 ```
 
-Verification took 7 minutes on 0.24.0, 10 on 0.25.0 and 11 on 0.26.0 — the page
-shows `Verifying…` in the version column meanwhile, which is the honest status.
+Verification took 7 minutes on 0.24.0, 10 on 0.25.0, 11 on 0.26.0 and 6 on
+0.28.0 — the page shows `Verifying…` in the version column meanwhile, which is
+the honest status. It does not lengthen with the version: budget ten minutes and
+poll, rather than reading the last number as a trend.
 
 To read the **channel** back off the gallery, ask for version properties or the
 answer is a lie of omission: `flags:103` omits `IncludeVersionProperties` (16),
