@@ -9,7 +9,7 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
-## [Unreleased]
+## [0.28.0] — 2026-08-16
 
 ### Fixed
 
