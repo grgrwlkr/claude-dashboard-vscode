@@ -107,6 +107,39 @@ test('barList sorts by the caller and caps the list', () => {
     assert.ok(!html.includes('>c<'));
 });
 
+// A model the price table has never heard of is billed at the FALLBACK rate,
+// which is the Opus rate — so the figure is a guess, and it carries the tilde
+// every other estimate on this page carries. `<synthetic>` is not a model at
+// all: it is what Claude Code writes in place of a reply that never arrived —
+// a limit, a dropped connection, a 403 — so it is not a row among models.
+test('a model with no published rate is a guess, and the refusal log is not a model', () => {
+    const total = ix.summarize(demoIndex());
+    total.models = {
+        'claude-opus-5': bucket(128.4, 10, { in: 1000 }),
+        'claude-newthing-9': bucket(3.02, 5, { in: 500 }),
+        '<synthetic>': bucket(0, 135),
+    };
+    const order = Object.keys(total.models);
+    db.assignModelColors(order);
+    const html = db.overviewTab(total, {}, order);
+
+    assert.match(html, /~\$3\.02/);
+    assert.doesNotMatch(html, /~\$128\.40/);
+    assert.match(html, /no published rate/);
+    assert.doesNotMatch(html, /synthetic/);
+});
+
+// The Models tab draws its own breakdown — model against effort tier — from a
+// different aggregate, so hiding the refusal log on Overview alone left it a
+// row here. One rule, both tables.
+test('the refusal log is not a row in the effort matrix either', () => {
+    const m = db.effortMatrix({
+        [ix.effortKey('claude-opus-5', 'xhigh')]: bucket(10),
+        [ix.effortKey('<synthetic>', '')]: bucket(0, 135),
+    });
+    assert.deepEqual(m.models, ['claude-opus-5']);
+});
+
 // The week bar. Positions on it are timestamps rather than fractions: the rail
 // is the window, so everything on it — the fill, the marks, the day cells — is
 // placed from the same two dates.
@@ -491,6 +524,65 @@ test('health marks a plugin idle when nothing of it ever ran', () => {
     assert.match(row('ghost'), /class="idle"/);
 });
 
+// A day of one long session and a day of nine parallel ones can carry the same
+// spend. The sessions tab showed the spend and never the difference.
+test('the sessions tab says how wide the busiest moment was', () => {
+    const h = (n) => Date.parse('2026-08-08T00:00:00Z') + n * 3600e3;
+    const total = ix.summarize(demoIndex());
+    total.sessions = [
+        { ...total.sessions[0], id: 's1', kind: 'main', start: h(10), end: h(12), activeMs: 3600e3 },
+        { ...total.sessions[0], id: 's2', kind: 'main', start: h(11), end: h(13), activeMs: 1800e3 },
+        // A fan-out is not the person running three windows: agents are counted
+        // on the Agents tab and must not inflate this one.
+        { ...total.sessions[0], id: 'a1', kind: 'agent', start: h(10), end: h(13), activeMs: 900e3 },
+    ];
+    const html = db.render({ files: {} }, total, { files: 0 });
+
+    // The value of the tile itself, not "a 2 somewhere on the page": with the
+    // agent counted this reads 3, which is the mistake the tile is guarding.
+    assert.match(html, /Peak parallel sessions<\/span><span class="tile-value">2</);
+    assert.match(html, /tile-value">1h30m</); // the work, not the three hours it spanned
+});
+
+// The cache tab could say how much was read and how much written, and nothing
+// about the replies that read nothing at all — which is where the full-rate
+// money goes, and the one place it can be traced to a session.
+test('the cache tab names the replies the cache could not answer', () => {
+    const total = ix.summarize(demoIndex());
+    total.breaks = {
+        count: 3,
+        tokens: 900000,
+        top: [{ at: Date.parse('2026-08-08T14:00:00Z'), uncached: 500000, session: 'sess-a', project: 'repo-x', kind: 'main' }],
+    };
+    const html = db.render({ files: {} }, total, { files: 0 });
+    assert.match(html, /repo-x/);
+    assert.match(html, /500k|500,000/);
+});
+
+test('the cache tab stays quiet when no reply ever broke the cache', () => {
+    const total = ix.summarize(demoIndex());
+    total.breaks = ix.emptyBreaks();
+    assert.doesNotMatch(db.render({ files: {} }, total, { files: 0 }), /could not answer/i);
+});
+
+// An agent used to be unmatchable here: its type is named in the arguments of
+// the call that spawned it, and the index only ever read results. The meta file
+// beside each subagent transcript names it, so an agent now answers the same
+// question a skill does — did this component ever run, and what did it cost.
+test('a plugin agent is matched by the type its dispatches carried', () => {
+    const total = ix.summarize(demoIndex());
+    total.agents = { 'guard:scan-researcher': bucket(7, 4) };
+    const sys = demoSystem({
+        plugins: [{ name: 'guard', marketplace: 'official', enabled: true, version: '1.0.0', copies: 1,
+            components: { skills: [], agents: ['scan-researcher'], commands: [], hooks: 0, mcp: [] } }],
+    });
+
+    const html = db.healthTab(total, sys);
+    const row = html.slice(html.indexOf('>scan-researcher<')).slice(0, 600);
+    assert.doesNotMatch(row, /not visible/);
+    assert.match(row, /\$7/);
+});
+
 test('the Setup panels degrade to a message when there is no snapshot', () => {
     const total = ix.summarize(demoIndex());
     for (const tab of [db.healthTab(total, null), db.jobsTab(null), db.diskTab(null), db.tasksTab(null)]) {
@@ -655,6 +747,36 @@ test('workflow text from another program is escaped', () => {
 test('the tab still renders with no workflow data at all', () => {
     const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0 });
     assert.match(html, /data-tab="agents"/);
+});
+
+// Which kind of agent the money went to. Until the meta file beside each
+// subagent transcript was read, this page could say what subagents cost in total
+// and nothing about which of them — the Health tab said so in as many words.
+test('the agents tab ranks subagent types by spend', () => {
+    const total = ix.summarize(demoIndex());
+    total.agents = {
+        'general-purpose': bucket(90, 12, { out: 900 }),
+        'worker-researcher': bucket(10, 3, { out: 100 }),
+    };
+    const html = db.agentsTab(total, []);
+    assert.match(html, /general-purpose/);
+    assert.match(html, /worker-researcher/);
+});
+
+// `plural` defaults the plural to the word plus an `s`, which is wrong for
+// exactly the noun this page counts most often. It reached a listing screenshot.
+test('a count of replies is spelled the English way', () => {
+    const total = ix.summarize(demoIndex());
+    total.agents = { 'general-purpose': bucket(5, 2843) };
+    const html = db.agentsTab(total, []);
+    assert.match(html, /2843 replies/);
+    assert.doesNotMatch(html, /replys/);
+});
+
+test('the agents tab drops the type panel when nothing carries a type', () => {
+    const total = ix.summarize(demoIndex());
+    total.agents = {};
+    assert.doesNotMatch(db.agentsTab(total, []), /agent type/i);
 });
 
 // A list of 13 rows under a heading of 74 says the run finished everything it

@@ -232,8 +232,8 @@ cannot fall behind the hover.
 
 | Tab | What it answers |
 | --- | --- |
-| Overview | spend all-time / 30d / 7d / today, daily stacked chart by model, a calendar heatmap, model breakdown, hour-of-day profile |
-| Sessions | every transcript as a row: its own title, project, kind, entrypoint, models and effort, duration, requests, tokens, spend |
+| Overview | spend all-time / 30d / 7d / today, daily stacked chart by model, a calendar heatmap, model breakdown — a model whose rate is not published carries a tilde and says so on hover — hour-of-day profile |
+| Sessions | every transcript as a row: its own title, project, kind, entrypoint, models and effort, duration, how much of that duration was actually work, requests, tokens, spend — and above the table, the most sessions that ever ran at once |
 | Projects | which repository the money went to |
 | Branches | spend per git branch, accumulated across sessions |
 
@@ -244,7 +244,7 @@ cannot fall behind the hover.
 
 | Tab | What it answers |
 | --- | --- |
-| Agents & workflows | main vs subagent vs workflow spend, what one agent costs (median, p90, max output tokens), agents per workflow run, and every run on the machine — its name, how it ended, its phases and its spend, with the prompt and the answer of each of its agents one click away |
+| Agents & workflows | main vs subagent vs workflow spend, spend by the agent type a dispatch asked for, what one agent costs (median, p90, max output tokens), agents per workflow run, and every run on the machine — its name, how it ended, its phases and its spend, with the prompt and the answer of each of its agents one click away |
 | Tools & MCP | which tools were called and how often, which of them fail, which MCP servers earn their place in the config, how many advisor consultations there were |
 | Files | every file an edit or write touched, by edit count and by lines changed |
 | Skills | which skill was driving when the tokens burned, from the transcript's own `attributionSkill` |
@@ -258,7 +258,7 @@ cannot fall behind the hover.
 | Tab | What it answers |
 | --- | --- |
 | Models & effort | spend as a model × effort matrix, which client the requests came from (`cli`, `claude-vscode`, `sdk-py`), output per request per tier |
-| Cache | share served from cache, what the reads saved, reads per token written, the 1h/5m TTL split |
+| Cache | share served from cache, what the reads saved, reads per token written, the 1h/5m TTL split, and the replies the cache could not answer — calls that sent more than 100k of input at the full rate, largest first |
 | Friction | failed tool calls, denials, compactions and the context they dropped, sessions with the most failures |
 | Limits | the weekly window over time, one line per week, overlaid against the even-spend diagonal |
 

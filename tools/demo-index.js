@@ -34,6 +34,7 @@ const BRANCHES = ['main', 'feat/checkout-v2', 'fix/rate-limiter', 'chore/deps'];
 const MODELS = ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'];
 const EFFORTS = ['xhigh', 'high', 'medium', 'low'];
 const SKILLS = ['test-driven-development', 'systematic-debugging', 'writing-plans', 'code-review'];
+const AGENT_TYPES = ['general-purpose', 'workflow-subagent', 'Explore', 'code-reviewer'];
 const TITLES = [
     'Rate limiter drops bursts under load', 'Checkout flow: split the payment step',
     'Migrate the orders table to UUID keys', 'Why is the p99 on /search 400 ms',
@@ -104,7 +105,23 @@ function projectAgg(project, seed, now) {
         mergeInto(agg.entrypoints, r() < 0.55 ? 'cli' : r() < 0.9 ? 'claude-vscode' : 'sdk-py');
         mergeInto(agg.speeds, r() < 0.85 ? 'standard' : 'fast');
         if (r() < 0.5) mergeInto(agg.skills, SKILLS[Math.floor(r() * SKILLS.length)]);
+        // Most agent spend is the general one, the way it is on a real machine;
+        // the named ones exist so the list has something to rank.
+        if (r() < 0.3) mergeInto(agg.agents, r() < 0.6 ? AGENT_TYPES[0] : AGENT_TYPES[Math.floor(r() * AGENT_TYPES.length)]);
     }
+
+    // A handful of replies the cache could not answer, one of them large enough
+    // to be worth the row it takes.
+    agg.breaks = { count: 2 + Math.round(r() * 6), tokens: 0, top: [] };
+    for (let i = 0; i < 3; i++) {
+        const uncached = 120000 + Math.round(r() * 700000);
+        agg.breaks.tokens += uncached;
+        agg.breaks.top.push({
+            at: now - Math.round(r() * 20) * day, uncached, session: `${project}-main-${i}`,
+            project, kind: i === 2 ? 'agent' : 'main',
+        });
+    }
+    agg.breaks.top.sort((a, b) => b.uncached - a.uncached);
 
     for (const [name, base] of [['Bash', 220], ['Read', 610], ['Edit', 180], ['Grep', 140],
         ['Task', 40], ['Glob', 95], ['mcp__github__list_issues', 22], ['mcp__context7__query-docs', 17]]) {
@@ -153,7 +170,8 @@ function projectAgg(project, seed, now) {
             id: `${project}-${kind}-${id++}`, kind, project, slug: project,
             title: TITLES[Math.floor(r() * TITLES.length)],
             entrypoint: kind === 'main' ? 'cli' : 'agent',
-            start, end: start + dur, msgs: 6 + Math.round(r() * 120),
+            start, end: start + dur, activeMs: Math.round(dur * (0.2 + r() * 0.5)),
+            msgs: 6 + Math.round(r() * 120),
             cost, tokens, out, cacheRead: Math.round(tokens * 0.78), cacheWrite: Math.round(tokens * 0.11),
             tools: Math.round(r() * 90), errors: Math.round(r() * 6),
             models: [r() < 0.7 ? MODELS[0] : MODELS[1]], efforts: [EFFORTS[Math.floor(r() * 3)]],

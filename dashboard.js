@@ -69,6 +69,16 @@ function fmtDateTime(ms) {
 }
 
 // Short model label: "claude-opus-5" → "opus 5". Full ids are noise in a table.
+// In place of a reply that never arrived — a spent limit, a dropped connection,
+// a 403 — Claude Code writes a record of its own and marks it with this id. Its
+// usage is all zeroes, so it costs nothing and buys nothing: a refusal log, not
+// a model, and therefore not a row in any breakdown of models.
+const SYNTHETIC_MODEL = '<synthetic>';
+
+function modelRows(models) {
+    return Object.entries(models).filter(([m]) => m !== SYNTHETIC_MODEL);
+}
+
 function shortModel(model) {
     return (model || 'unknown')
         .replace(/^claude-/, '')
@@ -299,7 +309,9 @@ function barList(entries, {
             + `<td class="bar-cell"><span class="bar-track">`
             + `<span class="bar-fill" style="width:${w.toFixed(1)}%${fill ? `;${fill}` : ''}"></span>`
             + `</span></td>`
-            + `<td class="bar-val">${esc(label(v, b))}</td>`
+            // The key travels to `label` too: a figure is sometimes an estimate
+            // because of what the row *is*, not because of what it adds up to.
+            + `<td class="bar-val">${esc(label(v, b, key))}</td>`
             + (after ? `<td class="bar-act">${after(b, key)}</td>` : '')
             + '</tr>';
     }).join('')}</table>`;
@@ -583,17 +595,27 @@ function statCards(total, cfg = {}) {
 }
 
 function overviewTab(total, dayModels, modelOrder, cfg = {}) {
-    const legend = `<div class="legend">${modelOrder.slice(0, 7).map((m, i) =>
+    // Filtered here rather than only at the caller: the refusal log is not a
+    // model on any of these three panels, whoever assembled the order.
+    const order = modelOrder.filter((m) => m !== SYNTHETIC_MODEL);
+    const legend = `<div class="legend">${order.slice(0, 7).map((m, i) =>
         `<span class="chip"><i style="background:${modelColor(m, i)}"></i>${esc(shortModel(m))}</span>`).join('')}</div>`;
     return `<section class="tab" data-tab="overview" hidden>
         ${statCards(total, cfg)}
-        ${panel('Daily spend by model', stackedDays(total.days, modelOrder, dayModels) + legend)}
+        ${panel('Daily spend by model', stackedDays(total.days, order, dayModels) + legend)}
         ${panel('Calendar', heatmap(total.days), {
         note: 'One cell per day, darker for a heavier day. Weeks run down, so the same weekday sits on one row.',
     })}
         ${panel('Models', barList(
-        Object.entries(total.models).sort((a, b) => b[1].cost - a[1].cost),
-        { byModel: true, label: (v, b) => `${fmtCost(v)} · ${tok(b.in + b.cacheRead + b.cacheWrite + b.out)}` },
+        modelRows(total.models).sort((a, b) => b[1].cost - a[1].cost),
+        {
+            byModel: true,
+            // A model with no entry in `RATES` is billed at the FALLBACK rate,
+            // which *is* the Opus rate — the number is a guess, and it says so
+            // with the tilde every other estimate on this page carries.
+            label: (v, b, m) => `${ratesFor(m).known ? '' : '~'}${fmtCost(v)} · ${tok(b.in + b.cacheRead + b.cacheWrite + b.out)}`,
+            titleOf: (b, m) => (ratesFor(m).known ? m : `${m} — no published rate, priced at Opus rates`),
+        },
     ))}
         ${panel('Hour of day', hourChart(total.hours, { width: 900, height: 180 }), {
         note: 'Every request ever made, by the hour it was made in. Full width because twenty-four columns in half a panel are a texture rather than a chart.',
@@ -623,19 +645,48 @@ function sessionsTab(total) {
         <td class="nowrap opt3">${esc(s.models.map(shortModel).join(', ') || '—')}</td>
         <td class="nowrap dim opt">${s.efforts && s.efforts.length ? esc(s.efforts.join(' / ')) : '—'}</td>
         <td class="num opt2">${esc(fmtDur(s.end - s.start))}</td>
+        <td class="num opt3">${esc(fmtDur(s.activeMs))}</td>
         <td class="num">${s.msgs}</td>
         <td class="num opt2">${esc(tok(s.tokens))}</td>
         ${shareCell(fmtCost(s.cost), dearest > 0 ? s.cost / dearest : 0)}</tr>`).join('');
     const table = `<table><thead><tr><th>Last activity</th><th>Project</th><th>Session</th><th class="opt3">Kind</th><th class="opt">Client</th>
         <th class="opt3">Models</th><th class="opt">Effort</th>
-        <th class="num opt2">Duration</th><th class="num">Requests</th><th class="num opt2">Tokens</th><th class="num">Spend</th></tr></thead>
+        <th class="num opt2">Open</th><th class="num opt3">Working</th><th class="num">Requests</th><th class="num opt2">Tokens</th><th class="num">Spend</th></tr></thead>
         <tbody>${rows}</tbody></table>`;
+
+    // A day's spend says how much was done and nothing about the shape of it:
+    // one session for nine hours and nine for one are the same figure.
+    //
+    // Main transcripts only. Counting every transcript answers a different
+    // question — one fan-out of a hundred agents reads as a hundred parallel
+    // sessions, which is true of the machine and false of the person driving it.
+    // The width of a fan-out is already the Agents tab's subject.
+    const own = total.sessions.filter((s) => s.kind === 'main');
+    const days = ix.peakParallel(own);
+    const widest = Object.entries(days).sort((a, b) => b[1].peak - a[1].peak
+        || b[0].localeCompare(a[0]))[0];
+    const open = own.reduce((a, s) => a + Math.max(0, s.end - s.start), 0);
+    const working = own.reduce((a, s) => a + (s.activeMs || 0), 0);
+
     return `<section class="tab" data-tab="sessions" hidden>
+        ${tiles(
+        widest ? tile('Peak parallel sessions', String(widest[1].peak),
+            `${fmtDay(widest[0])} · ${clock(widest[1].at)} · ${plural(widest[1].sessions, 'session')} that day, agents aside`) : '',
+        working ? tile('Time actually working', fmtDur(working),
+            `of ${fmtDur(open)} with a session open · ${pct(working, open)}`,
+            open > 0 ? Math.round((working / open) * 100) : null, 'cool') : '',
+    )}
         ${panel('Every transcript', table, {
         flush: true,
-        note: `Newest first, capped at 300 rows of ${total.sessions.length}. A row is one transcript: a main session, a subagent, or one agent of a workflow. The name is the session's own title where it has one, and the rule under a spend is that row against the dearest one shown.`,
+        note: `Newest first, capped at 300 rows of ${total.sessions.length}. A row is one transcript: a main session, a subagent, or one agent of a workflow. <em>Open</em> is first record to last; <em>working</em> drops the gaps longer than five minutes, which is a session left sitting rather than one thinking. The name is the session's own title where it has one, and the rule under a spend is that row against the dearest one shown.`,
     })}
     </section>`;
+}
+
+// Minutes past midnight as a clock face, for a peak that happened at one.
+function clock(ms) {
+    const m = Math.round(ms / 60000);
+    return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
 function breakdownTab(name, title, entries, note) {
@@ -785,6 +836,13 @@ function agentsTab(total, runs = []) {
     const perRun = quantiles(Object.values(perWorkflow));
     const table = runRows(runs);
 
+    // Which kind of agent the fan-out money went to. The type is not in the
+    // transcript — it is in the meta file the client writes beside it — so an
+    // agent old enough to predate that file has spend here and no type, and is
+    // absent from this list rather than lumped into a bucket it never chose.
+    const byType = Object.entries(total.agents || {}).sort((a, b) => b[1].cost - a[1].cost);
+    const typed = byType.reduce((a, [, b]) => a + b.cost, 0);
+
     const spreadTable = `<table class="matrix"><thead><tr><th></th><th class="num">agents</th><th class="num">median</th>
           <th class="num">p90</th><th class="num">max</th></tr></thead><tbody>
           ${spread.map(([label, q]) => `<tr><th scope="row">${esc(label)}</th><td class="num">${q.n}</td>
@@ -808,6 +866,11 @@ function agentsTab(total, runs = []) {
     )}
         ${spread.length ? panel('Output tokens one agent writes', spreadTable, {
         note: 'Subagents and workflows write their own transcripts, so this spend is invisible in the terminal statusline — it belongs to no single session there.',
+    }) : ''}
+        ${byType.length ? panel('Spend by agent type', barList(byType, {
+        label: (v, b) => `${fmtCost(v)} · ${plural(b.msgs, 'reply', 'replies')}`,
+    }), {
+        note: `The type each dispatch asked for, read from the meta file beside every subagent transcript. ${pct(typed, sum(agents) + sum(wf))} of subagent and workflow spend is typed this way; the rest is older than the meta file and has no type to be ranked under.`,
     }) : ''}
         ${panel('Workflow runs', runs.length ? runsTable : '<p class="empty">No workflow runs recorded.</p>', {
         flush: runs.length > 0,
@@ -880,6 +943,7 @@ function effortMatrix(efforts) {
     const cells = new Map();
     for (const [key, b] of Object.entries(efforts)) {
         const { model, effort } = ix.splitEffort(key);
+        if (model === SYNTHETIC_MODEL) continue;
         const tier = effort || NO_EFFORT;
         if (!models.includes(model)) models.push(model);
         if (!tiers.includes(tier)) tiers.push(tier);
@@ -1047,7 +1111,32 @@ function cacheTab(total) {
         note: 'The same days on their own scale — reads run an order of magnitude above everything above, which is the point of them.',
     })}
         ${panel('Cache hit rate by model', barList(byModel, { limit: 10, byModel: true, scaleMax: 100, value: (b) => b.hit * 100, label: (v, b) => `${v.toFixed(0)}% · ${tok(b.cacheRead)} read` }))}
+        ${breaksPanel(total.breaks)}
     </section>`;
+}
+
+/**
+ * The replies the cache could not answer — input that had to be sent fresh and
+ * billed at the full rate. Every session opens with one, so a count alone would
+ * only measure how many sessions there were; the list is what carries the
+ * signal, because a big break in the middle of a run is a cache that was
+ * rebuilt rather than reused.
+ */
+function breaksPanel(breaks) {
+    if (!breaks || !breaks.count) return '';
+    const rows = (breaks.top || []).map((b) => `<tr>
+        <td>${b.at ? esc(fmtDateTime(b.at)) : '<span class="dim">—</span>'}</td>
+        <td class="wrap">${esc(b.project || '')}</td>
+        <td class="dim opt">${esc(sessionLabel({ id: b.session }))}</td>
+        <td class="opt2"><span class="kind">${esc(b.kind || 'main')}</span></td>
+        <td class="num">${esc(tok(b.uncached))}</td></tr>`).join('');
+
+    return panel('Replies the cache could not answer', `<table><thead><tr><th>When</th><th>Project</th>
+        <th class="opt">Session</th><th class="opt2">Kind</th><th class="num">Uncached input</th></tr></thead>
+        <tbody>${rows}</tbody></table>`, {
+        flush: true,
+        note: `${plural(breaks.count, 'reply', 'replies')} sent more than ${tok(ix.CACHE_BREAK_TOKENS)} of input at the full rate, ${tok(breaks.tokens)} in total; the ${(breaks.top || []).length} largest are listed. The first reply of any session is one of these and cannot be avoided — what is worth reading here is a large one partway through a run, or several in the same session within minutes.`,
+    });
 }
 
 function frictionTab(total) {
@@ -1170,17 +1259,19 @@ const ago = (ms) => {
  *
  * A component is matched by the two names the client attributes with:
  * `plugin:name` for a skill of a plugin, and the bare name for one that reached
- * the index without its plugin. An agent is a third case and rarely visible at
- * all — its type is named in a tool call's arguments, not its result — so an
- * agent that never matched is reported as unknown rather than as unused.
+ * the index without its plugin. An agent is looked up in its own tally: what a
+ * dispatch asked for is recorded in the meta file beside the transcript it
+ * wrote, under the same two names — so an agent old enough to predate that file
+ * is still unknown here rather than unused, and a newer one answers plainly.
  */
-function componentRows(plugins, skills) {
+function componentRows(plugins, skills, agents = {}) {
     const rows = [];
     for (const p of plugins) {
         const c = p.components || {};
         const of = (kind, name) => {
+            const from = kind === 'agent' ? agents : skills;
             const key = `${p.name}:${name}`.toLowerCase();
-            const hit = skills[key] || skills[name.toLowerCase()] || null;
+            const hit = from[key] || from[name.toLowerCase()] || null;
             return { plugin: p.name, kind, name, enabled: p.enabled, hit };
         };
         for (const name of c.skills || []) rows.push(of('skill', name));
@@ -1314,7 +1405,7 @@ function healthTab(total, sys, cfg = {}) {
             <td class="dim opt">${esc(p.from)}</td></tr>`).join('')}
         </tbody></table>`;
 
-    const componentRows_ = componentRows(sys.plugins || [], total.skills || {});
+    const componentRows_ = componentRows(sys.plugins || [], total.skills || {}, total.agents || {});
     const ranCount = componentRows_.filter((r) => r.hit).length;
     const componentTable = `<table><thead><tr><th>Component</th><th class="opt2">Plugin</th><th>Kind</th>
         <th class="num opt">Requests</th><th class="num">Spend</th><th class="opt">Last used</th></tr></thead><tbody>
@@ -1326,7 +1417,7 @@ function healthTab(total, sys, cfg = {}) {
         <td class="num">${r.hit ? esc(fmtCost(r.hit.cost)) : '·'}</td>
         <td class="opt">${r.hit
         ? (r.hit.last ? esc(fmtDateTime(r.hit.last)) : '<span class="dim">—</span>')
-        : (r.kind === 'agent' ? '<span class="dim">not visible</span>' : '<span class="idle">never</span>')}</td>
+        : '<span class="idle">never</span>'}</td>
       </tr>`).join('')}
     </tbody></table>`;
 
@@ -1409,7 +1500,7 @@ function healthTab(total, sys, cfg = {}) {
         </div>
         ${panel('Plugins', pluginTable, {
         flush: true,
-        note: 'What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, commands or MCP tools appears anywhere in the indexed transcripts. Two things it cannot see: an agent, whose type is named in a tool call\'s arguments rather than its result, and a hook, which leaves no record at all — so a plugin that ships only those reads as idle whether or not it fired.',
+        note: 'What is configured on this machine, and which of it has actually run. "Idle" means none of its skills, agents, commands or MCP tools appears anywhere in the indexed transcripts. One thing it still cannot see is a hook, which leaves no record at all — so a plugin that ships only hooks reads as idle whether or not it fired.',
     })}
         ${panel('Versions', toggle('checkPluginUpdates', 'Check the marketplaces for newer versions',
         checks, 'One request per marketplace, at most hourly. Off means nothing is asked of the network.')
@@ -1419,7 +1510,7 @@ function healthTab(total, sys, cfg = {}) {
     })}
         ${panel('What each plugin actually brings', componentTable, {
         flush: true,
-        note: `Every skill, command and agent the installed plugins carry, against what ran. The plugin table above says whether <em>any</em> of a plugin fired; this says which part — ${ranCount} of ${componentRows_.length} components have ever appeared in a transcript. An agent is named in a tool call's arguments rather than its result, so one that never matched is unknown here rather than unused.`,
+        note: `Every skill, command and agent the installed plugins carry, against what ran. The plugin table above says whether <em>any</em> of a plugin fired; this says which part — ${ranCount} of ${componentRows_.length} components have ever appeared in a transcript. A skill is matched by what the client attributed the reply to, an agent by the type its dispatch recorded beside the transcript it wrote.`,
     })}
         ${(sys.permissions || []).length ? panel('Permission rules', permTable, {
         flush: true,
@@ -3289,7 +3380,7 @@ function navHtml() {
 }
 
 function render(index, total, meta) {
-    const modelOrder = Object.entries(total.models)
+    const modelOrder = modelRows(total.models)
         .sort((a, b) => b[1].cost - a[1].cost).map(([m]) => m);
     // Every panel on the page draws a model in this colour from here on, however
     // its own rows happen to be sorted.
@@ -3340,7 +3431,7 @@ module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
-    agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab,
+    overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab,
     limitsTab, weekLabel, nowTab, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     // The places a session can be opened in — the cards on the Settings tab and,

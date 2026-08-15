@@ -82,6 +82,277 @@ test('indexFile ignores a transcript with no usage records', () => tree(({ write
     assert.equal(ix.indexFile(file), null);
 }));
 
+// One API response arrives as several records — one per content block — and in
+// this shape each of them repeats the whole `usage` of the response. Counting
+// them as written charges the same reply once per block: measured over this
+// machine's transcripts, output read 100.1M where it is 47.1M.
+function blockRec(requestId, block, over = {}) {
+    return JSON.stringify({
+        timestamp: new Date(T0).toISOString(),
+        gitBranch: 'main',
+        requestId,
+        type: 'assistant',
+        message: {
+            model: 'claude-opus-5',
+            content: [block],
+            usage: { input_tokens: 10, output_tokens: 1e6, cache_read_input_tokens: 400, cache_creation_input_tokens: 200 },
+        },
+        ...over,
+    });
+}
+
+test('indexFile charges one API response once, however many blocks it arrived in', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [
+        blockRec('req-1', { type: 'thinking' }),
+        blockRec('req-1', { type: 'text', text: 'hi' }),
+        blockRec('req-1', { type: 'tool_use', id: 'tu-1', name: 'Bash' }),
+        blockRec('req-2', { type: 'text', text: 'next reply' }),
+    ]);
+    const agg = ix.indexFile(file);
+
+    assert.equal(agg.sessions[0].msgs, 2); // two responses, not four records
+    assert.equal(agg.sessions[0].cost, 50.003); // two requests of 1M output on Opus 5, plus their input
+    assert.equal(agg.sessions[0].out, 2e6);
+    assert.equal(agg.sessions[0].cacheRead, 800);
+    assert.equal(agg.sessions[0].cacheWrite, 400);
+    assert.equal(agg.models['claude-opus-5'].msgs, 2);
+    assert.equal(agg.days[ix.dayKey(T0)].in, 20);
+
+    // The blocks themselves are not duplicates — the tool call lives in exactly
+    // one of them, and dropping the record would drop the call with it.
+    assert.equal(agg.tools.Bash.calls, 1);
+    assert.equal(agg.sessions[0].tools, 1);
+}));
+
+// The records of a response do not all carry the same figures. Two shapes occur:
+// every record repeating the final usage, and a running counter where the early
+// records hold a partial output and only the last one is the answer — 3, 3, 3,
+// 1185 on a real reply here, with `speed` arriving on that last record too.
+// Taking whichever record came first is therefore not a dedupe, it is a third of
+// the output thrown away: 31.5M against 47.1M across this machine.
+test('a response is charged at its final figures, not its first partial one', () => tree(({ write }) => {
+    const partial = (out, extra = {}) => JSON.stringify({
+        timestamp: new Date(T0).toISOString(),
+        gitBranch: 'main',
+        requestId: 'req-1',
+        type: 'assistant',
+        message: {
+            model: 'claude-opus-5',
+            content: [{ type: 'tool_use', id: `tu-${out}`, name: 'Bash' }],
+            usage: { input_tokens: 10, output_tokens: out, cache_read_input_tokens: 400, ...extra },
+        },
+    });
+    const file = write('sess-1.jsonl', [
+        partial(3),
+        partial(3),
+        partial(1e6, { speed: 'standard' }), // the real answer, and the only record naming the speed
+    ]);
+    const agg = ix.indexFile(file);
+
+    assert.equal(agg.sessions[0].msgs, 1);
+    assert.equal(agg.sessions[0].out, 1e6);
+    assert.equal(agg.sessions[0].cost, 25.00025);
+    assert.equal(agg.models['claude-opus-5'].out, 1e6);
+    // A field that only ever appears on the closing record still lands.
+    assert.equal(agg.speeds.standard.msgs, 1);
+    assert.equal(agg.speeds.standard.out, 1e6);
+    // And the three tool calls are still three tool calls.
+    assert.equal(agg.tools.Bash.calls, 3);
+}));
+
+// Which record of a response to charge is decided on the whole of its usage,
+// not on `output_tokens` alone. On today's transcripts the two pick the same
+// record every time — 51 078 responses, zero disagreements — so this is about
+// what happens when they stop agreeing: the fuller record wins, and its nested
+// `cache_creation` travels with it. Picking per-field maxima instead would build
+// a usage object that no reply ever had and drop that nesting, taking the TTL
+// split of the cache with it.
+test('a response is charged from its fullest record, not its longest answer', () => tree(({ write }) => {
+    const rec2 = (usage) => JSON.stringify({
+        timestamp: new Date(T0).toISOString(),
+        requestId: 'req-1',
+        type: 'assistant',
+        message: { model: 'claude-opus-5', usage },
+    });
+    const file = write('sess-1.jsonl', [
+        rec2({ output_tokens: 1000, cache_creation_input_tokens: 10 }),
+        rec2({
+            output_tokens: 10,
+            cache_creation_input_tokens: 900000,
+            cache_creation: { ephemeral_1h_input_tokens: 900000 },
+        }),
+    ]);
+    const b = ix.indexFile(file).models['claude-opus-5'];
+
+    assert.equal(b.msgs, 1);
+    assert.equal(b.out, 10);
+    assert.equal(b.cacheWrite, 900000);
+    assert.equal(b.cw1h, 900000); // the nested split survived the choice
+}));
+
+// `speed` arrives on whichever record closes the response, and the record that
+// is charged is whichever one is fullest. Nothing makes those the same record.
+// The order that breaks it: speed lands on record 2, record 3 is larger and
+// carries no speed — a later replacement of the held usage takes the field with
+// it. No transcript here does that today, which is exactly why it is a test and
+// not a note: this file has now been wrong three times about what the data
+// happens to look like.
+test('a field that closed one record survives a larger record without it', () => tree(({ write }) => {
+    const part = (out, extra = {}) => JSON.stringify({
+        timestamp: new Date(T0).toISOString(),
+        requestId: 'req-1',
+        type: 'assistant',
+        message: { model: 'claude-opus-5', usage: { output_tokens: out, ...extra } },
+    });
+    const file = write('sess-1.jsonl', [
+        part(10),
+        part(20, { speed: 'fast' }), // the closing record names the speed
+        part(1e6),                   // and a larger one arrives after it
+    ]);
+    const agg = ix.indexFile(file);
+
+    assert.equal(agg.models['claude-opus-5'].out, 1e6); // still charged at the fullest
+    assert.equal(agg.speeds.fast.msgs, 1);              // and the speed is not lost
+    assert.equal(agg.speeds.fast.out, 1e6);
+}));
+
+// The model comes from the record being charged, because the price is computed
+// from that record's usage and the two must not come from different places. On
+// these transcripts two responses carry two different model ids — a real one and
+// `<synthetic>` — and both are saved only by `<synthetic>` happening to arrive
+// second. The clock is the opposite choice, and deliberate: a response is filed
+// under the hour it began, not the one it finished in, so the records of a reply
+// that crosses an hour boundary (78 of 51 133 here) stay on the earlier side.
+test('the model is taken from the record that is charged, the clock from the first', () => tree(({ write }) => {
+    const at = (ms) => new Date(T0 + ms).toISOString();
+    const part = (stamp, model, out) => JSON.stringify({
+        timestamp: stamp,
+        requestId: 'req-1',
+        type: 'assistant',
+        message: { model, usage: { output_tokens: out } },
+    });
+    const file = write('sess-1.jsonl', [
+        part(at(0), 'claude-opus-5', 2),
+        part(at(3600e3), '<synthetic>', 1e6), // an hour later, and the fullest record
+    ]);
+    const agg = ix.indexFile(file);
+
+    assert.equal(agg.models['<synthetic>'].out, 1e6);
+    assert.equal(agg.models['claude-opus-5'], undefined);
+    assert.deepEqual(agg.sessions[0].models, ['<synthetic>']);
+    // Filed under the hour it started in, not the one it ended in.
+    assert.equal(Object.keys(agg.hours)[0], String(new Date(T0).getHours()));
+    assert.equal(Object.keys(agg.hours).length, 1);
+}));
+
+test('indexFile still counts replies that carry no requestId', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [rec(), rec()]);
+    assert.equal(ix.indexFile(file).sessions[0].msgs, 2);
+}));
+
+// What kind of agent a subagent transcript belongs to is not in the transcript.
+// It is in the sibling `<agent>.meta.json` the client writes beside it, which
+// also names the model the dispatch asked for and how deep the spawn was.
+test('a subagent is attributed to its type from the meta file beside it', () => tree(({ write }) => {
+    const file = write(path.join('sess-1', 'subagents', 'agent-a1.jsonl'), [rec()]);
+    fs.writeFileSync(file.replace(/\.jsonl$/, '.meta.json'), JSON.stringify({
+        agentType: 'worker-researcher', model: 'opus', spawnDepth: 2, parentAgentId: 'a0',
+    }));
+
+    const agg = ix.indexFile(file);
+    assert.equal(agg.agents['worker-researcher'].msgs, 1);
+    assert.equal(agg.agents['worker-researcher'].out, 1e6);
+    assert.equal(agg.sessions[0].agentType, 'worker-researcher');
+    assert.equal(agg.sessions[0].spawnDepth, 2);
+    assert.equal(agg.sessions[0].parentAgentId, 'a0');
+    assert.equal(agg.sessions[0].askedModel, 'opus');
+}));
+
+test('a subagent with no meta file is counted, not dropped', () => tree(({ write }) => {
+    const file = write(path.join('sess-1', 'subagents', 'agent-a2.jsonl'), [rec()]);
+    const agg = ix.indexFile(file);
+    assert.equal(agg.sessions[0].agentType, '');
+    assert.equal(agg.sessions[0].msgs, 1);
+    assert.deepEqual(agg.agents, {});
+}));
+
+// How many sessions were running at once, which on a machine driven in parallel
+// is the difference between a busy day and a wide one.
+test('peakParallel finds the widest moment of each day', () => {
+    const h = (n) => Date.parse('2026-08-08T00:00:00Z') + n * 3600e3;
+    const days = ix.peakParallel([
+        { start: h(10), end: h(12) },
+        { start: h(11), end: h(13) },   // overlaps the first — two at once
+        { start: h(20), end: h(21) },   // alone later the same day
+        { start: h(30), end: h(31) },   // the next day
+    ]);
+
+    const first = days[ix.dayKey(h(10))];
+    assert.equal(first.peak, 2);
+    assert.equal(first.sessions, 3);
+    assert.equal(days[ix.dayKey(h(30))].peak, 1);
+});
+
+test('peakParallel ignores a session with no clock on it', () => {
+    assert.deepEqual(ix.peakParallel([{ start: 0, end: 0 }]), {});
+});
+
+// Wall-clock says when a session started and when it stopped, which for one
+// left open over lunch is mostly lunch. Gaps longer than the idle threshold are
+// not work, so they are not counted as any.
+test('a session separates the time it ran from the time it was open', () => tree(({ write }) => {
+    const at = (ms) => new Date(T0 + ms).toISOString();
+    const file = write('sess-1.jsonl', [
+        rec({ timestamp: at(0) }),
+        rec({ timestamp: at(60000) }),        // a minute later — work
+        rec({ timestamp: at(60000 + 3600e3) }), // an hour later — not work
+    ]);
+    const row = ix.indexFile(file).sessions[0];
+
+    assert.equal(row.end - row.start, 60000 + 3600e3);
+    assert.equal(row.activeMs, 60000);
+}));
+
+// A reply whose input arrives uncached is one the cache did not answer: the
+// context had to be sent and paid for at the full rate. Big ones are where the
+// money goes, and they cluster — so they are counted, and the worst are kept.
+test('a reply the cache could not answer is recorded as a break', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [
+        rec({}, { input_tokens: 5, cache_creation_input_tokens: 150000, cache_read_input_tokens: 900000 }),
+        rec({}, { input_tokens: 5, cache_creation_input_tokens: 1000, cache_read_input_tokens: 900000 }),
+    ]);
+    const agg = ix.indexFile(file);
+
+    assert.equal(agg.breaks.count, 1);
+    assert.equal(agg.breaks.tokens, 150005);
+    assert.equal(agg.breaks.top.length, 1);
+    assert.equal(agg.breaks.top[0].uncached, 150005);
+    assert.equal(agg.breaks.top[0].session, 'sess-1');
+    assert.equal(agg.breaks.top[0].at, T0);
+}));
+
+test('summarize keeps the worst breaks across files, newest scale first', () => tree(({ root, store, write }) => {
+    write('sess-1.jsonl', [rec({}, { cache_creation_input_tokens: 120000 })]);
+    write('sess-2.jsonl', [rec({}, { cache_creation_input_tokens: 400000 })]);
+
+    const { index } = ix.refreshIndex(store, { root });
+    const total = ix.summarize(index);
+    assert.equal(total.breaks.count, 2);
+    assert.equal(total.breaks.top[0].uncached, 400000);
+    assert.equal(total.breaks.top[1].uncached, 120000);
+}));
+
+test('summarize folds agent types across files', () => tree(({ root, store, write }) => {
+    const a = write(path.join('sess-1', 'subagents', 'agent-a1.jsonl'), [rec()]);
+    fs.writeFileSync(a.replace(/\.jsonl$/, '.meta.json'), JSON.stringify({ agentType: 'Explore' }));
+    const b = write(path.join('sess-2', 'subagents', 'agent-a2.jsonl'), [rec()]);
+    fs.writeFileSync(b.replace(/\.jsonl$/, '.meta.json'), JSON.stringify({ agentType: 'Explore' }));
+
+    const { index } = ix.refreshIndex(store, { root });
+    const total = ix.summarize(index);
+    assert.equal(total.agents.Explore.msgs, 2);
+}));
+
 test('refreshIndex reuses unchanged files and re-reads only what grew', () => tree(({ root, store, write }) => {
     write('sess-1.jsonl', [rec()]);
     write(path.join('sess-1', 'subagents', 'agent-a.jsonl'), [rec()]);

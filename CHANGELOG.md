@@ -9,6 +9,91 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [Unreleased]
+
+### Fixed
+
+- **A reply is charged once, at its final figures.** One API response is written
+  as several records — one per content block, thinking, text and each tool call —
+  and the index added every one of them, billing the same reply as many times as
+  it had blocks. Across this machine's 2 475 transcripts that is 112 799 records
+  for ~51 000 responses: output read 100.1M where it is **47.1M**, cache writes
+  1 043M where they are 382M, input 6.8M where it is 2.0M, cache reads 25.2B
+  where they are 12.6B. Every figure the dashboard draws from the index — spend,
+  projects, models, the month's forecast, the budget warnings — was high by
+  roughly a factor of two.
+
+  The records of a response do not agree with each other, which is what makes
+  this more than a dedupe. Two shapes occur: every record repeating the final
+  `usage`, and a running counter where the early records hold a partial output
+  and only the last is the answer — `3, 3, 3, 1185` on a real reply here, on
+  25.5% of responses. Charging the first record instead would read 31.5M, a
+  third of the output thrown away.
+
+  A response is therefore held until the file is read and charged once, from its
+  **fullest** record — the one whose usage totals the most — with the fields
+  around it merged across all of them, because `usage.speed` rides on the closing
+  record while the skill and the effort are on the opening one. Deliberately not
+  the *last* record (below the maximum on 2 responses of 51 075 — right almost
+  always, and strictly worse), not per-field maxima (`cache_creation` is nested
+  and carries the TTL split, so a best-of-each-field usage would be one no reply
+  ever had), and not `output_tokens` alone (it agrees with the total on all
+  51 078 responses here, but only because those fields move together, which
+  nothing documents). Tool calls are still counted from every record, since a
+  call lives in exactly one of them.
+
+  `INDEX_VERSION` is bumped: a stored aggregate holds the inflated numbers and
+  its file has not moved, so without the bump it would be reused forever. The
+  first run after this lands re-reads every transcript — about six seconds for
+  2 475 files here.
+
+- **"2843 replys"** on the Agents tab and in the Cache note. `plural` defaults
+  the plural to the word plus an `s`, which is right for every other noun this
+  page counts and wrong for the one it counts most. It had already reached a
+  listing screenshot.
+- **A dated model id now finds its rate.** `ratesFor` stripped `[1m]` and
+  `-fast` but not the date, so `claude-haiku-4-5-20251001` — which is what the
+  transcripts of that model actually carry — missed `RATES` and was billed at
+  the Opus fallback: five times Haiku's own rate, under a row still reading
+  "haiku 4.5", because `shortModel` stripped what `ratesFor` did not. On this
+  machine that model reads $0.40 rather than $2.01. Found by the tilde below,
+  which marked a model that was never actually unknown.
+
+### Added
+
+- **A model with no published rate is marked as a guess.** Its row in Models
+  carries the tilde every other estimate on this page carries, and says why on
+  hover: an id missing from `RATES` is billed at the `FALLBACK` rate, which *is*
+  the Opus rate. Until now the session tooltip said so and the dashboard did
+  not, so an unpriced model appeared there at Opus prices with nothing marking
+  it. The breakdowns are the only place this is drawn — a total that merely
+  includes such a model is left alone.
+- **`<synthetic>` is no longer a model.** It is what the client writes in place
+  of a reply that never arrived — a spent limit, a dropped connection, a 403 —
+  with an all-zero usage, and it was drawn as a row of its own among the models,
+  in the legend, and in the effort matrix. 137 such records here. Its count
+  still reaches the Requests tile, which counts messages rather than models.
+
+- **Spend by agent type**, on the Agents tab. The type a dispatch asked for is
+  recorded in the `.meta.json` the client writes beside each subagent
+  transcript — never inside the transcript, which is why this page could say
+  what subagents cost in total and nothing about which of them. The same file
+  carries the model the dispatch asked for, its depth in the spawn tree and its
+  parent, all now indexed.
+- **Plugin agents are matched by that type** on the Health tab. An agent used to
+  be unmatchable — its type is named in the arguments of the call that spawned
+  it, and the index reads results — so it was reported as "not visible" whether
+  or not it had ever run. It now answers the same question a skill does.
+- **Replies the cache could not answer**, on the Cache tab: calls that sent more
+  than 100k of input at the full rate, with the largest listed by session and
+  project. The first reply of a session is always one; a large one partway
+  through a run is a cache rebuilt rather than reused.
+- **Peak parallel sessions** and **time actually working**, on the Sessions tab,
+  plus a *working* column beside *open* in the table. Gaps longer than five
+  minutes are a session left sitting rather than one thinking, and are not
+  counted as work. The peak counts main transcripts only: a fan-out of a hundred
+  agents is the Agents tab's subject, not one person running a hundred windows.
+
 ## [0.26.0] — 2026-08-14
 
 Everything below, in the stable channel. It went out an hour earlier as

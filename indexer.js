@@ -24,7 +24,10 @@ const PROJECTS = path.join(HOME, '.claude', 'projects');
 // 5: word tallies count prompts rather than occurrences, drop paths and
 // identifiers, and keep sixty per file rather than thirty — a stored tally of
 // shape 4 is a different measurement wearing the same field name.
-const INDEX_VERSION = 5;
+// 6: a response is charged once rather than once per content block. The shape is
+// unchanged and every number in it is different — an aggregate of shape 5 holds
+// the inflated figures and would keep them forever, since its file has not moved.
+const INDEX_VERSION = 6;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only
@@ -37,6 +40,7 @@ function emptyAgg() {
         models: {},      // model id → bucket
         branches: {},    // git branch → bucket
         skills: {},      // attributionSkill → bucket
+        agents: {},      // agentType → bucket
         hours: {},       // 0..23 → bucket
         efforts: {},     // model and effort in one key → bucket
         entrypoints: {}, // cli | claude-vscode | sdk-py | … → bucket
@@ -44,9 +48,35 @@ function emptyAgg() {
         tools: {},       // tool name → { calls, errors, denials }
         files: {},       // absolute path → { edits, added, removed }
         friction: emptyFriction(),
+        breaks: emptyBreaks(),
         sessions: [],    // one row per file
         prompts: emptyPrompts(),
     };
+}
+
+// A reply whose input did not come from the cache. Some of that is unavoidable —
+// the first request of a session has nothing to read — but a large one in the
+// middle of a run means the cache was rebuilt rather than reused, and that is
+// the expensive direction. Counted for everything, kept in full only for the
+// worst, since the tail of small ones says nothing a total does not.
+const CACHE_BREAK_TOKENS = 100000;
+const BREAKS_PER_FILE = 5;
+const BREAKS_KEPT = 20;
+
+// Longer than this between two records and the session was not working, it was
+// sitting there. Five minutes is the same threshold Anthropic's own session
+// analyzer uses, and it is long enough that a slow reply is never mistaken for
+// an idle one.
+const IDLE_GAP_MS = 5 * 60 * 1000;
+
+function emptyBreaks() {
+    return { count: 0, tokens: 0, top: [] };
+}
+
+function keepBreak(breaks, entry, limit) {
+    breaks.top.push(entry);
+    breaks.top.sort((a, b) => b.uncached - a.uncached);
+    if (breaks.top.length > limit) breaks.top.length = limit;
 }
 
 // Everything that went sideways. None of it is priced: a rejected tool call
@@ -229,6 +259,27 @@ function describeFile(file, root = PROJECTS) {
     };
 }
 
+// What kind of agent a subagent transcript belongs to is not written anywhere
+// inside it. The client puts it in a sibling `<agent>.meta.json`, together with
+// the model the dispatch asked for and where the agent sat in the spawn tree —
+// which is the only place the difference between a requested model and the one
+// that actually replied can be seen.
+function readAgentMeta(file) {
+    try {
+        const m = JSON.parse(fs.readFileSync(file.replace(/\.jsonl$/, '.meta.json'), 'utf8'));
+        return {
+            agentType: typeof m.agentType === 'string' ? m.agentType : '',
+            askedModel: typeof m.model === 'string' ? m.model : '',
+            parentAgentId: typeof m.parentAgentId === 'string' ? m.parentAgentId : '',
+            spawnDepth: Number.isFinite(m.spawnDepth) ? m.spawnDepth : 0,
+        };
+    } catch {
+        // Older transcripts predate the meta file; the agent still counts, it
+        // just has no type to be grouped under.
+        return { agentType: '', askedModel: '', parentAgentId: '', spawnDepth: 0 };
+    }
+}
+
 // A project slug is the absolute path with separators replaced; the last
 // meaningful segment is close enough to a readable name.
 function projectName(slug) {
@@ -274,11 +325,23 @@ function indexFile(file, root = PROJECTS) {
         models: [],
         efforts: [],
         branch: '',
+        agentType: '',
+        askedModel: '',
+        parentAgentId: '',
+        spawnDepth: 0,
+        activeMs: 0,
     };
+
+    if (meta.kind !== 'main') Object.assign(row, readAgentMeta(file));
 
     const models = new Set();
     const efforts = new Set();
     const toolNames = new Map();
+    // One entry per response, keyed by request id — charged after the file is
+    // read, because the last record of a response is the one that says what it
+    // cost. See `holdResponse`.
+    const pending = new Map();
+    let prevAt = 0;
 
     const rawWords = {};
 
@@ -329,44 +392,31 @@ function indexFile(file, root = PROJECTS) {
         if (!usage) continue;
 
         const at = Date.parse(r.timestamp) || 0;
-        const model = r.message.model || '';
-        const cost = costOf(model, usage);
-        const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0)
-            + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
-
         if (at) {
-            add(agg.days, dayKey(at), usage, model);
-            add(agg.hours, String(new Date(at).getHours()), usage, model);
             if (!row.start || at < row.start) row.start = at;
             if (at > row.end) row.end = at;
+            // A gap shorter than the threshold is the session thinking; a longer
+            // one is a session left open. Measured between the records this pass
+            // already parses, which is every reply and every prompt — tool
+            // traffic in between changes nothing, since it sits inside a gap
+            // that is counted whole either way.
+            const gap = at - prevAt;
+            if (prevAt && gap > 0 && gap < IDLE_GAP_MS) row.activeMs += gap;
+            if (at > prevAt) prevAt = at;
         }
-        add(agg.models, model, usage, model);
-        if (r.gitBranch) { add(agg.branches, r.gitBranch, usage, model); row.branch = r.gitBranch; }
-        if (r.attributionSkill) {
-            const b = add(agg.skills, r.attributionSkill, usage, model);
-            // When it last ran, which is the difference between "installed and
-            // idle" and "was useful in June". A max rather than a sum, so it
-            // travels beside BUCKET_FIELDS rather than in it.
-            if (b) b.last = Math.max(b.last || 0, at || 0);
-        }
-        // The reasoning tier is recorded per reply, so a session that switched
-        // effort mid-way is counted honestly on both sides of the switch. Model
-        // and effort share a key because neither is meaningful without the other.
-        add(agg.efforts, effortKey(model, r.effort), usage, model);
-        if (r.entrypoint) add(agg.entrypoints, r.entrypoint, usage, model);
-        if (usage.speed) add(agg.speeds, usage.speed, usage, model);
 
+        // The records of one reply are not copies of each other: the reply is
+        // split one record per content block, and a tool call lives in exactly
+        // one of them. So calls are counted from every record, and only the
+        // money below is held to one charge per response.
         noteTools(agg, r.message.content, toolNames, row);
 
-        models.add(model);
-        efforts.add(r.effort || '');
-        row.msgs++;
-        row.cost += cost;
-        row.tokens += tokens;
-        row.out += usage.output_tokens || 0;
-        row.cacheRead += usage.cache_read_input_tokens || 0;
-        row.cacheWrite += usage.cache_creation_input_tokens || 0;
+        // Held rather than charged here: what a response actually cost is not
+        // known until every record of it has been read. See `holdResponse`.
+        holdResponse(pending, r, usage, at);
     }
+
+    for (const held of pending.values()) charge(agg, row, held, meta, models, efforts);
 
     if (row.msgs === 0 && agg.prompts.count === 0) return null;
     row.models = [...models].filter(Boolean);
@@ -374,6 +424,118 @@ function indexFile(file, root = PROJECTS) {
     agg.prompts.words = trimWords(rawWords);
     agg.sessions.push(row);
     return agg;
+}
+
+/**
+ * One response arrives as several records — one per content block — and they do
+ * not agree with each other. Two shapes occur on this machine: every record
+ * repeating the response's final `usage`, and a running counter where the early
+ * records carry a partial output and only the last one is the answer (3, 3, 3,
+ * 1185 on a real reply here). Adding them all charges a reply once per block;
+ * taking whichever came first throws away a third of the output — 31.5M against
+ * 47.1M across these transcripts, and 25.5% of responses affected.
+ *
+ * So a response is held until the file has been read and charged once, from its
+ * fullest record — the one whose usage totals the most.
+ *
+ * Not "the last record": here the last one is strictly below the maximum for 2
+ * responses of 51 075, so last is an approximation that is right almost always
+ * and is strictly worse. Not per-field maxima either: `cache_creation` is a
+ * nested object holding the TTL split, so assembling a usage from the best of
+ * each field would build one no reply ever had and drop that nesting. And not
+ * `output_tokens` alone: it picks the same record as the total on all 51 078
+ * responses here, but only because the fields move together, which nothing
+ * documents and no test could notice breaking.
+ *
+ * The fields around the usage are merged rather than taken from that record, and
+ * `speed` is held beside the usage rather than inside it: it appears only on the
+ * record that closes a response, while the skill and effort are on the opening
+ * one, and the charged record is neither by construction.
+ */
+function usageTotal(u) {
+    return (u.input_tokens || 0) + (u.output_tokens || 0)
+        + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+}
+
+function holdResponse(pending, r, usage, at) {
+    // A record with no request id belongs to no group and is charged alone.
+    const key = r.requestId || `solo:${r.uuid || pending.size}`;
+    const held = pending.get(key);
+    if (!held) {
+        pending.set(key, {
+            usage, at, model: r.message.model || '', skill: r.attributionSkill || '',
+            branch: r.gitBranch || '', effort: r.effort || '', entrypoint: r.entrypoint || '',
+            speed: usage.speed || '',
+        });
+        return;
+    }
+    if (usageTotal(usage) > usageTotal(held.usage)) {
+        held.usage = usage;
+        // With the usage, because the price is computed from it: a model taken
+        // from one record and a usage from another can disagree, and two
+        // responses here do carry two ids — a real one and `<synthetic>`.
+        if (r.message.model) held.model = r.message.model;
+    }
+    // Not moved to the charged record: this is when the response began, which is
+    // the hour a person was working in. 78 responses here span an hour boundary
+    // and 12 span midnight; they are filed on the earlier side on purpose.
+    if (!held.at) held.at = at;
+    if (!held.model) held.model = r.message.model || '';
+    if (!held.skill) held.skill = r.attributionSkill || '';
+    if (!held.branch) held.branch = r.gitBranch || '';
+    if (!held.effort) held.effort = r.effort || '';
+    if (!held.entrypoint) held.entrypoint = r.entrypoint || '';
+    // Beside the usage rather than inside it. `speed` rides on the record that
+    // closes a response, and the charged record is whichever is fullest —
+    // nothing makes those the same one, so a field kept inside `usage` would be
+    // dropped by the next replacement of it.
+    if (!held.speed) held.speed = usage.speed || '';
+}
+
+/** One held response, into every bucket that counts it. */
+function charge(agg, row, held, meta, models, efforts) {
+    const { usage, at, model } = held;
+    const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0)
+        + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+
+    if (at) {
+        add(agg.days, dayKey(at), usage, model);
+        add(agg.hours, String(new Date(at).getHours()), usage, model);
+    }
+
+    const uncached = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+    if (uncached > CACHE_BREAK_TOKENS) {
+        agg.breaks.count++;
+        agg.breaks.tokens += uncached;
+        keepBreak(agg.breaks, {
+            at, uncached, session: meta.sessionId, project: row.project, kind: meta.kind,
+        }, BREAKS_PER_FILE);
+    }
+    add(agg.models, model, usage, model);
+    if (held.branch) { add(agg.branches, held.branch, usage, model); row.branch = held.branch; }
+    if (held.skill) {
+        const b = add(agg.skills, held.skill, usage, model);
+        // When it last ran, which is the difference between "installed and idle"
+        // and "was useful in June". A max rather than a sum, so it travels
+        // beside BUCKET_FIELDS rather than in it.
+        if (b) b.last = Math.max(b.last || 0, at || 0);
+    }
+    // The reasoning tier is recorded per reply, so a session that switched effort
+    // mid-way is counted honestly on both sides of the switch. Model and effort
+    // share a key because neither is meaningful without the other.
+    add(agg.efforts, effortKey(model, held.effort), usage, model);
+    if (row.agentType) add(agg.agents, row.agentType, usage, model);
+    if (held.entrypoint) add(agg.entrypoints, held.entrypoint, usage, model);
+    if (held.speed) add(agg.speeds, held.speed, usage, model);
+
+    models.add(model);
+    efforts.add(held.effort || '');
+    row.msgs++;
+    row.cost += costOf(model, usage);
+    row.tokens += tokens;
+    row.out += usage.output_tokens || 0;
+    row.cacheRead += usage.cache_read_input_tokens || 0;
+    row.cacheWrite += usage.cache_creation_input_tokens || 0;
 }
 
 // Model and effort in one key, with a separator that cannot occur in either.
@@ -572,9 +734,9 @@ function refreshIndex(storageDir, { root = PROJECTS, onProgress } = {}) {
 /** Fold every per-file aggregate into the shape the dashboard renders. */
 function summarize(index) {
     const total = {
-        days: {}, models: {}, branches: {}, skills: {}, hours: {},
+        days: {}, models: {}, branches: {}, skills: {}, agents: {}, hours: {},
         efforts: {}, entrypoints: {}, speeds: {}, tools: {}, files: {}, friction: emptyFriction(),
-        sessions: [], projects: {}, prompts: emptyPrompts(),
+        breaks: emptyBreaks(), sessions: [], projects: {}, prompts: emptyPrompts(),
     };
     // How many files each word appeared in — the basis for dropping filler.
     const wordFiles = {};
@@ -587,6 +749,7 @@ function summarize(index) {
         for (const [k, v] of Object.entries(agg.models)) mergeBucket(total.models, k, v);
         for (const [k, v] of Object.entries(agg.branches)) mergeBucket(total.branches, k, v);
         for (const [k, v] of Object.entries(agg.skills)) mergeBucket(total.skills, k, v);
+        for (const [k, v] of Object.entries(agg.agents || {})) mergeBucket(total.agents, k, v);
         for (const [k, v] of Object.entries(agg.hours)) mergeBucket(total.hours, k, v);
         for (const [k, v] of Object.entries(agg.efforts || {})) mergeBucket(total.efforts, k, v);
         for (const [k, v] of Object.entries(agg.entrypoints || {})) mergeBucket(total.entrypoints, k, v);
@@ -594,6 +757,11 @@ function summarize(index) {
         mergeTools(total.tools, agg.tools);
         mergeFiles(total.files, agg.files);
         mergeFriction(total.friction, agg.friction);
+        if (agg.breaks) {
+            total.breaks.count += agg.breaks.count || 0;
+            total.breaks.tokens += agg.breaks.tokens || 0;
+            for (const b of agg.breaks.top || []) keepBreak(total.breaks, b, BREAKS_KEPT);
+        }
         for (const row of agg.sessions) {
             total.sessions.push(row);
             const p = total.projects[row.project] || (total.projects[row.project] = bucket());
@@ -675,6 +843,51 @@ function exportCsv(total) {
 }
 
 /**
+ * How many sessions were running at the same moment, per day. A day's total says
+ * how much was done; this says how wide it was — one session for nine hours and
+ * nine sessions for one hour are the same total and nothing like each other.
+ *
+ * Ten-minute buckets: finer than that measures the overlap of two transcripts
+ * that happened to write in the same second, which is not a session running
+ * beside another one. A session spanning midnight counts toward every day it
+ * touches, because on each of them it was genuinely open.
+ */
+const PARALLEL_BUCKET_MS = 10 * 60 * 1000;
+const BUCKETS_PER_DAY = 144;
+
+function peakParallel(sessions) {
+    const days = {};
+    for (const s of sessions || []) {
+        if (!s.start || !s.end || s.end < s.start) continue;
+        for (let at = s.start; ; at += PARALLEL_BUCKET_MS) {
+            const capped = Math.min(at, s.end);
+            const key = dayKey(capped);
+            const day = days[key] || (days[key] = { buckets: new Array(BUCKETS_PER_DAY).fill(0), sessions: 0, peak: 0, at: 0 });
+            const midnight = new Date(capped).setHours(0, 0, 0, 0);
+            const slot = Math.min(BUCKETS_PER_DAY - 1, Math.floor((capped - midnight) / PARALLEL_BUCKET_MS));
+            day.buckets[slot]++;
+            if (capped >= s.end) break;
+        }
+    }
+    for (const [key, day] of Object.entries(days)) {
+        day.peak = Math.max(...day.buckets);
+        day.at = day.buckets.indexOf(day.peak) * PARALLEL_BUCKET_MS;
+        day.sessions = (sessions || []).filter((s) => s.start && s.end
+            && s.end >= s.start && overlapsDay(s, key)).length;
+        delete day.buckets;
+    }
+    return days;
+}
+
+function overlapsDay(s, key) {
+    for (let at = s.start; ; at += PARALLEL_BUCKET_MS) {
+        const capped = Math.min(at, s.end);
+        if (dayKey(capped) === key) return true;
+        if (capped >= s.end) return false;
+    }
+}
+
+/**
  * The calendar month so far, and where it lands if the rest of it looks like
  * the part that has happened. Days come from the index, which already keys them
  * `YYYY-MM-DD`, so this costs nothing beyond the summary the page already has —
@@ -701,9 +914,10 @@ function monthToDate(total, nowMs = Date.now()) {
 }
 
 module.exports = {
-    monthToDate, exportJson, exportCsv,
+    monthToDate, peakParallel, exportJson, exportCsv,
     PROJECTS, INDEX_VERSION, SUBAGENT_RE, INTERESTING,
     describeFile, projectName, indexFile, walk, loadIndex, freshIndex, saveIndex, refreshIndex,
-    summarize, dayKey, bucket, emptyAgg, emptyFriction, effortKey, splitEffort,
+    summarize, dayKey, bucket, emptyAgg, emptyFriction, emptyBreaks, effortKey, splitEffort,
+    CACHE_BREAK_TOKENS, readAgentMeta,
     promptText, tallyWords, trimWords, lenBucket, LEN_BUCKETS,
 };

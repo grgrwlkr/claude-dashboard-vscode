@@ -55,6 +55,19 @@ test('an unknown model is priced at Opus rates and says so', () => {
     assert.deepEqual(p.ratesFor('claude-newthing-9').rates, p.RATES['claude-opus-5']);
 });
 
+// A dated id is the same model as its alias — `claude-haiku-4-5-20251001` is
+// what the transcripts of that model actually carry. Without the suffix coming
+// off, it misses `RATES`, falls back to the Opus rate, and Haiku is billed at
+// five times its price while the row still reads "haiku 4.5", because
+// `shortModel` strips the date and `ratesFor` did not.
+test('a dated model id finds the rate of the alias it belongs to', () => {
+    assert.equal(p.ratesFor('claude-haiku-4-5-20251001').known, true);
+    assert.deepEqual(p.ratesFor('claude-haiku-4-5-20251001').rates, p.RATES['claude-haiku-4-5']);
+    // And stripping the date invents nothing: a model the table never listed is
+    // still unknown without it. `claude-opus-4-5` is one — it has no row here.
+    assert.equal(p.ratesFor('claude-opus-4-5-20251101').known, false);
+});
+
 test('output and input are unaffected by the cache change', () => {
     assert.equal(p.costOf('claude-opus-5', { output_tokens: M }), 25);
     assert.equal(p.costOf('claude-opus-5', { input_tokens: M }), 5);

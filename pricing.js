@@ -29,10 +29,13 @@ const RATES = {
 // better overestimated than shown as a reassuringly small number.
 const FALLBACK = { in: 5, out: 25 };
 
-// Suffixes like [1m] and -fast do not change the rate — the model id underneath
-// is the same one.
+// Suffixes like [1m], -fast and a dated snapshot do not change the rate — the
+// model id underneath is the same one. The date matters most: transcripts carry
+// `claude-haiku-4-5-20251001`, and without stripping it the id misses `RATES`
+// and is billed at the Opus fallback — five times Haiku's own rate, under a row
+// that still reads "haiku 4.5" because `shortModel` strips what this did not.
 function ratesFor(model) {
-    const id = (model || '').replace(/\[[^\]]*\]$/, '').replace(/-fast$/, '');
+    const id = (model || '').replace(/\[[^\]]*\]$/, '').replace(/-fast$/, '').replace(/-\d{8}$/, '');
     return { rates: RATES[id] || FALLBACK, known: Boolean(RATES[id]) };
 }
 
