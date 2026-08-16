@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashboard & Statusline for Claude Code",
   "description": "Unofficial. A 23-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.28.0",
+  "version": "0.30.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -132,13 +132,31 @@
       "activitybar": [
         {
           "id": "claudeStatusline",
-          "title": "Claude",
-          "icon": "$(gear)"
+          "title": "Claude Dashboard",
+          "icon": "media/bar-icon.svg"
         }
       ]
     },
     "views": {
       "claudeStatusline": [
+        {
+          "id": "claudeStatusline.limits",
+          "name": "Limits",
+          "type": "webview",
+          "initialSize": 3
+        },
+        {
+          "id": "claudeStatusline.now",
+          "name": "Session",
+          "type": "webview",
+          "initialSize": 2,
+          "when": "claudeStatusline.hasSession"
+        },
+        {
+          "id": "claudeStatusline.sessions",
+          "name": "Live sessions",
+          "initialSize": 2
+        },
         {
           "id": "claudeStatusline.workflows",
           "name": "Workflow runs"

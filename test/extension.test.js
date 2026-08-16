@@ -1234,9 +1234,11 @@ test('the tab button opens the session in the active editor group', async () => 
         const terminal = lastTerminal();
         assert.deepEqual(terminal.options.location, { viewColumn: vscode.ViewColumn.Active });
         assert.equal(terminal.options.name, 'Claude Code');
-        // Transient, because a dead session restored into a tab on the next
-        // window is a tab that has to be closed by hand.
-        assert.equal(terminal.options.isTransient, true);
+        // Not transient: a reload reconnects to the shell that never stopped, so
+        // the session inside the tab goes on running — and installing a build of
+        // this extension is a reload. Claude Code's own terminals opt out of that
+        // and this one used to copy them, which killed a session per reload.
+        assert.equal(terminal.options.isTransient, undefined);
         assert.equal(terminal.shown, 1, 'a tab nobody is shown is not opened');
     } finally { run.dispose(); }
 });
@@ -1461,6 +1463,60 @@ test('a terminal this extension did not open is left alone', async () => {
     } finally { run.dispose(); }
 });
 
+// A reload restarts the extension host while the shells keep running, so the
+// tabs come back with nothing tying them to the sessions inside them. What VS
+// Code does keep is what each was created with, and two things in there point
+// here: the icon, which is a file of this extension, and the name a tab is
+// opened under. Either is enough — and when neither survives, the tab is left
+// alone, which is what happened to every reloaded tab before.
+const OUR_ICON = { light: { fsPath: '/anywhere/media/open-claude-light.svg' }, dark: { fsPath: '/anywhere/media/open-claude-dark.svg' } };
+
+// The pid a restored tab reports arrives through a promise, exactly as an opened
+// one's does, and taking it over waits for that — so the wait happens outside
+// `withSession`, whose stand-in for the session reader lasts only as long as the
+// synchronous half of what it is given.
+const restoreTab = async (options) => {
+    const terminal = vscode.__restoreTerminal(options);
+    await new Promise((r) => setImmediate(r));
+    return terminal;
+};
+
+test('a tab restored after a reload is taken back over, by its icon', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const restored = await restoreTab({ name: 'renamed by a session', iconPath: OUR_ICON, pid: 707 });
+        await withSession({ shellPid: 707, sessionId: 'abc', cwd: '/w' }, 'Restored session', async () => {
+            vscode.__activateTerminal(restored);
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), ['Restored session']);
+    } finally { run.dispose(); }
+});
+
+test('a tab restored under the name it was opened with is taken back over too', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const restored = await restoreTab({ name: 'Claude Code', pid: 808 });
+        await withSession({ shellPid: 808, sessionId: 'abc', cwd: '/w' }, 'By name', async () => {
+            vscode.__activateTerminal(restored);
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), ['By name']);
+    } finally { run.dispose(); }
+});
+
+test("a restored terminal of somebody else's is not taken over", async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const restored = await restoreTab({ name: 'zsh', iconPath: { fsPath: '/elsewhere/terminal.svg' }, pid: 909 });
+        await withSession({ shellPid: 909, sessionId: 'abc', cwd: '/w' }, 'Not ours to name', async () => {
+            vscode.__activateTerminal(restored);
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), [], 'a session running in a tab this extension did not open is still their tab');
+    } finally { run.dispose(); }
+});
+
 test('renameTabs off leaves the tab as it was opened', async () => {
     const run = activate({ segments: ['{today}'], settings: { renameTabs: false } });
     try {
@@ -1483,6 +1539,56 @@ test('a shell with no session under it is not renamed to nothing', async () => {
         });
         assert.deepEqual(renames(), []);
     } finally { run.dispose(); }
+});
+
+// An empty pane still claims its share of the sidebar's height, and that share
+// comes out of the limits above it — so the session pane is hidden rather than
+// emptied when no Claude session is open in this window. The context key is what
+// the manifest's `when` reads.
+test('the session pane is switched off when this window has no session', () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const keys = () => vscode.__executed
+            .filter((e) => e.id === 'setContext' && e.args[0] === 'claudeStatusline.hasSession')
+            .map((e) => e.args[1]);
+        // A state with no session of its own: the collectors found no transcript
+        // for this window, so `statusNow` has neither a context nor a money row.
+        assert.deepEqual(keys().slice(-1), [false]);
+    } finally {
+        run.dispose();
+    }
+});
+
+// The badge is the only number this extension puts where it can be read without
+// opening anything, so what it counts matters: sessions that are actually alive,
+// and nothing at all when there are none — a badge reading nought is a dot that
+// never leaves.
+test('the badge counts live sessions and disappears when there are none', () => {
+    const sessions = [
+        { id: 'a', pid: 1, alive: true, status: 'running', cwd: 'repo-one', entrypoint: 'cli' },
+        { id: 'b', pid: 2, alive: false, status: '', cwd: 'repo-two', entrypoint: 'cli' },
+    ];
+    const tree = new ext.__LiveSessionsTree(() => sessions);
+    tree.view = {};
+
+    tree.refresh();
+    assert.equal(tree.view.badge.value, 1);
+    assert.match(tree.view.badge.tooltip, /1 live Claude session$/);
+
+    sessions[0].alive = false;
+    tree.refresh();
+    assert.equal(tree.view.badge, undefined);
+});
+
+test('a live session is a row named by its project, with its client beside it', () => {
+    const tree = new ext.__LiveSessionsTree(() => [
+        { id: 'sesn-1', pid: 42, alive: true, status: 'running', cwd: 'claude-statusline', entrypoint: 'claude-vscode' },
+    ]);
+    const [row] = tree.getChildren();
+    const item = tree.getTreeItem(row);
+    assert.equal(item.label, 'claude-statusline');
+    assert.match(item.description, /claude-vscode/);
+    assert.match(item.description, /running/);
 });
 
 test('another terminal ending does not take this tab with it', async () => {

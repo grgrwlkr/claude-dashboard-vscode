@@ -1,0 +1,18 @@
+<!-- The Activity Bar glyph. Two rules shape it, and both are VS Code's:
+     one colour at 24x24, and only the opacity varies — 60% at rest, 100% on
+     hover and while the container is active.
+     So there is no faint backing ring here, though the marketplace icon has one:
+     a shape drawn at two opacities reads as two tones in colour and as one solid
+     ring in a single-colour glyph, which is exactly how the first version of this
+     file came out — a full circle where a three-fifths arc was meant.
+     What is left is the arc alone, in the logo's proportion (stroke-dasharray 158
+     of a 263.9 circumference, clockwise from twelve), over the three bars.
+     The file name matters too: the editor caches this by path, so a redraw needs
+     a new name, not new bytes. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <path fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+        d="M12 2.9A9.1 9.1 0 1 1 6.65 19.26"/>
+  <rect x="7.5" y="12.7" width="2.5" height="4.4" rx="1.05" fill="currentColor"/>
+  <rect x="10.75" y="10.1" width="2.5" height="7" rx="1.05" fill="currentColor"/>
+  <rect x="14" y="7.9" width="2.5" height="9.2" rx="1.05" fill="currentColor"/>
+</svg>

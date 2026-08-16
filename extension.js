@@ -349,6 +349,94 @@ class WorkflowTree {
 // number beside it. A topic with no builder at all is a bug in this file rather
 // than bad data, so that one is left to fail: the item hides, and the test that
 // walks every topic sees it.
+/**
+ * The live sessions, as rows in the sidebar. `system.live()` reads the registry
+ * files every time rather than being cached in `state`: it is a handful of small
+ * JSON files, the same read the slow tick already makes twice, and a list that
+ * lagged the bar by a minute would be a list about the wrong minute.
+ *
+ * This view also carries the container's badge, because the number worth seeing
+ * from across the editor is how many sessions are going — not a percentage,
+ * which a badge cannot spell, and not a total, which never falls back to zero.
+ */
+class LiveSessionsTree {
+    // The registry read is a parameter so a test can hand this a machine that
+    // has three sessions on it, and then none, without one existing anywhere.
+    constructor(readSessions) {
+        this.readSessions = readSessions || (() => sys.live().sessions);
+        this.emitter = new vscode.EventEmitter();
+        this.onDidChangeTreeData = this.emitter.event;
+        this.stamp = '';
+        this.view = null;
+    }
+
+    read() {
+        try { return this.readSessions().filter((s) => s.alive); } catch { return []; }
+    }
+
+    // Same contract as WorkflowTree.refresh: redraw only when a row would look
+    // different, so a tick that changed nothing costs nothing.
+    refresh() {
+        const rows = this.read();
+        const stamp = JSON.stringify(rows.map((s) => [s.id, s.status, s.cwd]));
+        if (stamp !== this.stamp) {
+            this.stamp = stamp;
+            this.emitter.fire();
+        }
+        if (this.view) {
+            // No badge rather than a zero: a badge reading nought is a dot that
+            // never leaves, and its absence says the same thing quietly.
+            this.view.badge = rows.length
+                ? { value: rows.length, tooltip: dashboard.plural(rows.length, 'live Claude session') }
+                : undefined;
+        }
+    }
+
+    getChildren(node) { return node ? [] : this.read(); }
+
+    getTreeItem(s) {
+        const item = new vscode.TreeItem(s.name || s.cwd || s.id.slice(0, 8),
+            vscode.TreeItemCollapsibleState.None);
+        item.id = s.id;
+        item.description = [s.entrypoint, s.status].filter(Boolean).join(' · ');
+        item.tooltip = [s.cwd, s.entrypoint, s.version, s.id].filter(Boolean).join('\n');
+        item.iconPath = new vscode.ThemeIcon('circle-filled');
+        return item;
+    }
+}
+
+/**
+ * Now, in the sidebar. The page has no script and nothing to click, so it is
+ * rebuilt outright on every draw rather than patched, and only while it is
+ * visible: a hidden view is redrawn when it comes back, which is the moment its
+ * numbers start mattering again.
+ */
+class NowView {
+    // `which` names the slice of the status sections this pane draws — the two
+    // panes are the same class because they differ in nothing else.
+    constructor(state, which) {
+        this.state = state;
+        this.which = which;
+        this.view = null;
+    }
+
+    resolveWebviewView(view) {
+        this.view = view;
+        view.webview.options = { enableScripts: false };
+        view.onDidChangeVisibility(() => this.refresh());
+        this.refresh();
+    }
+
+    refresh() {
+        if (!this.view || !this.view.visible) return;
+        try {
+            this.view.webview.html = dashboard.sidebarPage(
+                dashboard.sidebarSections(statusNow(this.state), this.which), this.which,
+            );
+        } catch { /* the bar is drawn; this view waits for the next tick */ }
+    }
+}
+
 function tooltipSections(state, topics) {
     return topics.map((topic) => {
         const build = TOOLTIPS[topic];
@@ -392,6 +480,26 @@ function render(state) {
     if (state.tree) {
         try { state.tree.refresh(); } catch { /* the bar is drawn; the tree waits for the next tick */ }
     }
+    // Same rule for the two sidebar views: neither may take the bar down with
+    // it, and a state a test filled by hand has none of the three.
+    if (state.sessionsTree) {
+        try { state.sessionsTree.refresh(); } catch { /* redrawn on the next tick */ }
+    }
+    for (const view of [state.limitsView, state.nowView]) {
+        if (!view) continue;
+        try { view.refresh(); } catch { /* redrawn on the next tick */ }
+    }
+    // The session pane is hidden rather than left empty when nothing is running
+    // in this window: an empty pane still claims its share of the sidebar, and
+    // that share comes out of the limits above it. Set only on a change — this
+    // runs on every tick, and `setContext` is a round trip to the workbench.
+    try {
+        const has = dashboard.sidebarSections(statusNow(state), 'session').length > 0;
+        if (state.hasSession !== has) {
+            state.hasSession = has;
+            vscode.commands.executeCommand('setContext', 'claudeStatusline.hasSession', has);
+        }
+    } catch { /* the bar is drawn; the pane keeps whatever it had */ }
 }
 
 // Fields whose value comes out of the single expensive pass over the whole
@@ -1293,6 +1401,9 @@ function activate(context) {
     // Built before the first collection so the view has a provider the moment it
     // is opened; render() refreshes it from there on.
     state.tree = new WorkflowTree(state);
+    state.sessionsTree = new LiveSessionsTree();
+    state.limitsView = new NowView(state, 'limits');
+    state.nowView = new NowView(state, 'session');
     slowTick(state);
 
     // The timer is what `autoRefresh` is named for — "Refresh on a timer" — so
@@ -1356,6 +1467,28 @@ function activate(context) {
         // Switching to a tab is the moment its name matters, and the moment the
         // rename command can reach it at all.
         vscode.window.onDidChangeActiveTerminal(() => renameActiveTab(state)),
+        // A tab restored after a reload opens as far as this process is
+        // concerned, so this is where it is recognised. The sweep below covers
+        // the other order, where the tabs were back before the extension was.
+        vscode.window.onDidOpenTerminal((t) => adopt(t)),
+        // Closing one is the only way a tab leaves the set, whoever put it
+        // there: the button's own tabs and the ones taken over after a reload.
+        vscode.window.onDidCloseTerminal((t) => {
+            const tab = tabFor(t);
+            if (tab) ourTabs.delete(tab);
+        }),
+        vscode.window.registerWebviewViewProvider('claudeStatusline.limits', state.limitsView),
+        vscode.window.registerWebviewViewProvider('claudeStatusline.now', state.nowView),
+        // Held rather than discarded: the badge lives on the view object, not on
+        // the provider, and it is the provider that knows the count.
+        (() => {
+            const view = vscode.window.createTreeView('claudeStatusline.sessions', {
+                treeDataProvider: state.sessionsTree,
+            });
+            state.sessionsTree.view = view;
+            state.sessionsTree.refresh();
+            return view;
+        })(),
         vscode.window.createTreeView('claudeStatusline.workflows', { treeDataProvider: state.tree }),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
@@ -1397,6 +1530,11 @@ function activate(context) {
             }
         }),
     );
+
+    // Tabs that came back before this process did: on a reload VS Code may
+    // reconnect its terminals either side of the extension starting, and only
+    // the ones that land afterwards arrive as an event.
+    for (const terminal of vscode.window.terminals || []) adopt(terminal);
 }
 
 /**
@@ -1501,18 +1639,26 @@ const PLACES = Object.fromEntries(dashboard.PLACES.map(([key, label]) => [key, {
  * is given up by not calling their command is its own resolution of the
  * executable — `claude` here is whatever the shell's PATH finds, the same one a
  * terminal would run — and its progress notification.
+ *
+ * Nothing here opts out of terminal persistence, and that is deliberate. VS Code
+ * keeps a terminal across a reload by reconnecting to the process that never
+ * stopped, so the session inside it goes on running — and reloading is what
+ * installing a new build of this extension asks for. Claude Code's own extension
+ * passes `isTransient: true` (2.1.233, both of its `createTerminal` calls) and
+ * this used to copy it, which meant every reload killed the sessions this button
+ * had opened. After a full quit there is no process left to reconnect to: VS Code
+ * relaunches the shell and the tab comes back empty, which is where it is left —
+ * `claude` is not sent again, because that would be a new session wearing an old
+ * session's scrollback.
  */
 async function openClaude(context) {
     const where = PLACES[vscode.workspace.getConfiguration('claudeStatusline').get('openLocation')] || PLACES.activeGroup;
     const terminal = vscode.window.createTerminal({
         // The same env var Claude Code reads for its own terminal, so a machine
         // that renames one renames both.
-        name: process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code',
+        name: tabName(),
         iconPath: claudeIcon(context),
         location: where.location,
-        // A session is not worth restoring on the next window: what it was doing
-        // is in its transcript, not in a dead terminal.
-        isTransient: true,
     });
     terminal.show();
 
@@ -1535,16 +1681,10 @@ async function openClaude(context) {
             terminal.dispose();
         }
     });
-    // The pid is what ties this tab to a session: `claude` runs as a direct child
-    // of this shell. It is asked for once and kept, because the promise resolves
-    // after the process is up and the rename runs on a tick.
-    const tab = { terminal, pid: 0, named: '' };
-    ourTabs.add(tab);
-    terminal.processId.then((pid) => { tab.pid = pid || 0; }, () => { /* never started */ });
+    track(terminal);
 
     const closed = vscode.window.onDidCloseTerminal((t) => {
         if (t !== terminal) return;
-        ourTabs.delete(tab);
         integration.dispose();
         ended.dispose();
         closed.dispose();
@@ -1565,6 +1705,63 @@ async function openClaude(context) {
 // name they gave it — this renames what it started, and nothing else.
 const ourTabs = new Set();
 
+const tabFor = (terminal) => [...ourTabs].find((t) => t.terminal === terminal);
+
+// The name a tab is opened under, before a session renames it. The same env var
+// Claude Code reads for its own terminal, so a machine that renames one renames
+// both.
+const tabName = () => process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code';
+
+// The two files under `media/` a tab of ours is opened with. Matched by name
+// rather than by full path: a restored tab points at the directory of the
+// version that opened it, and that directory is renamed by every update.
+const ICONS = ['open-claude-light.svg', 'open-claude-dark.svg'];
+
+/**
+ * Is this a tab this extension opened, judged from the outside?
+ *
+ * A reload restarts this process while the shells keep running, so the tabs come
+ * back with nothing tying them to `ourTabs`. What VS Code does keep is what each
+ * was created with, and two things in there point here: the icon, which is a
+ * file of this extension, and the name a tab is opened under. Either will do,
+ * because neither is guaranteed to survive — and when neither does, the tab is
+ * simply left alone, which is what happened to every reloaded tab before.
+ */
+function looksLikeOurs(terminal) {
+    const opts = terminal.creationOptions || {};
+    const icon = opts.iconPath || {};
+    // A revived uri may be a plain object rather than a `vscode.Uri`, so both
+    // spellings of its path are read.
+    const named = (u) => ICONS.some((f) => String((u && (u.fsPath || u.path)) || '').endsWith(f));
+    return named(icon) || named(icon.light) || named(icon.dark) || opts.name === tabName();
+}
+
+/**
+ * Tabs VS Code brought back on its own, taken back under this extension's wing.
+ *
+ * Without this a restored tab keeps running its session and nothing else works:
+ * it is not renamed as the session renames itself, and it does not close when
+ * the session ends. Whether the session is still alive is not asked here — a
+ * tab revived empty after a quit is still this extension's tab, and the moment
+ * somebody runs `claude` in it the rename has something to say again.
+ */
+function adopt(terminal) {
+    if (looksLikeOurs(terminal)) track(terminal);
+}
+
+// The pid is what ties a tab to a session: `claude` runs as a direct child of
+// its shell. It is asked for once and kept, because the promise resolves after
+// the process is up and the rename runs on a tick. Taking the same terminal
+// twice is a no-op, which is what lets the button and the sweep both call it.
+function track(terminal) {
+    const already = tabFor(terminal);
+    if (already) return already;
+    const tab = { terminal, pid: 0, named: '' };
+    ourTabs.add(tab);
+    terminal.processId.then((pid) => { tab.pid = pid || 0; }, () => { /* never started */ });
+    return tab;
+}
+
 /**
  * The active tab, renamed to the title of the session running in it.
  *
@@ -1580,7 +1777,7 @@ const ourTabs = new Set();
 async function renameActiveTab(state) {
     if (vscode.workspace.getConfiguration('claudeStatusline').get('renameTabs') === false) return;
     const active = vscode.window.activeTerminal;
-    const tab = active && [...ourTabs].find((t) => t.terminal === active);
+    const tab = active && tabFor(active);
     if (!tab || !tab.pid) return;
 
     const session = s.sessionForShell(tab.pid);
@@ -1610,6 +1807,9 @@ module.exports = {
     // The section list behind both the tooltips and the Now tab, exported so a
     // test can hold the two renderings against each other.
     __statusNow: statusNow,
+    // The sidebar's session list, exported for the badge: what it counts and
+    // when it shows nothing are the parts worth pinning down.
+    __LiveSessionsTree: LiveSessionsTree,
     // The tick's own redraw, exported so a test can fire it without waiting a
     // minute for the interval.
     __refreshDashboard: refreshDashboard,

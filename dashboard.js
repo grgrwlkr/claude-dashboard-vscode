@@ -2112,6 +2112,76 @@ function nowTab(sections, workflows, metrics) {
     </section>`;
 }
 
+/**
+ * The same Now, for the sidebar — 250 to 400 px, where both of this page's wide
+ * devices fail: `tiles` puts four figures across a strip that has no room for
+ * two, and `.cols` balances panels into columns there is width for exactly one
+ * of. So the numbers become rows, the panels become plain sections, and the
+ * sections themselves are the ones the tooltips use — the sidebar cannot drift
+ * from the hover any more than the Now tab can.
+ *
+ * The workflow table is deliberately absent: it is six columns wide and lives
+ * one view below, in a tree that is already built for this width.
+ */
+/**
+ * Which of the status sections each sidebar view draws.
+ *
+ * Limits stand alone because they are the one thing worth reading without
+ * scrolling, and a view holds its own height: sharing a pane with the context
+ * and the session cost is what pushed the pace note under the fold. VS Code's
+ * `initialSize` sets the starting height, but only the first time — after that
+ * the user's own drag is remembered — so the guarantee has to come from the
+ * split rather than from a number in the manifest.
+ *
+ * `work` is on neither: it is the peers and the todo list, and the peers are the
+ * Live sessions tree one row below, read from the session registry rather than
+ * from this window's transcript.
+ */
+const SIDEBAR_VIEWS = {
+    limits: ['limits'],
+    session: ['context', 'money'],
+};
+
+function sidebarSections(sections, view) {
+    const want = SIDEBAR_VIEWS[view] || [];
+    return (sections || []).filter((section) => want.includes(section.id));
+}
+
+// What an empty pane says. Each names what is missing from itself: the limits
+// pane going quiet means the reading failed, while the session pane going quiet
+// only means nothing is running here — and saying "no limits have been read"
+// there was plainly wrong beside a limits pane that had just drawn them.
+const SIDEBAR_EMPTY = {
+    limits: 'No limits have been read yet.',
+    session: 'No Claude session is open in this window.',
+};
+
+function sidebarNow(sections, which) {
+    const rows = sections || [];
+    if (rows.length === 0) {
+        return `<p class="empty">${esc(SIDEBAR_EMPTY[which] || SIDEBAR_EMPTY.session)}</p>`;
+    }
+
+    return `<div class="side">
+        ${rows.map((section) => `<section class="side-sec" data-sec="${esc(section.id || '')}">
+            <h3>${esc(section.title)}</h3>
+            ${statusBlocks(section.blocks)}
+        </section>`).join('')}
+    </div>`;
+}
+
+/**
+ * The whole document for the sidebar view. The dashboard's page allows inline
+ * script because its tabs, sections and folds are all clicks; this one has none
+ * of that — it is a readout that the extension replaces on every tick — so its
+ * policy leaves script out entirely rather than allowing what nothing uses.
+ */
+function sidebarPage(sections, which) {
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
+<style>${STYLE}</style></head><body class="side-body">${sidebarNow(sections, which)}</body></html>`;
+}
+
 // Every choice on this tab, with the sentence that says what picking it does.
 // A dropdown hides all but one of these behind a click, which is the whole
 // reason they are drawn open: a setting nobody can see the alternatives to is a
@@ -2714,6 +2784,16 @@ ul.log li { margin: 2px 0; opacity: .85; }
   font-variant-numeric: tabular-nums; }
 .row-note { grid-column: 2 / -1; font-size: 11px; opacity: .45; }
 .row-note:empty { display: none; }
+/* The sidebar view. No panel borders and no card padding: at 250px those two
+   eat a third of the width, and the container already draws a frame and a
+   collapsible heading around everything here. */
+.side { display: flex; flex-direction: column; gap: 14px; padding: 4px 2px 10px; }
+.side-sec h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  opacity: .5; margin: 0 0 6px; font-weight: 600; }
+/* Wrapping rather than scrolling: a sidebar is resized by dragging its edge,
+   and a table that scrolls sideways inside it reads as broken rather than wide. */
+.side .now-table th[scope="row"] { white-space: normal; padding-right: 8px; }
+.side .row { grid-template-columns: 2.6rem 1fr auto; }
 .now-table { width: 100%; margin: 0; }
 .now-table th, .now-table td { border: none; padding: 3px 0; }
 .now-table th[scope="row"] { font: inherit; text-transform: none; letter-spacing: 0;
@@ -3432,7 +3512,7 @@ module.exports = {
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab,
-    limitsTab, weekLabel, nowTab, paceTrack, statusBlocks, meterTone,
+    limitsTab, weekLabel, nowTab, sidebarNow, sidebarPage, sidebarSections, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     // The places a session can be opened in — the cards on the Settings tab and,
     // through extension.js, the button's own table of what each one means.

@@ -765,6 +765,64 @@ test('the agents tab ranks subagent types by spend', () => {
 
 // `plural` defaults the plural to the word plus an `s`, which is wrong for
 // exactly the noun this page counts most often. It reached a listing screenshot.
+// The sidebar is 250–400 px wide, where both of the dashboard's wide devices
+// break: the four-across headline strip and the balanced columns. What is left
+// is the sections themselves — the same ones, in the same order, one per column.
+//
+// And only those. A summary strip above them repeated the two figures the first
+// section already draws, in a second format, four scroll-lines higher: the pane
+// opened on the weekly window twice and on the pace note not at all.
+test('the sidebar draws the sections themselves, and adds no summary of its own', () => {
+    const sections = [
+        { id: 'limits', title: 'limits', blocks: [{ kind: 'meters', rows: [{ label: '5h', value: '20%', pct: 20, note: '1h5m' }] }] },
+        { id: 'money', title: 'spend', blocks: [{ kind: 'table', rows: [['today', '~$4.20']] }] },
+    ];
+    const html = db.sidebarNow(sections, 'limits');
+
+    assert.match(html, /20%/);
+    assert.match(html, /~\$4\.20/);
+    // The first section stays first: limits lead on the dashboard too.
+    assert.ok(html.indexOf('limits') < html.indexOf('spend'));
+    assert.doesNotMatch(html, /class="tiles"/);
+    assert.doesNotMatch(html, /class="cols"/);
+    assert.doesNotMatch(html, /side-stat/);
+});
+
+// Each pane says what is missing from *it*. The limits pane going quiet means
+// the reading failed; the session pane going quiet only means no Claude session
+// is open in this window — and saying "no limits have been read" there was wrong
+// beside a limits pane that had just drawn them.
+test('an empty pane says what its own emptiness means', () => {
+    assert.match(db.sidebarNow([], 'limits'), /limits/i);
+    assert.doesNotMatch(db.sidebarNow([], 'limits'), /session is open/i);
+    assert.match(db.sidebarNow([], 'session'), /session is open in this window/i);
+    assert.doesNotMatch(db.sidebarNow([], 'session'), /no limits have been read/i);
+});
+
+// Limits get a view to themselves so that the one section worth seeing without
+// scrolling cannot be pushed under the fold by whatever is below it. And `work`
+// — the peers — is on neither view: the sessions are the tree one row down,
+// where they come from the registry rather than from a transcript.
+test('the sidebar splits the sections between its views and leaves the peers out', () => {
+    const sections = [
+        { id: 'limits', title: 'Limits', blocks: [] },
+        { id: 'context', title: 'opus 5', blocks: [] },
+        { id: 'money', title: '~$4 this session', blocks: [] },
+        { id: 'work', title: 'Other sessions here', blocks: [] },
+    ];
+    assert.deepEqual(db.sidebarSections(sections, 'limits').map((s) => s.id), ['limits']);
+    assert.deepEqual(db.sidebarSections(sections, 'session').map((s) => s.id), ['context', 'money']);
+});
+
+// The view has nothing to click, so its policy is stricter than the dashboard's:
+// styles inline, scripts nowhere.
+test('the sidebar page states a policy that forbids script outright', () => {
+    const html = db.sidebarPage([], 'limits');
+    assert.match(html, /Content-Security-Policy/);
+    assert.doesNotMatch(html, /script-src/);
+    assert.doesNotMatch(html, /<script/);
+});
+
 test('a count of replies is spelled the English way', () => {
     const total = ix.summarize(demoIndex());
     total.agents = { 'general-purpose': bucket(5, 2843) };

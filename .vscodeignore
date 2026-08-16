@@ -23,10 +23,11 @@ extension/**
 
 # The marketplace listing pulls its screenshots from raw.githubusercontent, so
 # the images live in git and stay out of the package — only the images the editor
-# itself loads have to ship: the extension icon, and the two theme halves of the
-# title-bar button, which the editor resolves from `package.json` at runtime and
-# draws as blank if they are not there.
+# itself loads have to ship: the extension icon, the Activity Bar glyph, and the
+# two theme halves of the title-bar button, all of which the editor resolves from
+# `package.json` at runtime and draws as blank if they are not there.
 media/**
 !media/icon.png
+!media/bar-icon.svg
 !media/open-claude-dark.svg
 !media/open-claude-light.svg

@@ -9,6 +9,69 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.30.0] — 2026-08-16
+
+### Added
+
+- **The Activity Bar container is now a panel rather than one tree**, and it is
+  called **Claude Dashboard** rather than "Claude", which read as the client
+  itself. Four sections: **Limits** — the 5-hour window above the weekly one, how
+  far ahead or behind plan the spend is, and when the window would run out at this
+  rate; **Session** — the model with its effort and advisor, the context window
+  and its distance to auto-compact, and what the session open in this window has
+  cost; **Live sessions** — every session on the machine whose process is alive,
+  named by its project with its client and state beside it; and the **Workflow
+  runs** tree that was there before. The first two are the status bar's own
+  tooltip sections, so the panel cannot drift from the hover.
+
+  **Session** hides itself when no Claude session is open in this window, rather
+  than standing empty: an empty pane still claims its share of the sidebar's
+  height, and that share comes out of the limits above it.
+
+  Limits have a pane to themselves rather than a place in a longer one: the one
+  section worth reading without scrolling should not be pushed under the fold by
+  what sits below it. `initialSize` sets the starting heights, but only until the
+  first time the divider is dragged — after that VS Code remembers the drag, and
+  the split is what keeps the guarantee.
+- **The container's icon is the extension's own mark**, one colour at 24×24 as
+  VS Code renders it, instead of the stock gear it had been wearing: the logo's
+  arc over the three bars.
+
+  Two things about that file are worth knowing before touching it again. It has
+  no faint backing ring, though the marketplace icon does — the editor draws this
+  as a single-colour glyph, so a shape at two opacities that reads as two tones in
+  colour comes out as one solid circle here, which is what the first attempt did.
+  And the editor caches the glyph **by path**: replacing the bytes changes nothing
+  a reload will show, so a redrawn icon needs a new file name. This one is
+  `media/bar-icon.svg` for exactly that reason.
+- **A badge on that icon counts live sessions**, and shows nothing when there are
+  none — a badge reading nought is a dot that never leaves. It counts sessions
+  rather than a percentage because a badge is a number: it cannot spell `%`.
+
+### Fixed
+
+- **A session opened by the button survives a window reload.** The tab was
+  created with `isTransient: true`, which is VS Code's opt-out of terminal
+  persistence "on restart and reload" — so every reload took the session with it,
+  and installing a new build of this extension *is* a reload. Without the flag VS
+  Code reconnects the tab to a shell that never stopped, and the session inside
+  it goes on running. Claude Code's own extension sets the same flag (2.1.233,
+  both of its `createTerminal` calls) and this had copied it.
+
+  A tab that comes back is taken over again, so it keeps following its session's
+  name. Closing itself when the session ends is wired the same way but is not
+  promised across a reload: that depends on VS Code reporting the end of a
+  command which started before the extension host did. What identifies a tab
+  after a reload is what it was created with — the icon, which is a file of this extension, or
+  the name a tab is opened under — because the entry that tied it to its session
+  died with the previous extension host. Neither is guaranteed to survive, and
+  when neither does the tab is left alone: still running, just no longer renamed.
+
+  A full quit is the other half and is left alone deliberately. There is no
+  process to reconnect to, so VS Code relaunches the shell and the tab comes back
+  with its scrollback and no `claude` in it. Sending the command again would
+  start a *new* session wearing an old session's history.
+
 ## [0.28.0] — 2026-08-16
 
 ### Fixed

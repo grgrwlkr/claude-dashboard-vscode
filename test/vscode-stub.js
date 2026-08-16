@@ -14,7 +14,7 @@ const executed = [];
 const installed = new Map();
 const terminals = [];
 const views = new Map();
-const listeners = { config: [], window: [], integration: [], ended: [], closed: [], activeTerminal: [] };
+const listeners = { config: [], window: [], integration: [], ended: [], closed: [], activeTerminal: [], open: [] };
 let settings = {};
 let saveTarget;
 let nextPid;
@@ -81,10 +81,15 @@ const vscode = {
         // it was shown, and what was run in it. The three terminal events are
         // driven by the helpers below, so a test can play the shell's half.
         activeTerminal: undefined,
+        terminals,
         onDidChangeActiveTerminal: (cb) => subscribe(listeners.activeTerminal, cb),
+        onDidOpenTerminal: (cb) => subscribe(listeners.open, cb),
         createTerminal(options) {
             const terminal = {
                 options,
+                // What the real one exposes about how a terminal was made — the
+                // only thing left of a tab VS Code restored on its own.
+                creationOptions: options,
                 name: options.name,
                 shown: 0,
                 sent: [],
@@ -103,12 +108,17 @@ const vscode = {
                 },
             };
             terminals.push(terminal);
+            for (const cb of [...listeners.open]) cb(terminal);
             return terminal;
         },
         onDidChangeTerminalShellIntegration: (cb) => subscribe(listeners.integration, cb),
         onDidEndTerminalShellExecution: (cb) => subscribe(listeners.ended, cb),
         onDidCloseTerminal: (cb) => subscribe(listeners.closed, cb),
         createTreeView(id, opts) { views.set(id, opts.treeDataProvider); return disposable(); },
+        // The webview half of the same registry. A provider is kept under its
+        // view id like a tree's is, so a test can resolve it with a view of its
+        // own and read back what the extension drew.
+        registerWebviewViewProvider(id, provider) { views.set(id, provider); return disposable(); },
         showQuickPick: async () => undefined,
         showInformationMessage: async () => undefined,
         showWarningMessage: async (message) => { warnings.push(message); },
@@ -199,6 +209,29 @@ vscode.__shellExecutionEnds = (terminal, commandLine, exitCode = 0) => {
 // The pid the next terminal's shell will report, which is what ties a tab to a
 // session. Set before opening one: the pid is subscribed to at creation.
 vscode.__nextTerminalPid = (pid) => { nextPid = pid; };
+// A tab VS Code brought back on its own after a reload: the extension never
+// created it, so all it has is what it was originally created with and a shell
+// that has been running the whole time.
+vscode.__restoreTerminal = ({ name = 'Claude Code', iconPath, pid = 4242 } = {}) => {
+    const terminal = {
+        creationOptions: { name, iconPath },
+        name,
+        shown: 0,
+        sent: [],
+        executed: [],
+        disposed: false,
+        processId: Promise.resolve(pid),
+        show() { this.shown++; },
+        sendText(text) { this.sent.push(text); },
+        dispose() {
+            this.disposed = true;
+            for (const cb of [...listeners.closed]) cb(this);
+        },
+    };
+    terminals.push(terminal);
+    for (const cb of [...listeners.open]) cb(terminal);
+    return terminal;
+};
 vscode.__activateTerminal = (terminal) => {
     vscode.window.activeTerminal = terminal;
     for (const cb of [...listeners.activeTerminal]) cb(terminal);
@@ -236,6 +269,7 @@ vscode.__reset = () => {
     listeners.ended.length = 0;
     listeners.closed.length = 0;
     listeners.activeTerminal.length = 0;
+    listeners.open.length = 0;
     vscode.window.activeTerminal = undefined;
     settings = {};
     saveTarget = undefined;

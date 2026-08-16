@@ -302,6 +302,16 @@ survives is on disk, and this extension reads it into three surfaces: a **Workfl
 runs** tree in the Activity Bar (run → phase → agent), the runs table on the
 dashboard, and the placeholders above.
 
+That tree is the last of four sections in the **Claude Dashboard** container.
+Above it sit **Limits** — the 5-hour window above the weekly one, how far ahead
+or behind plan the spend is, and when the window would run out at this rate;
+**Session** — the model, the context window and what the session open in this
+window has cost, hidden entirely when there is no session here; and **Live
+sessions**, every session on the machine whose process is alive, named by its
+project. The first two are the status bar's own tooltip sections, so the panel
+and the hover cannot disagree. The icon carries a badge with the number of live
+sessions, and no badge at all when nothing is running.
+
 A run is in one of three states — **running** (no final snapshot, the owning
 session is alive, the directory moved in the last ten minutes), **finished** (the
 client wrote its one snapshot), and **abandoned** (everything else). The third is
@@ -375,6 +385,14 @@ three places are a tab beside this one, the terminal panel at the bottom, and a
 window of its own; the setting is read at the moment you press the button, and
 the button's hover names the place it will use. Right-click the title bar to hide
 whichever of the two buttons you would rather not have.
+
+A session opened this way survives a window reload: VS Code reconnects the tab to
+a shell that never stopped, and the tab is picked back up so that it keeps
+following the session's name. A full quit is different — there is no process left
+to reconnect to, so the tab comes back with its scrollback and no `claude` in it,
+and starting one again is yours to do. Nothing survives if
+`terminal.integrated.enablePersistentSessions` is off, which is VS Code's own
+switch for all of this.
 
 The same button sits in the status bar, left of every segment — on whichever side
 of the bar `claudeStatusline.alignment` puts them — as `$(terminal)$(sparkle)`,
