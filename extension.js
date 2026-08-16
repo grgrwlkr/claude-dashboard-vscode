@@ -28,6 +28,43 @@ const CONTEXT_TICK = 10;
 // shell's PATH like any other command — no path of ours to go stale.
 const CLAUDE_COMMAND = 'claude';
 
+// The aliases `--model` takes and the levels `--effort` takes, from the one list
+// each that the page, the manifest and this quick pick all read — `dashboard.js`,
+// beside the other choices the Settings tab draws. The empty first entry is the
+// page's "client decides"; a pick has nothing to offer for it, so it is dropped.
+const values = (list) => list.map(([value]) => value).filter(Boolean);
+
+// A value is quoted because it is being written into a shell, and `opus[1m]` is
+// the case that decides it: unquoted, zsh reads the brackets as a glob and
+// answers `no matches found: opus[1m]` without running anything at all.
+const quoted = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+
+/**
+ * The command line the button runs.
+ *
+ * Flags first, in a fixed order, then whatever the user wrote themselves — their
+ * text goes in as typed, because quoting it would break the moment it holds more
+ * than one argument.
+ */
+function claudeCommand({ model, effort, advisor, args } = {}) {
+    const parts = [CLAUDE_COMMAND];
+    if (model) parts.push('--model', quoted(model));
+    if (effort) parts.push('--effort', quoted(effort));
+    if (advisor) parts.push('--advisor', quoted(advisor));
+    if (args) parts.push(String(args).trim());
+    return parts.join(' ');
+}
+
+const launchSettings = () => {
+    const conf = vscode.workspace.getConfiguration('claudeStatusline');
+    return {
+        model: conf.get('model') || '',
+        effort: conf.get('effort') || '',
+        advisor: conf.get('advisor') || '',
+        args: conf.get('launchArgs') || '',
+    };
+};
+
 
 // StatusBarItem has no arbitrary colors — only these three states — so the
 // 50/80 thresholds from statusline.sh map onto them one to one.
@@ -964,6 +1001,12 @@ function configView(state) {
         alignment: cfg.get('alignment'),
         priority: cfg.get('priority'),
         openLocation: cfg.get('openLocation'),
+        // Read back as well as written: the page redraws from this, so a key
+        // missing here is a choice that looks forgotten the moment it is saved.
+        model: cfg.get('model'),
+        effort: cfg.get('effort'),
+        advisor: cfg.get('advisor'),
+        launchArgs: cfg.get('launchArgs'),
         refreshInterval: cfg.get('refreshInterval'),
         monthlyBudget: cfg.get('monthlyBudget'),
         checkPluginUpdates: cfg.get('checkPluginUpdates'),
@@ -982,7 +1025,13 @@ function configView(state) {
 // avoid. The list is the gate: a message naming anything else is dropped.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
     'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog',
-    'openLocation'];
+    'openLocation', 'model', 'effort', 'advisor', 'launchArgs'];
+
+// The one key that ignores the scope the page offers. `launchArgs` is declared
+// `machine` in the manifest — free text going into a shell is not something a
+// repository gets to set — and VS Code rejects a workspace write to such a key
+// with an error that would take the rest of the save down with it.
+const USER_ONLY = ['launchArgs'];
 
 // The full changelog, when the user has allowed the fetch. One public file, no
 // credentials, and at most once an hour — kept in the extension's own storage
@@ -1206,7 +1255,9 @@ async function handleMessage(context, msg) {
         const cfg = vscode.workspace.getConfiguration('claudeStatusline');
         try {
             for (const key of WRITABLE) {
-                if (msg.settings && msg.settings[key] !== undefined) await cfg.update(key, msg.settings[key], target);
+                if (!msg.settings || msg.settings[key] === undefined) continue;
+                const where = USER_ONLY.includes(key) ? vscode.ConfigurationTarget.Global : target;
+                await cfg.update(key, msg.settings[key], where);
             }
             panel.webview.postMessage({ type: 'saved' });
         } catch (err) {
@@ -1253,6 +1304,11 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
             'claudeStatusline.dashboard', 'Claude Dashboard', vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true },
         );
+        // A webview tab wears the generic editor glyph otherwise. This is the
+        // extension's own mark rather than a codicon, because among twenty tabs
+        // it is what the eye actually looks for — and it is a property of the
+        // panel, not an option of `createWebviewPanel`.
+        panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'icon.svg');
         panel.onDidDispose(() => { panel = null; });
         panel.webview.onDidReceiveMessage((msg) => handleMessage(context, msg));
         // A panel behind another editor tab is left alone by the tick, so the
@@ -1349,7 +1405,12 @@ function applyConfig(state) {
     // and a button that says "in a tab" while opening a panel is worse than one
     // that says nothing. applyConfig runs on every settings change, so the two
     // cannot drift.
-    btn.tooltip = (PLACES[cfg.get('openLocation')] || PLACES.activeGroup).says;
+    // The model and the effort join it for the same reason: they are settings
+    // too, chosen once and easy to forget, and the session starts on them.
+    const launch = launchSettings();
+    const on = [launch.model, launch.effort && `effort ${launch.effort}`].filter(Boolean).join(', ');
+    btn.tooltip = [(PLACES[cfg.get('openLocation')] || PLACES.activeGroup).says, on && `on ${on}`]
+        .filter(Boolean).join(' · ');
     btn.command = 'claudeStatusline.openClaude';
     btn.show();
     state.openBtn = btn;
@@ -1470,7 +1531,7 @@ function activate(context) {
         // A tab restored after a reload opens as far as this process is
         // concerned, so this is where it is recognised. The sweep below covers
         // the other order, where the tabs were back before the extension was.
-        vscode.window.onDidOpenTerminal((t) => adopt(t)),
+        vscode.window.onDidOpenTerminal((t) => adopt(t, context)),
         // Closing one is the only way a tab leaves the set, whoever put it
         // there: the button's own tabs and the ones taken over after a reload.
         vscode.window.onDidCloseTerminal((t) => {
@@ -1504,6 +1565,7 @@ function activate(context) {
         }),
         vscode.commands.registerCommand('claudeStatusline.placeholders', () => showPlaceholders(state)),
         vscode.commands.registerCommand('claudeStatusline.openClaude', () => openClaude(context)),
+        vscode.commands.registerCommand('claudeStatusline.openClaudeWith', () => openClaudeWith(context)),
         vscode.commands.registerCommand('claudeStatusline.copyRunId', async (node) => {
             const run = node && node.run;
             if (!run) return;
@@ -1534,7 +1596,7 @@ function activate(context) {
     // Tabs that came back before this process did: on a reload VS Code may
     // reconnect its terminals either side of the extension starting, and only
     // the ones that land afterwards arrive as an event.
-    for (const terminal of vscode.window.terminals || []) adopt(terminal);
+    for (const terminal of vscode.window.terminals || []) adopt(terminal, context);
 }
 
 /**
@@ -1651,14 +1713,44 @@ const PLACES = Object.fromEntries(dashboard.PLACES.map(([key, label]) => [key, {
  * `claude` is not sent again, because that would be a new session wearing an old
  * session's scrollback.
  */
-async function openClaude(context) {
+/**
+ * The same session, on a model and an effort chosen for this run alone.
+ *
+ * Two picks rather than one list of pairs: the pairs multiply to forty rows, and
+ * the answer to "which model" is not usually the same kind of decision as "how
+ * hard should it think". Escape at either step means no session — the button
+ * next to this one is there for starting one without being asked anything.
+ */
+async function openClaudeWith(context) {
+    const settings = launchSettings();
+    const pick = async (values, current, title) => vscode.window.showQuickPick(
+        values.map((value) => ({
+            label: value,
+            description: value === current ? 'from the settings' : undefined,
+        })),
+        { title, placeHolder: current ? `settings say ${current}` : 'the client decides' },
+    );
+
+    const model = await pick(values(dashboard.MODELS), settings.model, 'Model for this session');
+    if (!model) return undefined;
+    const effort = await pick(values(dashboard.EFFORTS), settings.effort, 'Effort for this session');
+    if (!effort) return undefined;
+    return openClaude(context, { model: model.label, effort: effort.label, args: settings.args });
+}
+
+async function openClaude(context, launch = launchSettings()) {
     const where = PLACES[vscode.workspace.getConfiguration('claudeStatusline').get('openLocation')] || PLACES.activeGroup;
+    const command = claudeCommand(launch);
     const terminal = vscode.window.createTerminal({
         // The same env var Claude Code reads for its own terminal, so a machine
         // that renames one renames both.
         name: tabName(),
         iconPath: claudeIcon(context),
         location: where.location,
+        // Not for the shell, which never reads it — for the next window. This is
+        // what says "this tab is ours" after a reload has thrown away everything
+        // else about how it was made.
+        env: { [TAB_MARK]: '1' },
     });
     terminal.show();
 
@@ -1668,20 +1760,20 @@ async function openClaude(context) {
     let sent = false;
     const send = (run) => { if (!sent) { sent = true; run(); } };
     const integration = vscode.window.onDidChangeTerminalShellIntegration((e) => {
-        if (e.terminal === terminal) send(() => e.shellIntegration.executeCommand(CLAUDE_COMMAND));
+        if (e.terminal === terminal) send(() => e.shellIntegration.executeCommand(command));
     });
-    setTimeout(() => send(() => terminal.sendText(CLAUDE_COMMAND)), SHELL_INTEGRATION_WAIT);
+    setTimeout(() => send(() => terminal.sendText(command)), SHELL_INTEGRATION_WAIT);
 
     // A session that ended cleanly leaves a shell nobody asked for sitting in a
     // tab, so the tab goes with it. A session that failed keeps its terminal:
     // `claude: command not found` is the answer to why the button did nothing,
     // and closing the tab would take it away.
     const ended = vscode.window.onDidEndTerminalShellExecution((e) => {
-        if (e.terminal === terminal && e.execution.commandLine.value.trim() === CLAUDE_COMMAND && e.exitCode === 0) {
+        if (e.terminal === terminal && e.execution.commandLine.value.trim() === command && e.exitCode === 0) {
             terminal.dispose();
         }
     });
-    track(terminal);
+    track(terminal, context);
 
     const closed = vscode.window.onDidCloseTerminal((t) => {
         if (t !== terminal) return;
@@ -1712,29 +1804,46 @@ const tabFor = (terminal) => [...ourTabs].find((t) => t.terminal === terminal);
 // both.
 const tabName = () => process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code';
 
-// The two files under `media/` a tab of ours is opened with. Matched by name
-// rather than by full path: a restored tab points at the directory of the
-// version that opened it, and that directory is renamed by every update.
-const ICONS = ['open-claude-light.svg', 'open-claude-dark.svg'];
+// A mark put into the environment of every tab this button opens, and the one
+// thing about such a tab that a reload is known to carry: the extension host
+// rebuilds `creationOptions` for a terminal it did not create from six fields —
+// `name`, `shellPath`, `shellArgs`, `cwd`, `env`, `hideFromUser` — and the icon
+// is not among them (`$acceptTerminalOpened`, VS Code 1.121).
+const TAB_MARK = 'CLAUDE_DASHBOARD_TAB';
+
+// Pids of the tabs this button opened, kept because the mark above is a
+// reasonable bet rather than a promise. An entry carries the moment it was made:
+// the operating system reuses pids, and a day is long past the life of a window.
+const TABS_KEY = 'openTabs';
+const TAB_MEMORY = 24 * 60 * 60 * 1000;
+
+function rememberTab(context, pid) {
+    if (!pid || !context.globalState) return;
+    const now = Date.now();
+    const kept = (context.globalState.get(TABS_KEY) || [])
+        .filter((t) => t && t.pid !== pid && now - t.at < TAB_MEMORY);
+    context.globalState.update(TABS_KEY, [...kept, { pid, at: now }]);
+}
+
+const wasOurs = (context, pid) => Boolean(pid && context.globalState
+    && (context.globalState.get(TABS_KEY) || []).some((t) => t && t.pid === pid));
 
 /**
  * Is this a tab this extension opened, judged from the outside?
  *
  * A reload restarts this process while the shells keep running, so the tabs come
- * back with nothing tying them to `ourTabs`. What VS Code does keep is what each
- * was created with, and two things in there point here: the icon, which is a
- * file of this extension, and the name a tab is opened under. Either will do,
- * because neither is guaranteed to survive — and when neither does, the tab is
- * simply left alone, which is what happened to every reloaded tab before.
+ * back with nothing tying them to `ourTabs`, and almost nothing of how they were
+ * made: the icon does not survive the trip, and the name is whatever the tab was
+ * last renamed to, which after one session is no longer the name it was opened
+ * under. Two witnesses are left, and either will do — the mark in the
+ * environment, and this extension's own note of the pid.
+ *
+ * Judging by the name was tried and is worse than useless: Claude Code's own
+ * button opens terminals under exactly the same one, so this would rename and
+ * close somebody else's tab.
  */
-function looksLikeOurs(terminal) {
-    const opts = terminal.creationOptions || {};
-    const icon = opts.iconPath || {};
-    // A revived uri may be a plain object rather than a `vscode.Uri`, so both
-    // spellings of its path are read.
-    const named = (u) => ICONS.some((f) => String((u && (u.fsPath || u.path)) || '').endsWith(f));
-    return named(icon) || named(icon.light) || named(icon.dark) || opts.name === tabName();
-}
+const looksLikeOurs = (terminal) => Boolean((terminal.creationOptions || {}).env
+    && terminal.creationOptions.env[TAB_MARK]);
 
 /**
  * Tabs VS Code brought back on its own, taken back under this extension's wing.
@@ -1744,21 +1853,31 @@ function looksLikeOurs(terminal) {
  * the session ends. Whether the session is still alive is not asked here — a
  * tab revived empty after a quit is still this extension's tab, and the moment
  * somebody runs `claude` in it the rename has something to say again.
+ *
+ * The pid arrives through a promise, so the second witness can only be asked for
+ * once it lands; the first is there straight away.
  */
-function adopt(terminal) {
-    if (looksLikeOurs(terminal)) track(terminal);
+function adopt(terminal, context) {
+    if (tabFor(terminal)) return;
+    if (looksLikeOurs(terminal)) { track(terminal, context); return; }
+    terminal.processId.then((pid) => {
+        if (wasOurs(context, pid) && !tabFor(terminal)) track(terminal, context);
+    }, () => { /* the shell never started */ });
 }
 
 // The pid is what ties a tab to a session: `claude` runs as a direct child of
 // its shell. It is asked for once and kept, because the promise resolves after
 // the process is up and the rename runs on a tick. Taking the same terminal
 // twice is a no-op, which is what lets the button and the sweep both call it.
-function track(terminal) {
+function track(terminal, context) {
     const already = tabFor(terminal);
     if (already) return already;
     const tab = { terminal, pid: 0, named: '' };
     ourTabs.add(tab);
-    terminal.processId.then((pid) => { tab.pid = pid || 0; }, () => { /* never started */ });
+    terminal.processId.then((pid) => {
+        tab.pid = pid || 0;
+        if (context) rememberTab(context, tab.pid);
+    }, () => { /* never started */ });
     return tab;
 }
 

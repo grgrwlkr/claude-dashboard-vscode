@@ -44,7 +44,14 @@ function activate() {
     });
     vscode.__setWorkspace('');
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-cold-'));
-    const context = { subscriptions: [], globalStorageUri: { fsPath: storage } };
+    // `extensionUri` is not optional in a real context — the icons of the button
+    // and of the dashboard tab are resolved from it — so the stand-in carries it
+    // too, pointed at the repository the icons live in.
+    const context = {
+        subscriptions: [],
+        globalStorageUri: { fsPath: storage },
+        extensionUri: { fsPath: path.join(__dirname, '..'), scheme: 'file' },
+    };
     ext.activate(context);
     return {
         dispose: () => {

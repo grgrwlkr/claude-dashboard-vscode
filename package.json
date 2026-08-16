@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashboard & Statusline for Claude Code",
   "description": "Unofficial. A 23-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.30.0",
+  "version": "0.32.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -68,6 +68,10 @@
           "light": "media/open-claude-light.svg",
           "dark": "media/open-claude-dark.svg"
         }
+      },
+      {
+        "command": "claudeStatusline.openClaudeWith",
+        "title": "Claude: Open Claude Code with…"
       },
       {
         "command": "claudeStatusline.reindex",
@@ -222,6 +226,81 @@
           ],
           "default": "activeGroup",
           "markdownDescription": "Where **Open Claude Code** puts the session — the button in the status bar, the one in the editor's title bar, and the command, all three.\n\nThe session is the same everywhere: a terminal running `claude` from the shell's `PATH`. Only the place differs, and it is read at the moment you press the button, so changing it needs no reload."
+        },
+        "claudeStatusline.model": {
+          "type": "string",
+          "enum": [
+            "",
+            "opus",
+            "opus[1m]",
+            "sonnet",
+            "sonnet[1m]",
+            "fable",
+            "fable[1m]",
+            "haiku",
+            "best",
+            "opusplan"
+          ],
+          "enumDescriptions": [
+            "Whatever the client would start on by itself — no --model flag is passed.",
+            "Latest Opus, on its ordinary context window.",
+            "Latest Opus with the million-token context window — a variant of the same model, not the same thing as the entry above.",
+            "Latest Sonnet, on its ordinary context window.",
+            "Latest Sonnet with the million-token context window.",
+            "Latest Fable, on its ordinary context window.",
+            "Latest Fable with the million-token context window.",
+            "Latest Haiku.",
+            "Whichever the client considers best for the task.",
+            "Opus while planning, Sonnet for everything else."
+          ],
+          "default": "",
+          "markdownDescription": "Start the session on this model, as `claude --model <alias>`.\n\nThe list is the aliases the client itself accepts; a dated or otherwise exact model id goes in `claudeStatusline.launchArgs` instead, as `--model claude-opus-5-20260101`.\n\nEmpty means no flag at all, which leaves the choice to the client — its own settings, the project's `.claude/settings.json`, and whatever `/model` was last set to."
+        },
+        "claudeStatusline.effort": {
+          "type": "string",
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "enumDescriptions": [
+            "Whatever the client would start on by itself — no --effort flag is passed.",
+            "Shallowest reasoning, fastest answers.",
+            "Moderate reasoning.",
+            "Deep reasoning — the default of most models.",
+            "Deeper still.",
+            "Deepest reasoning, at the cost of tokens and time."
+          ],
+          "default": "",
+          "markdownDescription": "Start the session at this effort, as `claude --effort <level>`.\n\nEmpty means no flag, leaving the level to the client and its settings. A model that does not offer the level asked for quietly runs at the highest one it has."
+        },
+        "claudeStatusline.advisor": {
+          "type": "string",
+          "enum": [
+            "",
+            "opus",
+            "sonnet",
+            "fable",
+            "haiku"
+          ],
+          "enumDescriptions": [
+            "No advisor — the flag is not passed and the client's own setting stands.",
+            "Latest Opus as the advisor.",
+            "Latest Sonnet as the advisor.",
+            "Latest Fable as the advisor.",
+            "Latest Haiku as the advisor."
+          ],
+          "default": "",
+          "markdownDescription": "Turn on the server-side advisor for the session, as `claude --advisor <model>` — a second model that reads the whole conversation and advises the one doing the work.\n\nThe client hides this flag from its own `--help`, but it is a real option and takes an alias or a full model id; an exact id goes in `claudeStatusline.launchArgs` instead.\n\nEmpty passes no flag, which leaves whatever `advisorModel` the client already has. The advisor must rank at or above the model it advises, and the client refuses the pair if it does not."
+        },
+        "claudeStatusline.launchArgs": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Anything else to put on the command line, after the two flags above — `--permission-mode acceptEdits`, `--fallback-model sonnet`, an exact model id.\n\nWritten into the shell exactly as typed, so quoting is yours: a value with brackets in it, such as a `[1m]` suffix, has to be quoted or the shell will read it as a pattern.\n\nThis one is yours alone — a project cannot set it through `.vscode/settings.json`, because free text going into a shell is not something a repository you opened should be able to choose."
         },
         "claudeStatusline.renameTabs": {
           "type": "boolean",

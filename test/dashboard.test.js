@@ -1201,6 +1201,62 @@ test('the hover panel has an opaque base under whatever the theme provides', () 
     assert.match(rule, /background-image:\s*linear-gradient\(var\(--vscode-editorHoverWidget-background/);
 });
 
+// What a session starts with is not what the status bar does, and four fields
+// about one command line read as a list of unrelated switches when they sit
+// among them. They get a panel, and the panel comes before the bar's own.
+test('what a session starts with has a panel of its own', () => {
+    const html = db.settingsTab({ segments: ['{today}'], palette: [], presets: [] });
+    const launch = html.indexOf('Starting a session');
+    const behaviour = html.indexOf('Behaviour');
+    assert.ok(launch > 0, 'the panel must exist');
+    assert.ok(behaviour > launch, 'and sit before the bar’s own settings');
+    for (const mark of ['name="model"', 'name="effort"', 'name="advisor"', 'id="launchArgs"', 'name="openLocation"']) {
+        const at = html.indexOf(mark);
+        assert.ok(at > launch && at < behaviour, `${mark} belongs in the launch panel`);
+    }
+});
+
+// Save belongs to the whole tab, not to whichever panel it happened to be
+// written into — it was the last field of "Behaviour", which reads as though it
+// saved that panel alone. And a form that says nothing about having been edited
+// leaves the reader to remember: the bar carries the state instead.
+test('save sits outside the panels and says when there is something to save', () => {
+    const html = db.settingsTab({ segments: ['{today}'], palette: [], presets: [] });
+    const bar = html.indexOf('class="save-bar"');
+    assert.ok(bar > 0, 'the bar must exist');
+    // Every panel opened before it has also been closed before it — which is
+    // what "outside the panels" means, and what comparing against the last
+    // `</section>` in the whole page does not test: that one closes the tab.
+    const before = html.slice(0, bar);
+    assert.ok(before.lastIndexOf('</section>') > before.lastIndexOf('<section class="panel"'),
+        'the bar sits between the panels and the end of the tab, not inside a panel');
+    for (const mark of ['id="save"', 'name="scope"', 'id="dirty"']) {
+        assert.ok(html.indexOf(mark) > bar, `${mark} belongs to the bar`);
+    }
+    // Nothing has been touched yet, so there is nothing to save.
+    assert.match(html.slice(bar), /<button class="btn primary" id="save" disabled>/);
+});
+
+// A text input with no width of its own is whatever the browser makes it —
+// about twenty characters, which is not enough to see one flag, let alone
+// several. The number fields beside it are narrow on purpose and this one must
+// not inherit that.
+test('the extra-arguments field is given room to type in', () => {
+    const html = db.settingsTab({ segments: ['{today}'], palette: [], presets: [] });
+    const input = html.match(/<input[^>]*id="launchArgs"[^>]*>/);
+    assert.ok(input, 'the field must be on the page at all');
+    assert.match(input[0], /class="[^"]*\bwide\b/);
+    // Keyed on the container the field actually sits in. The first attempt wrote
+    // `.form input.wide`, which is a rule this page never matches — a test on the
+    // text of the stylesheet passes just the same, and only the rendered page
+    // says the field is still 147 pixels wide.
+    const rule = db.STYLE.split('.field input.wide')[1].split('}')[0];
+    assert.match(rule, /width:\s*100%/);
+    const before = html.slice(0, html.indexOf('id="launchArgs"'));
+    assert.ok(before.lastIndexOf('class="field"') > before.lastIndexOf('class="panel"'),
+        'the field must sit inside the container the rule is keyed on');
+});
+
 // Most plugins live inside the marketplace repository, so their update is the
 // marketplace's and there is no second version to compare. The row says which
 // of the two it is rather than leaving a reader to infer it from a line above.

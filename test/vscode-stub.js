@@ -13,6 +13,9 @@ const commands = new Map();
 const executed = [];
 const installed = new Map();
 const terminals = [];
+// What was offered in a quick pick, and what the user picks next.
+const quickPicks = [];
+const picks = [];
 const views = new Map();
 const listeners = { config: [], window: [], integration: [], ended: [], closed: [], activeTerminal: [], open: [] };
 let settings = {};
@@ -119,7 +122,12 @@ const vscode = {
         // view id like a tree's is, so a test can resolve it with a view of its
         // own and read back what the extension drew.
         registerWebviewViewProvider(id, provider) { views.set(id, provider); return disposable(); },
-        showQuickPick: async () => undefined,
+        // Each call takes the next answer a test has queued; nothing queued is a
+        // dialog the user dismissed, which is what `undefined` means here.
+        showQuickPick: async (items, options) => {
+            quickPicks.push({ items: await items, options });
+            return picks.shift();
+        },
         showInformationMessage: async () => undefined,
         showWarningMessage: async (message) => { warnings.push(message); },
         showTextDocument: async () => undefined,
@@ -208,13 +216,18 @@ vscode.__shellExecutionEnds = (terminal, commandLine, exitCode = 0) => {
 };
 // The pid the next terminal's shell will report, which is what ties a tab to a
 // session. Set before opening one: the pid is subscribed to at creation.
+vscode.__quickPicks = quickPicks;
+vscode.__answerQuickPicks = (...answers) => { picks.push(...answers); };
 vscode.__nextTerminalPid = (pid) => { nextPid = pid; };
 // A tab VS Code brought back on its own after a reload: the extension never
 // created it, so all it has is what it was originally created with and a shell
 // that has been running the whole time.
-vscode.__restoreTerminal = ({ name = 'Claude Code', iconPath, pid = 4242 } = {}) => {
+vscode.__restoreTerminal = ({ name = 'Claude Code', iconPath, env, pid = 4242 } = {}) => {
     const terminal = {
-        creationOptions: { name, iconPath },
+        // The six fields the extension host rebuilds for a terminal it did not
+        // create — the icon is deliberately absent from the real ones, and a
+        // caller that passes it is testing that it is not what we go by.
+        creationOptions: { name, iconPath, env },
         name,
         shown: 0,
         sent: [],
@@ -262,6 +275,8 @@ vscode.__reset = () => {
     executed.length = 0;
     installed.clear();
     terminals.length = 0;
+    quickPicks.length = 0;
+    picks.length = 0;
     views.clear();
     listeners.config.length = 0;
     listeners.window.length = 0;

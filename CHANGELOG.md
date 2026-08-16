@@ -9,6 +9,87 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.32.0] — 2026-08-16
+
+### Added
+
+- **The session can be started on a model, an effort and an advisor of your own.**
+  `claudeStatusline.model`, `claudeStatusline.effort` and
+  `claudeStatusline.advisor` become `--model`, `--effort` and `--advisor`;
+  `claudeStatusline.launchArgs` carries whatever else you want after them. The
+  third of those is a flag the client keeps out of its own `--help` — the option
+  is declared with `.hideHelp()` — so a setting is the only way most people will
+  ever find it. Empty is the default for all three and passes no flag at all, so the
+  client keeps deciding exactly as it did before. The model list is the aliases
+  the client itself accepts, read out of 2.1.233 rather than remembered.
+
+  **Claude: Open Claude Code with…** asks for both instead of reading the
+  settings — two picks, for the run that is not like the others — and the
+  button's hover now names what it would start on.
+
+  The list is the client's own: `opus`, `sonnet`, `fable`, `haiku`, each with its
+  `[1m]` variant where one exists, plus `best` and `opusplan`. A `[1m]` entry is
+  the million-token variant of that model rather than a second name for it — the
+  client offers it as its own choice and has a `prefer1m` setting for picking it
+  by default.
+
+  Values are quoted on the way into the shell, and `opus[1m]` is the case that
+  decides it: unquoted, zsh reads the brackets as a pattern and answers
+  `no matches found` without running anything. That quoting is also what keeps a
+  model name with shell syntax in it a single argument rather than a second
+  command, which is now a test.
+
+  `launchArgs` is the exception and goes in as typed, because quoting a line of
+  several arguments would break it — so it is `machine`-scoped: user settings
+  only. A repository ships its own `.vscode/settings.json`, and free text written
+  into a shell is not something a project you opened gets to choose.
+- **The Settings tab has a panel for what a session starts with** — the place it
+  opens in, the model, the effort, the advisor and the extra arguments, together
+  rather than scattered among the settings of the status bar. Four fields about
+  one command line read as a list of unrelated switches when they sit next to
+  "Side of the bar".
+- **Save left the panels and became a bar of its own**, stuck to the bottom of
+  the tab, and it now says whether there is anything to save: at rest the button
+  is inert, an edit lights it and marks the form **unsaved changes**, and undoing
+  that edit by hand puts it back to rest — the comparison is against the state
+  the page was drawn with, not a flag that stays raised once tripped. The free
+  text field also got room to type in: at the browser's default width it showed
+  about twenty characters, which is less than one flag.
+- **The dashboard tab wears the extension's own mark** instead of the generic
+  editor glyph every webview gets by default. `iconPath` is a property of the
+  panel rather than an option of `createWebviewPanel`, which is how it stayed
+  unset since the tab existed; `media/icon.svg` also had to be added to the
+  package, where only the marketplace's `icon.png` was allowed through.
+
+### Fixed
+
+- **A tab restored after a reload keeps following its session's name again.**
+  0.30.0 recognised such a tab by its icon or by the name it was opened under,
+  and neither is available: the extension host rebuilds `creationOptions` for a
+  terminal it did not create from six fields — `name`, `shellPath`, `shellArgs`,
+  `cwd`, `env`, `hideFromUser` — the icon is not among them, and the name is
+  whatever the tab was last renamed to, which after one session is no longer the
+  name it started with. The tab therefore came back with a stale title and no way
+  to update it.
+
+  Two witnesses replace them, either of which is enough: a mark this extension
+  puts in the tab's environment, which is one of those six fields, and its own
+  note of the shell's pid, which depends on nothing VS Code chooses to keep.
+
+  Matching by name was not merely useless — Claude Code's own button opens
+  terminals under exactly the same one, so it could have renamed and closed a tab
+  belonging to another extension. That is now a test.
+
+  The tab's **icon** is a separate matter and cannot be fixed from here: it does
+  not reach the extension at all, and every field of `Terminal` is read-only, so
+  there is nothing to set it on.
+- **`.claude/` is no longer packaged.** `.vscodeignore` excluded the working
+  notes, the docs and the CI directory but not this one, so 0.30.0 shipped the
+  repository's publishing skill — instructions addressed to Claude, not to anyone
+  installing the extension — to both storefronts. It is 5.9 KB of nothing useful
+  and cannot be taken out of a published version; this only keeps it out of the
+  next one.
+
 ## [0.30.0] — 2026-08-16
 
 ### Added

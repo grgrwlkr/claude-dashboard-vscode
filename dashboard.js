@@ -2197,6 +2197,35 @@ const PLACES = [
     ['newWindow', 'in a new window', 'opened here, then carried out of this one'],
 ];
 const SCOPES = [['global', 'my settings'], ['workspace', 'this workspace']];
+// The aliases `claude --model` accepts, read out of the client itself, and the
+// levels `--effort` takes. One list each: the manifest's dropdown, the quick
+// pick behind **Open Claude Code with…** and this page all read from here, and a
+// test holds the manifest to it. The empty value is a real option — it passes no
+// flag and leaves the choice to the client.
+// The `[1m]` entries are not duplicates of the plain ones: the suffix picks the
+// million-token variant of the same model, which the client offers as its own
+// choice — "Opus (1M context)" — and has a `prefer1m` setting for. Without it the
+// session starts on that model's ordinary window.
+const MODELS = [
+    ['', 'client decides'],
+    ['opus', 'opus'], ['opus[1m]', 'opus 1M'],
+    ['sonnet', 'sonnet'], ['sonnet[1m]', 'sonnet 1M'],
+    ['fable', 'fable'], ['fable[1m]', 'fable 1M'],
+    ['haiku', 'haiku'],
+    ['best', 'best'], ['opusplan', 'opus in plan mode'],
+];
+const EFFORTS = [
+    ['', 'client decides'],
+    ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max'],
+];
+// `--advisor` is a real flag the client keeps out of its own `--help`, and it
+// takes an alias or a full id like `--model` does. The variants with a context
+// suffix are left out: an advisor reads the transcript it is handed rather than
+// carrying a window of its own.
+const ADVISORS = [
+    ['', 'off'],
+    ['opus', 'opus'], ['sonnet', 'sonnet'], ['fable', 'fable'], ['haiku', 'haiku'],
+];
 
 /**
  * One setting: what it is called, what it does, and the control for it.
@@ -2311,22 +2340,37 @@ function settingsTab(config) {
     ].join(''), {
         note: 'The same switches that sit beside the things they govern — changing one here changes it there, and both write your own settings straight away.',
     })}
+        ${panel('Starting a session', [
+        field('Open Claude Code', 'where the button and the command put a session',
+            cards('openLocation', PLACES, cfg.openLocation || 'activeGroup')),
+        field('Model', 'the session starts on it, as <code>claude --model</code>',
+            chips('model', MODELS, cfg.model || '')),
+        field('Effort', 'and at this level, as <code>claude --effort</code>',
+            chips('effort', EFFORTS, cfg.effort || '')),
+        field('Advisor', 'a second, stronger model reviews the work, as <code>claude --advisor</code>',
+            chips('advisor', ADVISORS, cfg.advisor || '')),
+        field('Extra arguments', 'anything else for that command line, written as typed — user settings only',
+            `<input id="launchArgs" class="wide" type="text" spellcheck="false"
+                    placeholder="--permission-mode acceptEdits --fallback-model sonnet"
+                    value="${esc(cfg.launchArgs || '')}">`, 'launchArgs'),
+    ].join(''), {
+        note: 'What <b>Open Claude Code</b> runs, in the terminal it opens: the three choices below the place become <code>--model</code>, <code>--effort</code> and <code>--advisor</code> on one command line, and each of them left alone passes no flag at all. <b>Claude: Open Claude Code with…</b> asks for a model and an effort instead, for a single run.',
+    })}
         ${panel('Behaviour', [
         field('Side of the bar', 'where the items sit',
             cards('alignment', ALIGNMENTS, cfg.alignment || 'right')),
-        field('Open Claude Code', 'where the button and the command put a session',
-            cards('openLocation', PLACES, cfg.openLocation || 'activeGroup')),
         field('Priority', 'higher means further left',
             `<input id="priority" type="number" value="${Number(cfg.priority) || 100}">`, 'priority'),
         field('Refresh interval', 'seconds between the expensive reads',
             `<input id="refreshInterval" type="number" min="15" value="${Number(cfg.refreshInterval) || 60}">`, 'refreshInterval'),
-        field('Save to', "workspace settings live in the repository's <code>.vscode/settings.json</code>",
-            chips('scope', SCOPES, 'global')),
-        `<div class="btns">
-          <button class="btn primary" id="save">Save</button>
-          <span class="saved" id="saved" hidden>Saved</span>
-        </div>`,
     ].join(''))}
+        <div class="save-bar">
+          <span class="save-where">Save to</span>
+          ${chips('scope', SCOPES, 'global')}
+          <span class="dirty" id="dirty" hidden>unsaved changes</span>
+          <button class="btn primary" id="save" disabled>Save</button>
+          <span class="saved" id="saved" hidden>Saved</span>
+        </div>
     </section>`;
 }
 
@@ -2836,6 +2880,18 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .btn.primary { color: var(--vscode-button-foreground, #fff);
   background: var(--vscode-button-background, hsl(210 80% 45%)); border-color: transparent; }
 .saved { color: hsl(145 45% 55%); font-size: 12px; }
+/* Save belongs to the tab rather than to a panel, and it sticks to the bottom of
+   it: the form is long enough that a button at its end is a scroll away from
+   most of what it saves. The background is the editor's own so the panels do not
+   show through as it passes over them. */
+.save-bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center;
+  gap: 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 2px;
+  background: var(--vscode-editor-background);
+  border-top: 1px solid var(--vscode-panel-border); }
+.save-where { font-size: 12px; opacity: .75; }
+.save-bar .btn { margin-left: auto; }
+.save-bar .btn[disabled] { opacity: .45; cursor: default; }
+.dirty { font-size: 12px; color: var(--vscode-editorWarning-foreground, hsl(38 90% 60%)); }
 .palette { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 20px; margin-bottom: 8px; }
 .pal-group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
   opacity: .55; margin: 8px 0 4px; font-weight: 600; }
@@ -2850,6 +2906,12 @@ ul.log li { margin: 2px 0; opacity: .85; }
   background: var(--vscode-input-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
 .form input[type="number"] { width: 8ch; }
+/* A line of shell arguments, not a number: the browser's default of about twenty
+   characters shows less than one flag. It stops short of the panel's own width
+   so a long value does not run to the edge of a wide window. Keyed on .field
+   rather than on .form, which the Settings tab is not inside — the same reason
+   the number rule above reaches nothing there. */
+.field input.wide { width: 100%; max-width: 72ch; box-sizing: border-box; }
 .form td:first-of-type { width: 1%; }
 /* A switch with no text of its own sits on the field's own line. */
 .switch.bare { display: inline-flex; padding: 0; }
@@ -3182,19 +3244,47 @@ if (list && api) {
     return on ? on.value : fallback;
   };
 
+  // What Save would write, as one string. The comparison is against the state
+  // the page was drawn with, so undoing an edit by hand puts the button back to
+  // rest rather than leaving it lit for the rest of the visit.
+  const formState = () => JSON.stringify(settingsToSave());
+  let atRest = formState();
+  const saveBtn = document.getElementById('save');
+  const dirtyMark = document.getElementById('dirty');
+  const settleSave = () => {
+    const changed = formState() !== atRest;
+    saveBtn.disabled = !changed;
+    dirtyMark.hidden = !changed;
+  };
+  // A radio, a checkbox and a typed character all reach this: the input event
+  // covers typing, change covers the rest, and the section is the whole form.
+  const form = document.querySelector('section.tab[data-tab="settings"]');
+  form.addEventListener('input', settleSave);
+  form.addEventListener('change', settleSave);
+
   document.getElementById('save').addEventListener('click', () => {
+    atRest = formState();
+    settleSave();
     api.postMessage({
       type: 'save',
       scope: picked('scope', 'global'),
-      settings: {
+      settings: settingsToSave(),
+    });
+  });
+
+  function settingsToSave() {
+    return {
         segments: templates().filter((t) => t.trim().length > 0),
         alignment: picked('alignment', 'right'),
         priority: Number(document.getElementById('priority').value) || 100,
         refreshInterval: Number(document.getElementById('refreshInterval').value) || 60,
         openLocation: picked('openLocation', 'activeGroup'),
-      },
-    });
-  });
+        model: picked('model', ''),
+        effort: picked('effort', ''),
+        advisor: picked('advisor', ''),
+        launchArgs: document.getElementById('launchArgs').value.trim(),
+    };
+  }
 
   window.addEventListener('message', (event) => {
     const msg = event.data || {};
@@ -3517,6 +3607,9 @@ module.exports = {
     // The places a session can be opened in — the cards on the Settings tab and,
     // through extension.js, the button's own table of what each one means.
     PLACES,
+    // The launch vocabularies, read by the manifest's test, by the Settings tab
+    // above and by the quick pick behind **Open Claude Code with…**.
+    MODELS, EFFORTS, ADVISORS,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

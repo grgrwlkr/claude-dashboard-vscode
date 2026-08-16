@@ -167,6 +167,14 @@ watcher**, **Limits, in full**, **Spend**, **Session**, **Whole machine**,
 **Workflows**, **The works** and **Everything, one line**. Picking one fills the
 editor; nothing is written until you press Save.
 
+The rest of the tab is every other setting this extension has, grouped: what is
+read and what leaves the machine, **Starting a session** — where **Open Claude
+Code** puts it and what it runs there — and the behaviour of the bar itself. Save
+is a bar of its own at the foot of the tab rather than a button inside one of
+those panels, and it says whether there is anything to save: inert until
+something is edited, lit and marked **unsaved changes** once it is, and back to
+inert if the edit is undone by hand.
+
 Two placeholders answer "when do I run out", and the difference matters: `{dry}`
 is silent when the forecast lands after the reset — running out then never
 happens — while `{dryAt}` names the date either way.
@@ -365,15 +373,19 @@ All of these apply the moment they change — none needs a window reload.
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
 | `claudeStatusline.openLocation` | `activeGroup` | Where **Open Claude Code** puts the session: `activeGroup` a tab in the group you are looking at, `beside` a tab in a new group to the right, `panel` the terminal panel at the bottom, `newWindow` a tab moved out into its own window |
+| `claudeStatusline.model` | `""` | Start the session on this model, as `claude --model <alias>` — the aliases the client accepts: `opus`, `opus[1m]`, `sonnet`, `sonnet[1m]`, `fable`, `fable[1m]`, `haiku`, `best`, `opusplan`. A `[1m]` entry is the million-token variant of that model, not a duplicate of it. Empty passes no flag and leaves the choice to the client |
+| `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>` — `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
+| `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>` — `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |
+| `claudeStatusline.launchArgs` | `""` | Anything else for the command line, after those two — `--permission-mode acceptEdits`, an exact model id. Written as typed, so quoting is yours. User settings only: a project cannot set it through `.vscode/settings.json` |
 | `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal — VS Code's rename acts on the active terminal |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |
 
-**Commands:** Claude: Open dashboard · Open Claude Code · Rebuild the
-usage index · Export usage as CSV or JSON · Refresh now · List status-bar
-placeholders · and, from a row of the workflow view, Open the workflow script and
-Copy the workflow run id.
+**Commands:** Claude: Open dashboard · Open Claude Code · Open Claude Code with…
+· Rebuild the usage index · Export usage as CSV or JSON · Refresh now · List
+status-bar placeholders · and, from a row of the workflow view, Open the workflow
+script and Copy the workflow run id.
 
 **Open Claude Code** is also a button in the editor's title bar, next to Claude
 Code's own. Both start a terminal session; what differs is where it lands. Claude
@@ -385,6 +397,14 @@ three places are a tab beside this one, the terminal panel at the bottom, and a
 window of its own; the setting is read at the moment you press the button, and
 the button's hover names the place it will use. Right-click the title bar to hide
 whichever of the two buttons you would rather not have.
+
+The session can be started on a model and an effort of your own —
+`claudeStatusline.model` and `claudeStatusline.effort` become `--model` and
+`--effort` on the command line, and `claudeStatusline.launchArgs` carries
+anything else you want after them. Each is empty by default, which passes no flag
+at all and leaves the choice to the client. The button's hover names what it
+would start on, and **Claude: Open Claude Code with…** asks for both instead, for
+the one run that is not like the others.
 
 A session opened this way survives a window reload: VS Code reconnects the tab to
 a shell that never stopped, and the tab is picked back up so that it keeps

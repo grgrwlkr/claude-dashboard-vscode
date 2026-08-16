@@ -15,6 +15,13 @@ CLAUDE.md
 .github/**
 tools/**
 
+# Instructions addressed to Claude working on this repository — a skill for
+# publishing, a model pin — not to anyone installing it. This was missed until
+# 0.30.0, which shipped the publishing skill to both storefronts: a published
+# version cannot be replaced, only unpublished, so it stays there and this line
+# is what keeps the next one clean.
+.claude/**
+
 # Inside a .vsix everything lives under `extension/`, so unzipping one into the
 # repository leaves a directory of that name — and the next `vsce package` packs
 # it back in, shipping a second copy of whatever was in it. Caught once at 190 KB
@@ -28,6 +35,7 @@ extension/**
 # `package.json` at runtime and draws as blank if they are not there.
 media/**
 !media/icon.png
+!media/icon.svg
 !media/bar-icon.svg
 !media/open-claude-dark.svg
 !media/open-claude-light.svg
