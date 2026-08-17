@@ -33,14 +33,16 @@ const u = require('../usage');
 const s = require('../session');
 const sys = require('../system');
 
-function activate({ segments, workspace = '', settings = {} } = {}) {
+function activate({ segments, workspace = '', settings = {}, hadSession } = {}) {
     vscode.__reset();
     vscode.__setSettings({
         segments, alignment: 'right', priority: 100, refreshInterval: 3600, ...settings,
     });
     vscode.__setWorkspace(workspace);
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-ext-'));
-    const memory = new Map();
+    // What the previous window left behind, which is what the sidebar is laid
+    // out from before anything has been read.
+    const memory = new Map(hadSession === undefined ? [] : [['hadSession', hadSession]]);
     const context = {
         subscriptions: [],
         globalStorageUri: { fsPath: storage },
@@ -246,7 +248,8 @@ test('the manifest offers exactly the places the button knows', () => {
 test('the manifest offers exactly the models and efforts the page does', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const props = manifest.contributes.configuration.properties;
-    for (const [key, list] of [['model', db.MODELS], ['effort', db.EFFORTS], ['advisor', db.ADVISORS]]) {
+    const lists = [['model', db.MODELS], ['effort', db.EFFORTS], ['advisor', db.ADVISORS], ['outputStyle', db.STYLES]];
+    for (const [key, list] of lists) {
         const property = props[`claudeStatusline.${key}`];
         assert.deepEqual(property.enum, list.map(([value]) => value));
         assert.equal(property.enum.length, property.enumDescriptions.length);
@@ -330,6 +333,45 @@ test('the free-text arguments go to the user settings whatever scope was picked'
         assert.equal(model.target, vscode.ConfigurationTarget.Workspace);
         assert.equal(args.target, vscode.ConfigurationTarget.Global);
     } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// The two panes worth reading without scrolling are the limits and the session;
+// the two lists below them are worth having, not worth the height. So the first
+// two share the container evenly and the lists open closed — one click away, and
+// none of it binds afterwards: VS Code remembers what the user drags.
+test('the sidebar opens with limits and session even, and the lists collapsed', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const views = Object.fromEntries(manifest.contributes.views.claudeStatusline.map((v) => [v.id, v]));
+    assert.equal(views['claudeStatusline.limitsPane'].initialSize, views['claudeStatusline.sessionPane'].initialSize);
+    assert.equal(views['claudeStatusline.livePane'].visibility, 'collapsed');
+    assert.equal(views['claudeStatusline.runsPane'].visibility, 'collapsed');
+});
+
+// `initialSize` is applied when a pane is *first shown*, so a pane behind a
+// `when` clause that turns true on the first tick arrives after the container
+// has been laid out and takes whatever is left rather than its share. The answer
+// from last time is therefore applied before anything is registered — a reload
+// then builds the sidebar with both panes in it, and they split it evenly.
+test('the session pane is asked for before the views are registered', () => {
+    const run = activate({ segments: ['{today}'], hadSession: true });
+    try {
+        const keys = vscode.__executed.filter((e) => e.id === 'setContext' && e.args[0] === 'claudeStatusline.hasSession');
+        assert.ok(keys.length > 0, 'the key must be set at all');
+        assert.equal(keys[0].args[1], true, 'and the first answer is what was remembered');
+    } finally { run.dispose(); }
+});
+
+// A view whose id the manifest declares and the extension never registers is an
+// empty pane with a spinner in it — and renaming ids, which is the only way to
+// make VS Code forget a remembered layout, is exactly how that happens.
+test('every view the manifest declares is registered under that id', () => {
+    const run = activate({ segments: ['x'] });
+    try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+        for (const view of manifest.contributes.views.claudeStatusline) {
+            assert.ok(vscode.__views.has(view.id), `${view.id} is declared but never registered`);
+        }
+    } finally { run.dispose(); }
 });
 
 test('the commands the package manifest promises are all registered', () => {
@@ -676,7 +718,7 @@ test('the workflow view draws the runs the collector filled', () => {
         };
         state.data.workflows = { runs: [going], active: [going] };
 
-        const provider = vscode.__views.get('claudeStatusline.workflows');
+        const provider = vscode.__views.get('claudeStatusline.runsPane');
         assert.ok(provider, 'the view was registered with a provider');
 
         const [node] = provider.getChildren();
@@ -748,7 +790,7 @@ test('the tree is redrawn when the runs change, not on every collection', () => 
         state.data.workflows = { runs: [one()], active: [one()] };
         ext.__render(state);
 
-        const provider = vscode.__views.get('claudeStatusline.workflows');
+        const provider = vscode.__views.get('claudeStatusline.runsPane');
         let fired = 0;
         provider.onDidChangeTreeData(() => { fired += 1; });
 
@@ -788,7 +830,7 @@ test('one unreadable run does not freeze the bar or the tree', () => {
         };
         state.data.workflows = { runs: [broken], active: [broken] };
 
-        const provider = vscode.__views.get('claudeStatusline.workflows');
+        const provider = vscode.__views.get('claudeStatusline.runsPane');
         let fired = 0;
         provider.onDidChangeTreeData(() => { fired += 1; });
 
@@ -1463,6 +1505,17 @@ test('the advisor is passed too, after the model and the effort', async () => {
     try {
         await openClaude();
         assert.equal(ranIn(lastTerminal()), "claude --model 'opus[1m]' --effort 'max' --advisor 'fable'");
+    } finally { run.dispose(); }
+});
+
+// There is no `--output-style` flag — the client has none — but `outputStyle` is
+// an ordinary setting, and `--settings` takes JSON that merges with the settings
+// files rather than replacing them. So the style is asked for that way.
+test('the output style is passed as settings json, which merges rather than replaces', async () => {
+    const run = activate({ segments: ['{today}'], settings: { model: 'opus', outputStyle: 'Explanatory' } });
+    try {
+        await openClaude();
+        assert.equal(ranIn(lastTerminal()), `claude --model 'opus' --settings '{"outputStyle":"Explanatory"}'`);
     } finally { run.dispose(); }
 });
 

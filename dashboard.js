@@ -2226,6 +2226,14 @@ const ADVISORS = [
     ['', 'off'],
     ['opus', 'opus'], ['sonnet', 'sonnet'], ['fable', 'fable'], ['haiku', 'haiku'],
 ];
+// The client's four built-in output styles. A style of your own is a file under
+// `~/.claude/output-styles`, and its name goes in the extra arguments — there is
+// no flag for any of this, so it travels as `--settings` JSON.
+const STYLES = [
+    ['', 'client decides'],
+    ['default', 'default'], ['Proactive', 'proactive'],
+    ['Explanatory', 'explanatory'], ['Learning', 'learning'],
+];
 
 /**
  * One setting: what it is called, what it does, and the control for it.
@@ -2349,6 +2357,8 @@ function settingsTab(config) {
             chips('effort', EFFORTS, cfg.effort || '')),
         field('Advisor', 'a second, stronger model reviews the work, as <code>claude --advisor</code>',
             chips('advisor', ADVISORS, cfg.advisor || '')),
+        field('Output style', 'how Claude answers, as the <code>outputStyle</code> setting for this session',
+            chips('outputStyle', STYLES, cfg.outputStyle || '')),
         field('Extra arguments', 'anything else for that command line, written as typed — user settings only',
             `<input id="launchArgs" class="wide" type="text" spellcheck="false"
                     placeholder="--permission-mode acceptEdits --fallback-model sonnet"
@@ -2901,11 +2911,15 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .chip-btn:hover { background: var(--vscode-list-hoverBackground); }
 .pal-val { margin-left: auto; opacity: .5; font-size: 11px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 14ch; }
-.form select, .form input { font: inherit; padding: 3px 6px; border-radius: 4px;
+/* Keyed on .field, the container the settings tab actually uses. These rules
+   named .form for a long time, a class nothing on the page carries, so every
+   input here fell through to the browser's own control — which under
+   color-scheme: light dark is painted dark on a light page. */
+.field select, .field input { font: inherit; padding: 3px 6px; border-radius: 4px;
   color: var(--vscode-input-foreground, inherit);
   background: var(--vscode-input-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
-.form input[type="number"] { width: 8ch; }
+.field input[type="number"] { width: 9ch; }
 /* A line of shell arguments, not a number: the browser's default of about twenty
    characters shows less than one flag. It stops short of the panel's own width
    so a long value does not run to the edge of a wide window. Keyed on .field
@@ -3282,6 +3296,7 @@ if (list && api) {
         model: picked('model', ''),
         effort: picked('effort', ''),
         advisor: picked('advisor', ''),
+        outputStyle: picked('outputStyle', ''),
         launchArgs: document.getElementById('launchArgs').value.trim(),
     };
   }
@@ -3609,7 +3624,7 @@ module.exports = {
     PLACES,
     // The launch vocabularies, read by the manifest's test, by the Settings tab
     // above and by the quick pick behind **Open Claude Code with…**.
-    MODELS, EFFORTS, ADVISORS,
+    MODELS, EFFORTS, ADVISORS, STYLES,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

@@ -9,6 +9,80 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.34.0] — 2026-08-17
+
+### Added
+
+- **An output style can be asked for at launch**, beside the model, the effort
+  and the advisor: `default`, `Proactive`, `Explanatory` or `Learning`. There is
+  no `--output-style` flag — the client has none — but `outputStyle` is an
+  ordinary setting and `--settings` takes JSON that **merges** with the settings
+  files, so one key is sent and everything else you have configured keeps its
+  value. A style of your own lives in `~/.claude/output-styles` and goes through
+  the extra arguments by name.
+
+### Documentation
+
+- **The README shows what a session is started with, and what the forecast looks
+  like when it has something to say.** Two new pairs of screenshots: the
+  **Starting a session** panel with a model, an effort, an advisor and a style
+  chosen, and the week track of a window spent ahead of its plan — the overspend
+  block past the plan rule, and the red line where the week runs dry, two days
+  before it resets. The second needed a dial in the demo data: below plan the
+  forecast lands past the reset and `{dry}` is silent by design, so
+  `tools/preview.js --demo --over` spends the demo week ahead of plan. The main
+  screenshot is untouched — it shows a workflow running, which is worth its own
+  frame.
+
+  Both halves of the week track are shown, not just the alarming one: the week
+  under its plan gets its own frame and its own paragraph — the green slack
+  between spent and plan, the dry label with a trailing arrow meaning "past the
+  end of the track", and the caption `lasts to the reset`, which is the state
+  where `{dry}` stays empty while `{dryAt}` still names a date.
+
+  Colours are now named for both themes wherever a mark actually changes with
+  the theme. The plan rule was called black, which is only true on a light
+  theme — it is drawn in `--vscode-foreground`, so it is white on a dark one, and
+  it is the *only* mark on the week track that flips: everything else is a chart
+  colour. The status bar's thresholds were described as yellow and red where they
+  are really the editor's own warning and error backgrounds.
+
+### Fixed
+
+- **The settings inputs are painted from the theme again.** Their rules were
+  keyed on `.form`, a class the page puts on nothing, so every field on the tab
+  fell through to the browser's own control — which under `color-scheme: light
+  dark` is drawn dark whatever the page's theme is. On a light theme that was a
+  black box among white fields. The number fields were the same story from the
+  other side: `width: 8ch` never applied either, which is why they were as wide
+  as a sentence. Found while taking the screenshot for the listing, which is the
+  only place a light theme gets looked at here.
+
+### Changed
+
+- **The sidebar opens on the two panes worth reading.** Limits and Session split
+  the container evenly, and the two lists below them — Live sessions and Workflow
+  runs — start collapsed, a click from open. They were pushing the numbers above
+  them off the top of a narrow sidebar to show rows that are a glance, not a
+  read. None of it binds afterwards: VS Code remembers whatever you drag or open
+  yourself, and these are only the starting positions.
+
+  Splitting evenly needed one more thing. `initialSize` is applied to a pane the
+  first time it is *shown*, and the session pane sits behind a `when` clause that
+  only turned true on the first tick — by which point VS Code had laid the
+  container out without it, so it arrived into a finished sidebar and took what
+  was left. The answer from the previous window is now remembered and given
+  before anything is read or registered, and the first tick corrects it.
+
+  **The four panes have new ids**, and that is what makes the above take effect
+  at all. VS Code keeps a container's layout — each pane's height and whether it
+  is collapsed — under the id of the pane, in the workspace's own storage, and
+  what it remembers outranks anything a manifest declares. A pane that has ever
+  been opened therefore ignores `initialSize` and `visibility` forever. Renaming
+  is the only way an extension can ask for a fresh start, so this release resets
+  the sidebar's layout once; drag it back to taste and it will be remembered
+  again.
+
 ## [0.32.0] — 2026-08-16
 
 ### Added

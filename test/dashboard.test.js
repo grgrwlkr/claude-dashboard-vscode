@@ -1237,6 +1237,19 @@ test('save sits outside the panels and says when there is something to save', ()
     assert.match(html.slice(bar), /<button class="btn primary" id="save" disabled>/);
 });
 
+// The inputs on this tab were styled through `.form`, a class the page never
+// puts on anything — so they fell back to the browser's own control, which under
+// `color-scheme: light dark` is drawn dark whatever the page's theme is. On a
+// light theme that is a black box among white fields; the screenshot for the
+// listing is what showed it.
+test('the settings inputs are painted from the theme, not left to the browser', () => {
+    const html = db.settingsTab({ segments: ['{today}'], palette: [], presets: [] });
+    assert.equal(/class="[^"]*\bform\b/.test(html), false, 'nothing carries the class the old rules keyed on');
+    const rule = db.STYLE.split('.field select, .field input')[1].split('}')[0];
+    assert.match(rule, /background:\s*var\(--vscode-input-background/);
+    assert.match(rule, /color:\s*var\(--vscode-input-foreground/);
+});
+
 // A text input with no width of its own is whatever the browser makes it —
 // about twenty characters, which is not enough to see one flag, let alone
 // several. The number fields beside it are narrow on purpose and this one must

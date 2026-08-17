@@ -281,7 +281,15 @@ function presetPreviews() {
     return out;
 }
 
-function demo(now = Date.now()) {
+/**
+ * The demo reading, and the one dial worth turning in it.
+ *
+ * `weeklyPct` decides whether the forecast has anything to say: below the plan
+ * the window outlasts the spending and `{dry}` stays silent by design, so the
+ * screenshot that shows a forecast needs a window spent ahead of its plan. The
+ * default is the state everything else is photographed in.
+ */
+function demo(now = Date.now(), { weeklyPct = 57 } = {}) {
     const index = { files: {} };
     PROJECTS.forEach((p, i) => {
         index.files[`/work/${p}/transcript.jsonl`] = { agg: projectAgg(p, 1000 + i * 7, now) };
@@ -294,10 +302,10 @@ function demo(now = Date.now()) {
     const reset = nowS + Math.round(2.5 * 86400);
     const limits = {
         session: { pct: 43, reset: nowS + 2 * 3600 + 40 * 60, scope: null },
-        weekly: { pct: 57, reset, scope: null },
+        weekly: { pct: weeklyPct, reset, scope: null },
         scoped: [
-            { pct: 61, reset, scope: 'Opus' },
-            { pct: 24, reset, scope: 'Sonnet' },
+            { pct: Math.min(99, weeklyPct + 4), reset, scope: 'Opus' },
+            { pct: Math.round(weeklyPct * 0.42), reset, scope: 'Sonnet' },
         ],
     };
     const pace = u.pace(limits.weekly, nowS);

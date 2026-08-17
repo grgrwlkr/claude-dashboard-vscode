@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashboard & Statusline for Claude Code",
   "description": "Unofficial. A 23-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.32.0",
+  "version": "0.34.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -109,16 +109,16 @@
       "view/item/context": [
         {
           "command": "claudeStatusline.openWorkflowScript",
-          "when": "view == claudeStatusline.workflows && viewItem == run",
+          "when": "view == claudeStatusline.runsPane && viewItem == run",
           "group": "inline"
         },
         {
           "command": "claudeStatusline.openWorkflowScript",
-          "when": "view == claudeStatusline.workflows && viewItem == run"
+          "when": "view == claudeStatusline.runsPane && viewItem == run"
         },
         {
           "command": "claudeStatusline.copyRunId",
-          "when": "view == claudeStatusline.workflows && viewItem == run"
+          "when": "view == claudeStatusline.runsPane && viewItem == run"
         }
       ],
       "commandPalette": [
@@ -144,26 +144,27 @@
     "views": {
       "claudeStatusline": [
         {
-          "id": "claudeStatusline.limits",
+          "id": "claudeStatusline.limitsPane",
           "name": "Limits",
           "type": "webview",
-          "initialSize": 3
+          "initialSize": 1
         },
         {
-          "id": "claudeStatusline.now",
+          "id": "claudeStatusline.sessionPane",
           "name": "Session",
           "type": "webview",
-          "initialSize": 2,
+          "initialSize": 1,
           "when": "claudeStatusline.hasSession"
         },
         {
-          "id": "claudeStatusline.sessions",
+          "id": "claudeStatusline.livePane",
           "name": "Live sessions",
-          "initialSize": 2
+          "visibility": "collapsed"
         },
         {
-          "id": "claudeStatusline.workflows",
-          "name": "Workflow runs"
+          "id": "claudeStatusline.runsPane",
+          "name": "Workflow runs",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -295,6 +296,25 @@
           ],
           "default": "",
           "markdownDescription": "Turn on the server-side advisor for the session, as `claude --advisor <model>` — a second model that reads the whole conversation and advises the one doing the work.\n\nThe client hides this flag from its own `--help`, but it is a real option and takes an alias or a full model id; an exact id goes in `claudeStatusline.launchArgs` instead.\n\nEmpty passes no flag, which leaves whatever `advisorModel` the client already has. The advisor must rank at or above the model it advises, and the client refuses the pair if it does not."
+        },
+        "claudeStatusline.outputStyle": {
+          "type": "string",
+          "enum": [
+            "",
+            "default",
+            "Proactive",
+            "Explanatory",
+            "Learning"
+          ],
+          "enumDescriptions": [
+            "No style is asked for — whatever the client's own settings say.",
+            "Claude Code's ordinary system prompt for software engineering.",
+            "Executes immediately, makes reasonable assumptions instead of pausing for routine decisions, prefers action over planning.",
+            "Adds educational \"Insights\" between the steps of a task.",
+            "Learn by doing: insights plus TODO(human) markers for you to fill in."
+          ],
+          "default": "",
+          "markdownDescription": "Ask for an output style for the session — how Claude answers, not what it can do.\n\nThere is no command-line flag for this: `outputStyle` is an ordinary setting, so it travels as `claude --settings '{\"outputStyle\":\"…\"}'`, which **merges** with your settings files rather than replacing them — every other key keeps whatever value it already had.\n\nThe list is the client's four built-in styles. A style of your own lives in `~/.claude/output-styles`; pass its name through `claudeStatusline.launchArgs` instead."
         },
         "claudeStatusline.launchArgs": {
           "type": "string",

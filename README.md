@@ -88,6 +88,9 @@ editor rather than fighting it.
 | ![Spend overview, dark](media/screenshots/overview-dark.png) | ![Spend overview, light](media/screenshots/overview-light.png) |
 | ![Agents and workflows, dark](media/screenshots/agents-dark.png) | ![Agents and workflows, light](media/screenshots/agents-light.png) |
 | ![The settings editor, dark](media/screenshots/settings-dark.png) | ![The settings editor, light](media/screenshots/settings-light.png) |
+| ![Starting a session, dark](media/screenshots/launch-dark.png) | ![Starting a session, light](media/screenshots/launch-light.png) |
+| ![The week track with a dry forecast, dark](media/screenshots/dry-dark.png) | ![The week track with a dry forecast, light](media/screenshots/dry-light.png) |
+| ![The week track running under plan, dark](media/screenshots/under-dark.png) | ![The week track running under plan, light](media/screenshots/under-light.png) |
 
 <a name="install"></a><a name="user-content-install"></a>
 
@@ -179,6 +182,41 @@ Two placeholders answer "when do I run out", and the difference matters: `{dry}`
 is silent when the forecast lands after the reset — running out then never
 happens — while `{dryAt}` names the date either way.
 
+The week track on the Now tab draws the same answer instead of stating it:
+
+![The week as a track of seven days: the blue part is spent, a rule in the theme's text colour marks where an even burn would be by now, the red block is the overspend, and a red line labelled DRY 1D10H marks the day the window runs out — two days before it resets](media/screenshots/dry-dark.png)
+
+Every part of it is one fact. The **blue** length is the week as it has been
+spent, day by day. The **rule in the theme's own text colour** — white on a dark
+theme, black on a light one — is where an even burn would stand right now,
+labelled `plan 64%`; the **red block** past it is the overspend, `76% +12%`. The
+**red line** further along is the forecast: `DRY 1D10H → WED 19.08, ~06H`, the
+moment the window empties at this rate. The gap between that line and the end of
+the track is time without quota, and the captions spell the same thing in words —
+`runs out Wed 19.08, ~06h, in 1d10h` against `resets Thu 20.08 08:38 · in 2d12h`.
+
+Only that one rule changes colour between themes, because it is the only mark
+drawn in the editor's foreground rather than in a chart colour: blue for spent,
+red for both the overspend and the forecast, green for the slack when a week is
+running under its plan.
+
+The same week spent *under* its plan is the other half of the vocabulary, and it
+is drawn rather than left blank:
+
+![The same track for a week running under plan: a green block between what is spent and the plan rule, no red anywhere, a dry label with a trailing arrow, and the caption 'lasts to the reset'](media/screenshots/under-dark.png)
+
+Every red mark is gone, and two things take their place. The **green block**
+between the spent length and the plan rule is the slack — `57% −7%`, seven points
+of the week still in hand at this moment. The dry label keeps its date but gains
+a **trailing arrow**, `DRY 3D9H → FRI 21.08, ~05H ⟶`, which says the forecast
+lands past the right edge of the track: the window resets on Thursday and this
+rate would only empty it on Friday. That is exactly the case the caption states
+in words — `lasts to the reset` instead of `runs out …` — and the case in which
+`{dry}` stays empty in the status bar while `{dryAt}` still names the date.
+
+So the bar and the track agree on when to speak: red and a `{dry}` value mean the
+allowance ends before the window does, green and silence mean it does not.
+
 <details>
 <summary><b>All 45 placeholders</b></summary>
 
@@ -211,7 +249,8 @@ the same list in a quick pick and copies whichever you choose.
 Tooltips are not configurable and do not need to be: each segment gets the full
 tooltip of every topic it mentions, so hiding a number from the bar never hides
 it from the hover. Colour follows the same rule — a segment carrying a limit or a
-context fill turns yellow past 50 % and red past 80 %. Reading is lazy: a field no
+context fill takes the editor's own warning background past 50 % and its error
+background past 80 %, which in the stock themes are amber and red. Reading is lazy: a field no
 segment mentions is never collected, so a bar without `{today}` does not pay for
 the walk across every project it needs.
 
@@ -316,7 +355,8 @@ or behind plan the spend is, and when the window would run out at this rate;
 **Session** — the model, the context window and what the session open in this
 window has cost, hidden entirely when there is no session here; and **Live
 sessions**, every session on the machine whose process is alive, named by its
-project. The first two are the status bar's own tooltip sections, so the panel
+project. It opens with the first two sharing the height and the two lists
+collapsed; drag or open whatever you like and VS Code remembers it instead. The first two are the status bar's own tooltip sections, so the panel
 and the hover cannot disagree. The icon carries a badge with the number of live
 sessions, and no badge at all when nothing is running.
 
@@ -376,6 +416,7 @@ All of these apply the moment they change — none needs a window reload.
 | `claudeStatusline.model` | `""` | Start the session on this model, as `claude --model <alias>` — the aliases the client accepts: `opus`, `opus[1m]`, `sonnet`, `sonnet[1m]`, `fable`, `fable[1m]`, `haiku`, `best`, `opusplan`. A `[1m]` entry is the million-token variant of that model, not a duplicate of it. Empty passes no flag and leaves the choice to the client |
 | `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>` — `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
 | `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>` — `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |
+| `claudeStatusline.outputStyle` | `""` | Ask for an output style for the session — `default`, `Proactive`, `Explanatory`, `Learning`. There is no flag for it: `outputStyle` is a setting, so it travels as `--settings '{"outputStyle":"…"}'`, which merges with your settings files rather than replacing them. A style of your own goes through `launchArgs` by name |
 | `claudeStatusline.launchArgs` | `""` | Anything else for the command line, after those two — `--permission-mode acceptEdits`, an exact model id. Written as typed, so quoting is yours. User settings only: a project cannot set it through `.vscode/settings.json` |
 | `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal — VS Code's rename acts on the active terminal |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
@@ -398,13 +439,35 @@ window of its own; the setting is read at the moment you press the button, and
 the button's hover names the place it will use. Right-click the title bar to hide
 whichever of the two buttons you would rather not have.
 
-The session can be started on a model and an effort of your own —
-`claudeStatusline.model` and `claudeStatusline.effort` become `--model` and
-`--effort` on the command line, and `claudeStatusline.launchArgs` carries
-anything else you want after them. Each is empty by default, which passes no flag
-at all and leaves the choice to the client. The button's hover names what it
-would start on, and **Claude: Open Claude Code with…** asks for both instead, for
-the one run that is not like the others.
+**The session can be started on settings of your own** — the model, how hard it
+thinks, whether a second model advises it, and how it answers you. The dashboard
+has a panel for all of it, under **Setup → Settings → Starting a session**:
+
+![Starting a session: where Open Claude Code puts the session, then the model, the effort, the advisor, the output style and any extra arguments](media/screenshots/launch-dark.png)
+
+Each choice becomes one flag on the command line the button runs, and each one
+left alone passes no flag at all, so the client decides exactly as it did before:
+
+| Setting | On the command line |
+| --- | --- |
+| Model | `--model opus[1m]` — the client's own aliases, `[1m]` being that model's million-token variant rather than a second name for it |
+| Effort | `--effort max` — `low`, `medium`, `high`, `xhigh`, `max` |
+| Advisor | `--advisor fable` — a second, stronger model that reads the conversation and advises the one working. The client hides this flag from its own `--help` |
+| Output style | `--settings '{"outputStyle":"Explanatory"}'` — there is no flag for this one, and that JSON **merges** with your settings files instead of replacing them |
+| Extra arguments | written as typed, after the rest |
+
+So a fully configured button runs:
+
+```bash
+claude --model 'opus[1m]' --effort 'max' --advisor 'fable' --settings '{"outputStyle":"Explanatory"}' --permission-mode acceptEdits
+```
+
+Values are quoted on the way in, which is not decoration: unquoted, `opus[1m]` is
+a shell pattern, and zsh answers `no matches found` without running anything.
+
+The button's hover names what it would start on, and **Claude: Open Claude Code
+with…** asks for a model and an effort instead — for the one run that is not like
+the others.
 
 A session opened this way survives a window reload: VS Code reconnects the tab to
 a shell that never stopped, and the tab is picked back up so that it keeps

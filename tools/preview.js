@@ -33,7 +33,10 @@ const THEME_NAME = positional[2] === 'light' ? 'light' : 'dark';
 const dir = path.dirname(out);
 
 const now = Date.now();
-const demo = DEMO ? require('./demo-index').demo(now) : null;
+// `--over` spends the demo week ahead of its plan, which is the only state in
+// which the forecast has anything to say: below plan the window outlasts the
+// spending and `{dry}` is silent on purpose.
+const demo = DEMO ? require('./demo-index').demo(now, args.includes('--over') ? { weeklyPct: 76 } : {}) : null;
 const { index, stats } = demo
     ? { index: demo.index, stats: { total: demo.meta.files } }
     : ix.refreshIndex(store);

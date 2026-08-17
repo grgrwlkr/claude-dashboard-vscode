@@ -46,11 +46,17 @@ const quoted = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
  * text goes in as typed, because quoting it would break the moment it holds more
  * than one argument.
  */
-function claudeCommand({ model, effort, advisor, args } = {}) {
+function claudeCommand({ model, effort, advisor, outputStyle, args } = {}) {
     const parts = [CLAUDE_COMMAND];
     if (model) parts.push('--model', quoted(model));
     if (effort) parts.push('--effort', quoted(effort));
     if (advisor) parts.push('--advisor', quoted(advisor));
+    // The client has no `--output-style` flag; `outputStyle` is an ordinary
+    // setting, and `--settings` takes JSON that merges with the settings files —
+    // "a key you set here overrides the same key in local, project, or user
+    // settings, and a key you omit keeps its lower-level value". So one key is
+    // sent and everything else the user has configured stays as it was.
+    if (outputStyle) parts.push('--settings', quoted(JSON.stringify({ outputStyle })));
     if (args) parts.push(String(args).trim());
     return parts.join(' ');
 }
@@ -61,6 +67,7 @@ const launchSettings = () => {
         model: conf.get('model') || '',
         effort: conf.get('effort') || '',
         advisor: conf.get('advisor') || '',
+        outputStyle: conf.get('outputStyle') || '',
         args: conf.get('launchArgs') || '',
     };
 };
@@ -535,6 +542,9 @@ function render(state) {
         if (state.hasSession !== has) {
             state.hasSession = has;
             vscode.commands.executeCommand('setContext', 'claudeStatusline.hasSession', has);
+            // Kept for the next window, which lays the sidebar out before it can
+            // know the answer for itself.
+            if (state.memory) state.memory.update(HAD_SESSION, has);
         }
     } catch { /* the bar is drawn; the pane keeps whatever it had */ }
 }
@@ -1006,6 +1016,7 @@ function configView(state) {
         model: cfg.get('model'),
         effort: cfg.get('effort'),
         advisor: cfg.get('advisor'),
+        outputStyle: cfg.get('outputStyle'),
         launchArgs: cfg.get('launchArgs'),
         refreshInterval: cfg.get('refreshInterval'),
         monthlyBudget: cfg.get('monthlyBudget'),
@@ -1025,7 +1036,7 @@ function configView(state) {
 // avoid. The list is the gate: a message naming anything else is dropped.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
     'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog',
-    'openLocation', 'model', 'effort', 'advisor', 'launchArgs'];
+    'openLocation', 'model', 'effort', 'advisor', 'outputStyle', 'launchArgs'];
 
 // The one key that ignores the scope the page offers. `launchArgs` is declared
 // `machine` in the manifest — free text going into a shell is not something a
@@ -1419,12 +1430,24 @@ function applyConfig(state) {
 function activate(context) {
     const cfg = vscode.workspace.getConfiguration('claudeStatusline');
 
+    // Before anything is read or registered: the session pane sits behind a
+    // `when` clause, and `initialSize` is applied to a pane the first time it is
+    // shown. A key set on the first tick therefore arrives after VS Code has
+    // laid the container out with the pane missing, and the pane then takes
+    // whatever height is left instead of its half. What the last window found is
+    // remembered and answered with straight away; the first tick corrects it.
+    vscode.commands.executeCommand('setContext', 'claudeStatusline.hasSession',
+        Boolean(context.globalState && context.globalState.get(HAD_SESSION)));
+
     const state = {
         workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
         // The limit history lives beside the index, in storage the extension
         // owns. ~/.claude belongs to Claude Code; reading it is one thing,
         // leaving files of ours in it is another.
         storageDir: context.globalStorageUri.fsPath,
+        // What survives a window, as opposed to `context` below, which is this
+        // session's context window.
+        memory: context.globalState,
         // The tree of runs is read from a field rather than from the constant in
         // workflows.js so a test can point the whole collector at a scratch
         // directory — without it every test that calls activate() walks the real
@@ -1538,19 +1561,25 @@ function activate(context) {
             const tab = tabFor(t);
             if (tab) ourTabs.delete(tab);
         }),
-        vscode.window.registerWebviewViewProvider('claudeStatusline.limits', state.limitsView),
-        vscode.window.registerWebviewViewProvider('claudeStatusline.now', state.nowView),
+        // The ids carry a `Pane` suffix because VS Code remembers a container's
+        // layout — height and collapsed state — under the id of each view, and
+        // remembered state outranks anything the manifest declares. Renaming
+        // them is the only way an extension can say "start over": the four
+        // before these were `limits`, `now`, `sessions` and `workflows`, and the
+        // panel they described opened at sizes chosen weeks earlier.
+        vscode.window.registerWebviewViewProvider('claudeStatusline.limitsPane', state.limitsView),
+        vscode.window.registerWebviewViewProvider('claudeStatusline.sessionPane', state.nowView),
         // Held rather than discarded: the badge lives on the view object, not on
         // the provider, and it is the provider that knows the count.
         (() => {
-            const view = vscode.window.createTreeView('claudeStatusline.sessions', {
+            const view = vscode.window.createTreeView('claudeStatusline.livePane', {
                 treeDataProvider: state.sessionsTree,
             });
             state.sessionsTree.view = view;
             state.sessionsTree.refresh();
             return view;
         })(),
-        vscode.window.createTreeView('claudeStatusline.workflows', { treeDataProvider: state.tree }),
+        vscode.window.createTreeView('claudeStatusline.runsPane', { treeDataProvider: state.tree }),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
         vscode.commands.registerCommand('claudeStatusline.export', () => exportIndex(context)),
@@ -1810,6 +1839,10 @@ const tabName = () => process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code';
 // `name`, `shellPath`, `shellArgs`, `cwd`, `env`, `hideFromUser` — and the icon
 // is not among them (`$acceptTerminalOpened`, VS Code 1.121).
 const TAB_MARK = 'CLAUDE_DASHBOARD_TAB';
+
+// Whether the last window this extension ran in had a Claude session of its own.
+// Read before the sidebar is built, written whenever the answer changes.
+const HAD_SESSION = 'hadSession';
 
 // Pids of the tabs this button opened, kept because the mark above is a
 // reasonable bet rather than a promise. An entry carries the moment it was made:
