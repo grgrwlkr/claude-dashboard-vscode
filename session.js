@@ -261,6 +261,95 @@ function contextOf(record) {
     };
 }
 
+// Four characters to a token, the same rate the memory files are weighed at in
+// `system.js`. Right in the first digit, which is all a "what is my window full
+// of" figure needs.
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * What is in the context window besides the conversation, as far as the
+ * transcript admits.
+ *
+ * `/context` computes its breakdown in memory and writes none of it down, but
+ * four of its rows leave a trace: the client records the skill listing, the
+ * deferred tool names, the agent listing and each MCP server's instructions as
+ * attachments, because those are the blocks it adds to the prompt.
+ *
+ * They are deltas, and that is the trap. A listing repeats and grows over a long
+ * session, so adding up every record counts the same skill many times over — on
+ * this machine that reads ~93k tokens of skills where the client says ~10k. What
+ * is in the window is the state at the end of the file: a listing marked
+ * `isInitial` replaces what came before it, everything else adds and removes by
+ * name.
+ *
+ * What this cannot see is worth saying out loud: the system prompt, and the tool
+ * schemas themselves — the transcript carries tool *names*, not their
+ * definitions, so the largest row of `/context` is not here. The caller reports
+ * the difference as unaccounted rather than pretending the window is smaller.
+ */
+function contextParts(file) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
+
+    const skills = new Map();
+    const tools = new Map();
+    const agents = new Map();
+    const mcp = new Map();
+    let hooks = 0;
+
+    // Each block arrives with the text that was added; where a delta names more
+    // entries than it carries lines, the name itself is what reached the prompt.
+    const put = (into, names, lines) => {
+        (names || []).forEach((name, i) => {
+            const line = (lines || [])[i];
+            into.set(name, typeof line === 'string' ? line.length : String(name).length);
+        });
+    };
+    const drop = (from, names) => { (names || []).forEach((name) => from.delete(name)); };
+
+    for (const line of text.split('\n')) {
+        if (line.length < 40 || line[0] !== '{') continue;
+        let record;
+        try { record = JSON.parse(line); } catch { continue; }
+        const a = record.attachment;
+        if (!a || typeof a !== 'object') continue;
+
+        if (a.type === 'skill_listing') {
+            if (a.isInitial) skills.clear();
+            const names = a.names || [];
+            // One listing, one block of text: it is split evenly rather than
+            // guessed per skill, because the text is written as a whole.
+            const each = (a.content || '').length / Math.max(1, names.length);
+            names.forEach((name) => skills.set(name, each));
+        } else if (a.type === 'deferred_tools_delta') {
+            drop(tools, a.removedNames);
+            put(tools, a.addedNames, a.addedLines);
+            (a.readdedNames || []).forEach((name) => {
+                if (!tools.has(name)) tools.set(name, String(name).length);
+            });
+        } else if (a.type === 'agent_listing_delta') {
+            if (a.isInitial) agents.clear();
+            drop(agents, a.removedTypes);
+            put(agents, a.addedTypes, a.addedLines);
+        } else if (a.type === 'mcp_instructions_delta') {
+            drop(mcp, a.removedNames);
+            put(mcp, a.addedNames, a.addedBlocks);
+        } else if (a.type === 'hook_additional_context') {
+            hooks += (a.content || []).reduce((sum, c) => sum + String(c).length, 0);
+        }
+    }
+
+    const tok = (map) => Math.round([...map.values()].reduce((a, b) => a + b, 0) / CHARS_PER_TOKEN);
+    return {
+        skills: tok(skills),
+        tools: tok(tools),
+        agents: tok(agents),
+        mcp: tok(mcp),
+        hooks: Math.round(hooks / CHARS_PER_TOKEN),
+        counts: { skills: skills.size, tools: tools.size, agents: agents.size, mcp: mcp.size },
+    };
+}
+
 // Everything that needs the whole transcript is computed in a single pass: cost,
 // duration, share of time spent waiting on the model, edits, message count. A
 // 5 MB file parses in ~20 ms, so this runs on the slow tick, not on every draw.
@@ -527,7 +616,7 @@ module.exports = {
     SESSIONS, PROJECTS, TAIL,
     slugFor, listSessions, findOwnSession, sessionForShell, titleOf, titleIn,
     transcriptPath, readTail, contextOf,
-    windowFor, sessionStats, costToday, costSince, peersOf, todoOf,
+    windowFor, sessionStats, contextParts, costToday, costSince, peersOf, todoOf,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
     settingsFiles, settingsChain, resolveSetting, MANAGED,
 };

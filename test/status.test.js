@@ -148,6 +148,48 @@ test('the session section reports the thinking setting, not the last reply', () 
     assert.deepEqual(rowsOf(ctx2).find((r) => r[0] === 'thinking'), ['thinking', 'on · summaries hidden']);
 });
 
+// What the window is full of, in the same section the window meter lives in —
+// which is what puts it on the Now tab and in the sidebar at once. The rows the
+// transcript can weigh are estimates and say so; the rest of the window is one
+// row that names what is inside it rather than claiming to be the conversation.
+test('the context breakdown accounts for the whole window, unseparable parts included', () => {
+    const parts = { skills: 8000, tools: 2000, agents: 5000, mcp: 2000, hooks: 1000 };
+    const withParts = { ...data, contextParts: parts, memoryTokens: 20000 };
+    const ctx = status.statusSections(withParts, helpers, {}).find((x) => x.id === 'context');
+    const meters = ctx.blocks.filter((b) => b.kind === 'meters').flatMap((b) => b.rows);
+    const by = Object.fromEntries(meters.map((r) => [r.label, r]));
+
+    assert.ok(by.memory && by.skills && by.agents, 'the parts that can be weighed are rows');
+    assert.ok(by.free, 'the rest of the window is a row of its own');
+    const rest = by['rest in use'];
+    assert.ok(rest, 'and what cannot be separated is one row, named for what is in it');
+    assert.match(rest.note, /chat, system prompt, tool schemas/);
+    // 529k in use, 38k of it named: the remainder is what is left.
+    assert.equal(rest.tokens, data.ctx.tokens - 38000);
+
+    // Every row is a share of the window, and together they are the whole of it —
+    // the meter beside them is the same number from the other end.
+    const parts2 = meters.filter((r) => r.label !== 'window');
+    assert.equal(parts2.reduce((sum, r) => sum + r.tokens, 0), data.ctx.window);
+
+    // Biggest first: a list of shares that is not sorted by share makes the eye
+    // do the ranking, and the rows worth seeing are the largest ones. Free space
+    // is the exception and sits last — it is what the others are measured
+    // against, not one of them.
+    assert.equal(parts2[parts2.length - 1].label, 'free');
+    const pcts = parts2.slice(0, -1).map((r) => r.pct);
+    assert.deepEqual(pcts, [...pcts].sort((a, b) => b - a));
+
+    // And every label fits one line beside its meter. The column is narrow in the
+    // sidebar, where a two-word label wraps and pushes the rows apart.
+    for (const row of parts2) {
+        assert.ok(row.label.length <= 12, `"${row.label}" is too long for the label column`);
+    }
+    // The estimated rows carry a tilde; free space is exact and does not.
+    assert.match(by.skills.value, /^~/);
+    assert.doesNotMatch(by.free.value, /^~/);
+});
+
 test('an unpriced model is flagged where the money is stated', () => {
     const sections = status.statusSections(data, helpers, {});
     const money = sections.find((x) => x.id === 'money');

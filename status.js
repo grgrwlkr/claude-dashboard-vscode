@@ -127,6 +127,68 @@ function limits(d, h, env) {
     return { id: 'limits', title: 'Limits', blocks };
 }
 
+/**
+ * What the window is full of, as far as this side can tell.
+ *
+ * `/context` in the client draws the same thing from figures it holds in memory
+ * and never writes down. Four of its rows leave a trace in the transcript — the
+ * skill listing, the deferred tool names, the agent listing, the MCP
+ * instructions — and the memory files are on disk, so those are weighed here,
+ * each at four characters to a token and each marked as the estimate it is.
+ *
+ * The rest is one row called `unaccounted`, and it is the honest part of this
+ * panel: the system prompt and the tool schemas are the largest thing in a real
+ * window and none of it reaches the transcript. Splitting the difference among
+ * the rows that *can* be measured would make every one of them wrong; leaving it
+ * out would draw a window emptier than it is. So the rows always add up to the
+ * whole window, and the unmeasurable part carries its own name.
+ */
+function breakdown(d, h) {
+    const ctx = d.ctx;
+    const parts = d.contextParts;
+    if (!ctx || !parts || !ctx.window) return null;
+
+    const window = ctx.window;
+    const rows = [];
+    const add = (label, tokens, { estimated = true, note = '' } = {}) => {
+        if (tokens <= 0) return;
+        const pct = Math.round((tokens / window) * 1000) / 10;
+        rows.push({
+            label,
+            value: `${estimated ? '~' : ''}${pct < 0.1 ? '<0.1' : pct}%`,
+            pct,
+            tokens,
+            note: note || h.tok(tokens),
+        });
+    };
+
+    // Labels are one word wherever a word will do: the column is narrow in the
+    // sidebar, and a label that wraps pushes its own meter onto a second line.
+    add('memory', d.memoryTokens || 0, { note: `${h.tok(d.memoryTokens || 0)} · instruction files` });
+    add('skills', parts.skills);
+    add('agents', parts.agents);
+    add('mcp', parts.mcp, { note: `${h.tok(parts.mcp)} · server instructions` });
+    add('tools', parts.tools, { note: `${h.tok(parts.tools)} · names only` });
+    add('hooks', parts.hooks);
+
+    // The remainder, and it is deliberately not called "messages". The
+    // conversation, the system prompt and the tool schemas arrive as one number
+    // — the input the last reply was billed for — and nothing on disk separates
+    // them. Naming this row after the conversation alone would be a guess
+    // presented as a measurement; naming what is in it is not.
+    const measured = rows.reduce((sum, r) => sum + r.tokens, 0);
+    const rest = Math.max(0, ctx.tokens - measured);
+    add('rest in use', rest, { note: `${h.tok(rest)} · chat, system prompt, tool schemas` });
+    // Biggest share first: the rows worth seeing are the largest ones, and a
+    // fixed order buries them under whichever parts happen to be measurable.
+    rows.sort((a, b) => b.tokens - a.tokens);
+    // Free space is last whatever its size — it is what the others are measured
+    // against, not one of them, and an empty window would otherwise open the
+    // list with the one row that says nothing about what is in it.
+    add('free', Math.max(0, window - ctx.tokens), { estimated: false });
+    return { kind: 'meters', rows };
+}
+
 function context(d, h) {
     const ctx = d.ctx;
     if (!ctx) return null;
@@ -161,6 +223,9 @@ function context(d, h) {
             note: `${h.tok(ctx.tokens)} / ${h.tok(ctx.window)}`,
         }],
     });
+    const parts = breakdown(d, h);
+    if (parts) blocks.push(parts);
+
     const fill = [];
     if (ctx.estimated) fill.push(['note', 'window size unknown for this model']);
     if (ctx.cachePct >= 0) fill.push(['from cache', `${ctx.cachePct}%`]);

@@ -627,6 +627,16 @@ function collectSlow(state) {
             d.stats = state.stats;
         }
         if (state.needs.has('today')) { state.todayUsd = s.costToday().usd; d.todayUsd = state.todayUsd; }
+        // What the window is full of. Another whole-transcript pass, so it rides
+        // the slow tick with the rest; the memory files are already weighed by
+        // the system snapshot, which is where that half of the answer comes from.
+        state.contextParts = s.contextParts(s.transcriptPath(state.workspace, state.session.sessionId));
+        d.contextParts = state.contextParts;
+        // Every instruction file that reaches the prompt, not just the global
+        // ones: the project's own CLAUDE.md and this repository's auto-memory are
+        // in the window too.
+        const budget = sys.contextBudget(sys.ROOT, [state.workspace], [s.slugFor(state.workspace)]);
+        d.memoryTokens = (budget.files || []).reduce((sum, f) => sum + f.tokens, 0);
         state.compactPct = s.autoCompactPct(state.workspace, state.context?.window || 0);
         state.settings = s.settingsOf(state.workspace);
         state.version = s.versionInfo(state.session.version);

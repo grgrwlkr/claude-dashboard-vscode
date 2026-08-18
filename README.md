@@ -182,6 +182,38 @@ Two placeholders answer "when do I run out", and the difference matters: `{dry}`
 is silent when the forecast lands after the reset — running out then never
 happens — while `{dryAt}` names the date either way.
 
+### What fills the context window
+
+Beside the window meter, the session section lists what is in it — biggest share
+first, free space last:
+
+```
+window            82%   828k / 1.0M
+rest in use    ~74.1%   741k · chat, system prompt, tool schemas
+memory          ~6.8%    68k · instruction files
+skills          ~0.8%     8k
+agents          ~0.5%     5k
+tools           ~0.2%     2k · names only
+mcp             ~0.2%     2k · server instructions
+hooks           ~0.2%     2k
+free            17.2%   172k
+```
+
+The client works this out for `/context` from figures it keeps in memory and
+writes none of them to disk. What it does record are the blocks it adds to the
+prompt — the skill listing, the deferred tool names, the agent listing, each MCP
+server's instructions — and those, with the instruction files, are what these
+rows weigh, at four characters to a token. Hence the tildes: right in the first
+digit, which is what a "what is my window full of" figure needs.
+
+Two things are worth knowing before reading the numbers. **`rest in use` is not
+"messages"** — the conversation, the system prompt and the tool schemas arrive as
+one figure, the input the last reply was billed for, and nothing on disk splits
+them; the row is named for what is inside it rather than guessing. And **`tools`
+counts names, not schemas** — the transcript carries the names of deferred tools,
+never their definitions, so the schemas are inside `rest in use` too. The rows
+therefore add up to the whole window, unmeasurable parts included.
+
 The week track on the Now tab draws the same answer instead of stating it:
 
 ![The week as a track of seven days: the blue part is spent, a rule in the theme's text colour marks where an even burn would be by now, the red block is the overspend, and a red line labelled DRY 1D10H marks the day the window runs out — two days before it resets](media/screenshots/dry-dark.png)
@@ -352,10 +384,10 @@ dashboard, and the placeholders above.
 That tree is the last of four sections in the **Claude Dashboard** container.
 Above it sit **Limits** — the 5-hour window above the weekly one, how far ahead
 or behind plan the spend is, and when the window would run out at this rate;
-**Session** — the model, the context window and what the session open in this
-window has cost, hidden entirely when there is no session here; and **Live
-sessions**, every session on the machine whose process is alive, named by its
-project. It opens with the first two sharing the height and the two lists
+**Session** — the model, the context window with a breakdown of what fills it,
+and what the session open in this window has cost, hidden entirely when there is
+no session here; and **Live sessions**, every session on the machine whose
+process is alive, named by its project. It opens with the first two sharing the height and the two lists
 collapsed; drag or open whatever you like and VS Code remembers it instead. The first two are the status bar's own tooltip sections, so the panel
 and the hover cannot disagree. The icon carries a badge with the number of live
 sessions, and no badge at all when nothing is running.

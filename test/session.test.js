@@ -136,6 +136,45 @@ test("costSince drops yesterday's records from the same file", () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// What fills the context window besides the conversation. The client works these
+// out in memory for `/context` and writes none of it down, but the pieces it
+// *does* record are enough to weigh several of them: the skill listing, the
+// deferred tool names, the agent listing and the MCP instructions all reach the
+// transcript as attachments.
+//
+// They arrive as deltas, and that is the whole difficulty: a listing repeats and
+// grows, so adding up every record counts the same skill a dozen times. Summing
+// this file's records naively gives ~93k tokens of skills where the client
+// reports ~10k. Only the state at the end of the file is in the window.
+test('context parts are the state at the end of the file, not the sum of the deltas', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
+    const file = path.join(dir, 'session.jsonl');
+    const attach = (attachment) => JSON.stringify({ type: 'attachment', attachment });
+    fs.writeFileSync(file, [
+        // A full listing, then a delta that adds one more skill.
+        attach({ type: 'skill_listing', isInitial: true, names: ['a', 'b'], content: 'x'.repeat(800) }),
+        attach({ type: 'skill_listing', isInitial: false, names: ['c'], content: 'x'.repeat(400) }),
+        // Tools come and go: two added, one taken away.
+        attach({ type: 'deferred_tools_delta', addedNames: ['t1', 't2'], addedLines: ['x'.repeat(100), 'x'.repeat(60)] }),
+        attach({ type: 'deferred_tools_delta', addedNames: [], addedLines: [], removedNames: ['t2'] }),
+        // A second full agent listing replaces the first rather than doubling it.
+        attach({ type: 'agent_listing_delta', isInitial: true, addedTypes: ['one'], addedLines: ['x'.repeat(200)] }),
+        attach({ type: 'agent_listing_delta', isInitial: true, addedTypes: ['one'], addedLines: ['x'.repeat(200)] }),
+        attach({ type: 'mcp_instructions_delta', addedNames: ['srv'], addedBlocks: ['x'.repeat(120)] }),
+        '',
+    ].join('\n'));
+
+    const parts = s.contextParts(file);
+    assert.deepEqual(parts.counts, { skills: 3, tools: 1, agents: 1, mcp: 1 });
+    // 800 chars over two skills, plus 400 for the one the delta added, at four
+    // characters to a token — the same rate the memory files are weighed with.
+    assert.equal(parts.skills, 300);
+    assert.equal(parts.tools, 25, 'the removed tool is gone, the kept one is 100 chars');
+    assert.equal(parts.agents, 50, 'the repeated listing is one listing, not two');
+    assert.equal(parts.mcp, 30);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // The title is what the terminal tab is named after. It is written as its own
 // record and rewritten as a session goes on, so the last one in the file wins —
 // and a title the user typed outranks the generated one.

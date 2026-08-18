@@ -9,6 +9,39 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.36.0] — 2026-08-18
+
+### Added
+
+- **The context window is broken down into what fills it**, in the session
+  section — which puts it on the Now tab and in the sidebar at once. Rows are
+  ordered by share, largest first, with free space pinned to the bottom: it is
+  what the others are measured against rather than one of them.
+
+  `/context` in the client draws this from figures it holds in memory and writes
+  none of them down — not to the transcript, not to the session registry, not to
+  the payload a status line gets, which carries only totals. What the transcript
+  *does* record is the blocks the client adds to the prompt: the skill listing,
+  the deferred tool names, the agent listing and each MCP server's instructions.
+  Those are weighed here, together with the instruction files on disk, at four
+  characters to a token — the same rate the memory files have always been counted
+  at — and each is marked with a tilde as the estimate it is.
+
+  They arrive as deltas, and that is the whole difficulty: a listing repeats and
+  grows over a long session, so adding up every record counts the same skill many
+  times over. Summed naively, this machine's transcript reads ~93k tokens of
+  skills where the client reports ~10k. Only the state at the end of the file is
+  in the window, so a listing marked `isInitial` replaces what came before it and
+  everything else adds and removes by name.
+
+  The largest row is called **rest in use** and not "messages", deliberately. The
+  conversation, the system prompt and the tool schemas reach this side as one
+  number — the input the last reply was billed for — and nothing on disk
+  separates them. Naming that row after the conversation alone would be a guess
+  wearing the clothes of a measurement; the row names what is inside it instead,
+  and the rows add up to the whole window rather than to a window that pretends
+  to be emptier than it is.
+
 ## [0.34.0] — 2026-08-17
 
 ### Added
