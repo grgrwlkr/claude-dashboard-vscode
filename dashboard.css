@@ -405,9 +405,12 @@ ul.log li { margin: 2px 0; opacity: .85; }
   background: var(--vscode-foreground); }
 .wk-dry { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
   background: var(--vscode-charts-red, hsl(0 60% 57%)); }
+/* Two facts, one at each end. The middle one — the forecast in words — is a pill
+   now, and the rule that centred it was still pointing at whatever sat second,
+   which is the right-hand fact: it kept `flex: 1` and only lost the alignment
+   fight to `:last-child`. */
 .wk-feet { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px;
   font-size: 11px; opacity: .5; }
-.wk-feet span:nth-child(2) { flex: 1; text-align: center; }
 .wk-feet span:last-child { text-align: right; }
 
 /* Columns rather than a grid: panels of wildly different heights leave a grid
@@ -462,8 +465,14 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .pill-muted { opacity: .55; }
 /* Pills have their own edge, unlike a heading's letters, so the body needs more
    air under them than under a plain title — at 6px the first bar of a panel
-   looked stuck to them. */
-.panel-head ~ .panel-body, .side-head ~ * { margin-top: 10px; }
+   looked stuck to them. The adjacent sibling, not the general one: written as
+   `~` this reached every block of a sidebar section and beat any rule declared
+   above it, so `.now-sub` silently lost its 14px there and which rule won came
+   down to where in the file it happened to sit. */
+.panel-head + .panel-body, .side-head + * { margin-top: 10px; }
+/* The gauge carries no spacing of its own, so a section that ever puts one
+   second — after a note, say — would weld it to the block above. */
+.gauge + *, * + .gauge { margin-top: 10px; }
 .pill-active { background: color-mix(in srgb, var(--vscode-charts-blue) 22%, transparent); }
 .pill-safe { background: color-mix(in srgb, var(--vscode-charts-green) 22%, transparent); }
 .pill-warn { background: color-mix(in srgb, var(--vscode-charts-yellow) 25%, transparent); }

@@ -2508,7 +2508,21 @@ function settingsTab(config) {
 // pretending to be a string. `STYLE` is still a string, so both pages, both
 // preview tools and the tests that hold rules against the vocabularies are
 // untouched by the move.
-const STYLE = fs.readFileSync(path.join(__dirname, 'dashboard.css'), 'utf8');
+// Degrade, never guess — and here the difference is the whole extension. This
+// read happens at require time, so a missing or unreadable file would throw
+// before `activate` is even defined: the status bar, the tree and the sidebar
+// would all be gone, over a stylesheet. The fallback keeps the page legible
+// enough to say what is wrong instead.
+const STYLE = (() => {
+    try {
+        return fs.readFileSync(path.join(__dirname, 'dashboard.css'), 'utf8');
+    } catch {
+        return 'body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);'
+            + ' background: var(--vscode-editor-background); padding: 16px; }'
+            + ' table { width: 100%; border-collapse: collapse; }'
+            + ' .empty::before { content: "dashboard.css is missing from this install — "; }';
+    }
+})();
 
 
 /**

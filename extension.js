@@ -134,7 +134,17 @@ function renderSection(section) {
         // first, then the figure, then what it is made of.
         if (block.kind === 'pills') {
             if ((block.items || []).length === 0) continue;
-            md.appendMarkdown(`${block.items.map((p) => (p.value ? `${p.text} **${p.value}**` : `**${p.text}**`)).join(' · ')}\n\n`);
+            // The page colours a toned pill and the hover cannot, so it takes
+            // the same codicon a toned note gets — `tone` is meaning, and a
+            // renderer that drops it says "credits off" in the voice of "max".
+            // Only the tones that warn or reassure: `active` is emphasis on the
+            // page rather than a message, and a play glyph beside the effort
+            // level reads as something happening.
+            const SPEAKS = new Set(['alarm', 'safe', 'warn', 'update']);
+            md.appendMarkdown(`${block.items.map((p) => {
+                const icon = SPEAKS.has(p.tone) && TONE_ICON[p.tone] ? `${TONE_ICON[p.tone]} ` : '';
+                return `${icon}${p.value ? `${p.text} **${p.value}**` : `**${p.text}**`}`;
+            }).join(' · ')}\n\n`);
         }
         if (block.kind === 'gauge') {
             const bar = Number.isFinite(block.pct) ? `\`${u.bar(block.pct, block.pct)}\` ` : '';

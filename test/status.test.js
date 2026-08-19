@@ -267,6 +267,18 @@ test('the context breakdown accounts for everything in use, unseparable parts in
     }
 });
 
+// The gauge gives up its track because the breakdown draws the same measurement
+// in colour underneath. When there is no breakdown — an unreadable transcript, a
+// window of zero — the panel would be a percentage floating over nothing.
+test('the window keeps a bar of its own when there is no breakdown to draw one', () => {
+    const noParts = { ...data, contextParts: null };
+    const ctx = status.statusSections(noParts, helpers, {}).find((x) => x.id === 'context');
+    const gauge = ctx.blocks.find((b) => b.kind === 'gauge');
+    assert.ok(!ctx.blocks.some((b) => b.kind === 'parts'), 'nothing was weighed');
+    assert.equal(gauge.bar, true, 'so the gauge draws its own track');
+    assert.equal(gauge.pct, data.ctx.pct);
+});
+
 test('an unpriced model is flagged where the money is stated', () => {
     const sections = status.statusSections(data, helpers, {});
     const money = sections.find((x) => x.id === 'money');
@@ -347,7 +359,11 @@ test('credits are stated as billed, and as spent when they have run out', () => 
     const note = notes(limits).find((n) => n.label === 'Credits');
     assert.equal(note.tone, 'warn');
     assert.match(note.text, /\$103\.67 spent past the plan/);
-    assert.match(note.text, /none left/);
+    assert.match(note.text, /none are left/);
+    // The switch itself is the pill, and the note no longer repeats it: said in
+    // both places it read as two findings that happen to agree.
+    assert.ok(!/credits are off/.test(note.text), 'the note states the money, the pill states the switch');
+    assert.ok(limits.blocks[0].items.some((p) => p.text === 'credits off' && p.tone === 'warn'));
     assert.ok(!note.text.includes('~'), 'a billed figure carries no tilde');
 
     const on = { ...data, limits: { ...data.limits, credits: { used: 12, limit: 50, pct: 24, enabled: true, reason: '' } } };

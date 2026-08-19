@@ -1029,9 +1029,24 @@ test('the page names itself the same way the command that opens it does', () => 
 test('the stylesheet is read from dashboard.css and is actually there', () => {
     const fs = require('node:fs');
     const path = require('node:path');
-    const file = path.join(__dirname, '..', 'dashboard.css');
+    const root = path.join(__dirname, '..');
+    const file = path.join(root, 'dashboard.css');
     assert.ok(fs.existsSync(file), 'dashboard.css is missing from the repository');
     assert.equal(db.STYLE, fs.readFileSync(file, 'utf8'), 'STYLE is not this file');
+
+    // And that it survives packaging. Every other check here reads the working
+    // tree, where the file always exists; .vscodeignore is the one thing that
+    // can drop it from the .vsix, and a page whose CSS did not ship is what the
+    // fallback in dashboard.js exists to make legible rather than fatal.
+    const rules = fs.readFileSync(path.join(root, '.vscodeignore'), 'utf8')
+        .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    for (const asset of ['dashboard.css', 'claude-settings-registry.json']) {
+        if (!fs.existsSync(path.join(root, asset))) continue;
+        const excluded = rules.some((r) => (r.endsWith('/**') && asset.startsWith(r.slice(0, -2)))
+            || r === asset || (r.startsWith('*.') && asset.endsWith(r.slice(1))));
+        assert.ok(!excluded || rules.includes(`!${asset}`),
+            `${asset} is read at runtime but excluded from the .vsix by .vscodeignore`);
+    }
     // A few rules every page depends on, so an empty or truncated file fails
     // here rather than in a screenshot.
     for (const rule of ['.panel {', '.tiles {', '.wk-rail {', '.pill {', '.strip {']) {

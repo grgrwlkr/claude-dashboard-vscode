@@ -163,6 +163,10 @@ function limits(d, h, env) {
                 }).format(amount);
             } catch { return `${amount.toFixed(2)} ${cr.currency}`; }
         };
+        // The switch is the pill and the money is the note — the same split the
+        // pace verdict gets. Said in both, "credits are off" read as two
+        // findings that happen to agree, which is what the pill was meant to
+        // stop rather than to add to.
         if (!cr.enabled) pills.push({ text: 'credits off', tone: 'warn' });
         blocks.push({
             kind: 'note',
@@ -170,7 +174,7 @@ function limits(d, h, env) {
             label: 'Credits',
             text: cr.enabled
                 ? `${money(cr.used)} spent past the plan${cr.limit > 0 ? ` of ${money(cr.limit)}, ${cr.pct}%` : ''} — billed, not estimated`
-                : `${money(cr.used)} spent past the plan, and credits are off${cr.reason === 'out_of_credits' ? ': none left' : ''} — work stops at the limit rather than continuing on credit`,
+                : `${money(cr.used)} spent past the plan${cr.reason === 'out_of_credits' ? ', and none are left' : ''} — work stops at the limit rather than continuing on credit`,
         });
     }
 
@@ -301,7 +305,10 @@ function context(d, h) {
             ? (settings.thinkingSummaries ? 'on' : 'on · summaries hidden')
             : 'off',
     });
-    if (settings.outputStyle) pills.push({ text: settings.outputStyle });
+    // Labelled, like the advisor beside it: on the page a bare "explanatory"
+    // reads as a state of something, but in the hover's one line of pills it is
+    // a word with no subject at all.
+    if (settings.outputStyle) pills.push({ text: 'style', value: settings.outputStyle });
     blocks.push({ kind: 'pills', items: pills });
 
     // The window as one headline rather than a meter row indistinguishable from
@@ -319,18 +326,21 @@ function context(d, h) {
     // fills — but this one draws no track of its own: the breakdown's colour bar
     // right under it is the same measurement, and two bars of one number stacked
     // on each other is the repetition this layout exists to remove.
+    // Worked out before the gauge, because whether the gauge draws its own track
+    // depends on whether this exists: the breakdown is null when the transcript
+    // could not be read at all, and a panel with neither bar is a percentage
+    // floating over nothing.
+    const parts = (breakdown(d, h) || []).filter((block) => block.rows.length);
     blocks.push({
         kind: 'gauge',
         headline: `${ctx.estimated ? '~' : ''}${ctx.pct}%`,
         value: `${h.tok(ctx.tokens)} / ${h.tok(ctx.window)}`,
         sub: sub.join(' · '),
         pct: ctx.pct,
-        bar: false,
+        bar: parts.length === 0,
         chips: [],
     });
-    for (const block of breakdown(d, h) || []) {
-        if (block.rows.length) blocks.push(block);
-    }
+    blocks.push(...parts);
 
     // Where this session runs, as the footer it always was: two facts nobody
     // reads twice, and — only when there is one — the update, which is the one

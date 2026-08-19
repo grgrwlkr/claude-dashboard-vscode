@@ -9,6 +9,34 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [Unreleased]
+
+### Fixed
+
+- **The context panel could show a percentage over nothing.** The window gauge
+  gives up its own track because the breakdown draws the same measurement in
+  colour underneath — but the breakdown is absent when the transcript cannot be
+  read at all, and then the panel had no bar anywhere. The gauge now keeps its
+  track exactly when there is no breakdown to replace it.
+- **A missing stylesheet took the whole extension down, not just the styles.**
+  `dashboard.css` is read at require time, so an unreadable file threw before
+  `activate` was even defined — no status bar, no tree, no sidebar, over CSS.
+  It now falls back to a legible minimum, and a test checks that `.vscodeignore`
+  cannot drop a file the runtime reads.
+- **The tooltip drew every pill in the same voice.** `tone` is meaning, and the
+  hover was ignoring it: `credits off` looked like `max`. Pills that warn or
+  reassure now carry the same codicon a toned note gets.
+- **`credits off` was said twice** — as a pill and again inside the note beside
+  it, which is the duplication the pills were introduced to remove. The pill
+  states the switch, the note states the money.
+- **The output style pill had no subject.** In the hover's single line it read as
+  a bare `default`; it is `style default` now, the same shape as `advisor`.
+- **Two CSS rules reached further than they were written for.** The body spacing
+  used a general sibling selector, so it applied to every block of a sidebar
+  section and beat any rule declared above it — `.now-sub` lost its spacing there
+  depending on where in the file its rule happened to sit. And the week footer's
+  centring rule still pointed at a middle element that no longer exists.
+
 ## [0.38.0] — 2026-08-19
 
 ### Changed
@@ -37,13 +65,14 @@ grew out of, and a version that shipped nothing is worth saying so.
   measurements — and ends in a footer of branch and client version, with a chip
   when a newer client is unpacked and waiting.
 
-- **The stylesheet moved out of the JavaScript, into `dashboard.css`.** 714 lines
-  of CSS lived inside a template literal, where a backtick in a comment breaks
-  the module at require time — it did, four times in one session — and where no
-  editor offers highlighting, bracket matching or a linter. `STYLE` is still a
-  string, read from the file at load, so both pages, both preview tools and every
-  test that holds a rule against a vocabulary are untouched. The move is
-  byte-for-byte: the file has the same checksum the extracted block had.
+- **The stylesheet moved out of the JavaScript, into `dashboard.css`.** The CSS
+  lived inside a template literal — 570 lines at the last release, 708 by the
+  time it was lifted out — where a backtick in a comment breaks the module at
+  require time, as it did four times in one session, and where no editor offers
+  highlighting, bracket matching or a linter. `STYLE` is still a string, read
+  from the file at load, so both pages, both preview tools and every test that
+  holds a rule against a vocabulary are untouched. The lift itself changed
+  nothing: the file matched the extracted block byte for byte, checksum included.
 
 - **The week track is a panel, and everything it used to say around the rail is
   a pill.** It had four ways of stating a fact in one block: a verdict sentence
