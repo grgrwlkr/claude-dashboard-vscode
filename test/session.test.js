@@ -175,6 +175,31 @@ test('context parts are the state at the end of the file, not the sum of the del
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// One file, several contexts. A subagent's records live in the same transcript
+// as the main thread's, and they carry their own listings — a fresh `isInitial`
+// skill listing from an agent would wipe the state built for this window, and
+// its tools would be counted into a window they were never in. `readTail` has
+// always skipped these records; this pass had not, which is the same "state at
+// the end of the file" trap one level deeper.
+test('a subagent’s own listings do not count towards this window', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
+    const file = path.join(dir, 'session.jsonl');
+    const attach = (attachment, extra = {}) => JSON.stringify({ type: 'attachment', attachment, ...extra });
+    fs.writeFileSync(file, [
+        attach({ type: 'skill_listing', isInitial: true, names: ['a', 'b'], content: 'x'.repeat(800) }),
+        // Everything below belongs to a subagent, by each of the three markers.
+        attach({ type: 'skill_listing', isInitial: true, names: ['agent-only'], content: 'x'.repeat(4000) }, { isSidechain: true }),
+        attach({ type: 'deferred_tools_delta', addedNames: ['t9'], addedLines: ['x'.repeat(999)] }, { agentId: 'a1' }),
+        attach({ type: 'agent_listing_delta', isInitial: true, addedTypes: ['w'], addedLines: ['x'.repeat(999)] }, { workflowId: 'w1' }),
+        '',
+    ].join('\n'));
+
+    const parts = s.contextParts(file);
+    assert.deepEqual(parts.counts, { skills: 2, tools: 0, agents: 0, mcp: 0 });
+    assert.equal(parts.skills, 200, 'the main listing survives the agent’s own');
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // The title is what the terminal tab is named after. It is written as its own
 // record and rewritten as a session goes on, so the last one in the file wins —
 // and a title the user typed outranks the generated one.

@@ -128,6 +128,38 @@ function renderSection(section) {
                 r.label, `\`${u.bar(r.pct, r.pct)}\` **${r.value}**`, r.note ? `_${r.note}_` : '',
             ]), ['', '', '']));
         }
+        // The page has a heading row for pills, a big figure for a gauge and
+        // colour for the parts. A tooltip has one width, one type size and no
+        // fills, so it says the same things with emphasis and order: state
+        // first, then the figure, then what it is made of.
+        if (block.kind === 'pills') {
+            if ((block.items || []).length === 0) continue;
+            md.appendMarkdown(`${block.items.map((p) => (p.value ? `${p.text} **${p.value}**` : `**${p.text}**`)).join(' · ')}\n\n`);
+        }
+        if (block.kind === 'gauge') {
+            const bar = Number.isFinite(block.pct) ? `\`${u.bar(block.pct, block.pct)}\` ` : '';
+            md.appendMarkdown(`${bar}**${block.headline}** — ${[block.value, block.sub].filter(Boolean).join(' · ')}\n\n`);
+            if (Number.isFinite(block.plan)) md.appendMarkdown(`plan ${block.plan}%\n\n`);
+            if ((block.chips || []).length) md.appendMarkdown(`${block.chips.join(' · ')}\n\n`);
+        }
+        if (block.kind === 'parts') {
+            if (block.rows.length === 0) continue;
+            md.appendMarkdown(`**${block.caption}**${block.figure ? ` — ${block.figure}` : ''}\n\n`);
+            // Size and qualifier share the last column: the page can afford a
+            // column each, a tooltip that wraps cannot.
+            md.appendMarkdown(table(block.rows.map((r) => [
+                r.label, `\`${u.bar(r.pct, r.pct)}\` **${r.value}**`,
+                [r.figure, r.note].filter(Boolean).join(' · '),
+            ]), ['', '', '']));
+        }
+        // The band is the footer in both renderers, and the chip is the one
+        // thing in it that asks for an action — said in words rather than drawn.
+        if (block.kind === 'band') {
+            const chip = block.chip
+                ? `${block.chip.label} **${block.chip.value}**${block.chip.tail ? ` ${block.chip.tail}` : ''}` : '';
+            const line = [...(block.facts || []), chip].filter(Boolean).join(' · ');
+            if (line) md.appendMarkdown(`\n_${line}_\n\n`);
+        }
         if (block.kind === 'table') {
             if (block.rows.length === 0) continue;
             // The first column is a label and the second the answer, so the

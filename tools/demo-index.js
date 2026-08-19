@@ -318,10 +318,15 @@ function demo(now = Date.now(), { weeklyPct = 57 } = {}) {
         apiPct: 61, added: 4120, removed: 1870,
     };
     const settings = { thinking: true, thinkingSummaries: true, advisor: 'claude-fable-5', outputStyle: 'default' };
+    // What the window is full of, in the proportions a working session actually
+    // shows: instructions and the skill listing are the parts worth naming, and
+    // everything else is dwarfed by the conversation.
+    const contextParts = { skills: 8200, tools: 2100, agents: 4700, mcp: 2000, hooks: 1700 };
+
     const shared = {
         now: nowS, limits, weekly: limits.weekly, session: limits.session, scoped: limits.scoped,
         pace, ctx, stats, settings, version: { current: '2.1.224', latest: '' },
-        compactPct: 78, todayUsd: 38.4,
+        compactPct: 78, todayUsd: 38.4, contextParts, memoryTokens: 67000,
         peers: { total: 3, busy: 1 }, todo: { done: 4, total: 7, active: 'Backfill the orders table' },
     };
 

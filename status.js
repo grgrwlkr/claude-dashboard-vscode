@@ -10,8 +10,31 @@
 //   { kind: 'table', head?, rows }   rows are [label, value] or a head-wide array
 //   { kind: 'meters', rows }         [{ label, value, pct, note }] — a share of
 //                                    something, drawn as a bar or written as one
+//   { kind: 'pills', items }         the state of whatever the section is about,
+//                                    [{ text, value?, tone? }] — drawn beside the
+//                                    section's own heading, never as rows
+//   { kind: 'gauge', headline,       the one figure a section exists for:
+//           value, sub, pct, plan,   `headline` is it, `value` and `sub` are the
+//           chips }                  two lines beside it, `pct` draws a track
+//                                    (null for a figure that is not a share),
+//                                    `plan` a notch on it, `chips` the dim facts
+//                                    under it
+//   { kind: 'parts', caption,        the components of that gauge, one line each:
+//           figure?, rows }          [{ label, note, figure, value, pct }] —
+//                                    `figure` is the size, `value` the share
+//   { kind: 'band', facts, chip? }   the footer: short facts, and at most one
+//                                    chip for the thing that wants an action
 //   { kind: 'subtitle', text }       a heading inside the section
 //   { kind: 'note', text, tone }     a sentence under the rows
+//
+// `meters` and `parts` are both shares and are still two kinds of fact: meters
+// are unrelated windows that happen to be drawn alike, parts are pieces of one
+// gauge above them. Drawn identically the total reads as one more component of
+// itself, which is what the context block looked like before.
+//
+// Every section is the same five moves in the same order — heading and pills,
+// one gauge, what it is made of, the facts, a footer — so three panels that used
+// to solve each of those their own way now read as one page.
 // `tone` is meaning, not appearance: the tooltip turns it into a codicon and the
 // page into a colour, and neither has to know what the other picked.
 //
@@ -36,6 +59,9 @@ function limits(d, h, env) {
     if (!lim || !d.weekly) return null;
     const now = d.now;
     const blocks = [];
+    // Collected as they are found and hoisted to the front at the end: they are
+    // drawn beside the heading, and the heading is above everything here.
+    const pills = [];
 
     // A window is a share of something, and a share wants a bar beside it —
     // written with blocks in a tooltip, drawn as a meter on a page. The number
@@ -46,18 +72,35 @@ function limits(d, h, env) {
         pct,
         note: reset ? `${h.fmtLeft(reset, now)} → ${h.fmtAbs(reset)}` : '',
     });
+    const pc = d.pace;
+
+    // The week is the window that actually stops the work, so it is the gauge
+    // and the others are rows under it. Drawn as three equal meters — which is
+    // what this was — the one that matters is found by reading all three.
     const rows = [];
-    if (lim.session) rows.push(row('5h', lim.session.pct, lim.session.reset));
-    if (lim.weekly) rows.push(row('7d', lim.weekly.pct, lim.weekly.reset));
+    if (lim.weekly) {
+        blocks.push({
+            kind: 'gauge',
+            headline: `${lim.weekly.pct}%`,
+            value: '7 days',
+            sub: `${h.fmtLeft(lim.weekly.reset, now)} left · resets ${h.fmtAbs(lim.weekly.reset)}`,
+            pct: lim.weekly.pct,
+            // The plan is where an evenly spent week would be by now, and it is
+            // the only mark on this track that is not the spend itself.
+            plan: pc && pc.settled ? pc.plan : null,
+            chips: [],
+        });
+    } else if (lim.session) {
+        rows.push(row('5h', lim.session.pct, lim.session.reset));
+    }
+    if (lim.weekly && lim.session) rows.push(row('5h', lim.session.pct, lim.session.reset));
     // Per-model windows almost always reset together with the overall weekly
     // one; repeating that date on every row would turn the table into noise.
     for (const scoped of lim.scoped || []) {
         const own = Math.abs(scoped.reset - (lim.weekly ? lim.weekly.reset : 0)) > 60 ? scoped.reset : 0;
         rows.push(row(scoped.scope.toLowerCase(), scoped.pct, own));
     }
-    blocks.push({ kind: 'meters', rows });
-
-    const pc = d.pace;
+    if (rows.length) blocks.push({ kind: 'meters', rows });
     // `settled` gates the comparison the same way it gates the bar and the
     // {drift} field: in the first half hour the plan is 0% and the sentence
     // below would open a fresh week with "1% ahead of plan".
@@ -67,12 +110,20 @@ function limits(d, h, env) {
         const diff = lim.weekly.pct - pc.plan;
         // "behind", not "under": the track header says the same thing in the
         // same words, and a verdict assembled in two files may not drift.
-        const verdict = diff > 0 ? `${diff}% ahead of plan` : diff < 0 ? `${-diff}% behind plan` : 'exactly on plan';
+        // The same two words the week track uses, and the same colours: spending
+        // faster than the window elapses is `over` and is a warning, spending
+        // slower is `under` and is not. Written as "ahead of plan" it read as
+        // success and was drawn green — for the state that runs the quota out
+        // early. Two panels on one screen said the opposite of each other.
+        const verdict = diff > 0 ? `${diff}% over` : diff < 0 ? `${-diff}% under` : 'exactly on plan';
+        // The verdict is the pill and the measurement is the note: one fact, one
+        // place. Written in both they read as two findings that happen to agree.
+        pills.push({ text: verdict, tone: diff > 0 ? 'warn' : 'safe' });
         blocks.push({
             kind: 'note',
             tone: 'plain',
             label: 'Pace',
-            text: `${lim.weekly.pct}% spent, ${pc.plan}% of the window elapsed: ${verdict}`,
+            text: `${lim.weekly.pct}% spent, ${pc.plan}% of the window elapsed`,
         });
 
         // The forecast is stated even when it lands past the reset. "You will
@@ -112,6 +163,7 @@ function limits(d, h, env) {
                 }).format(amount);
             } catch { return `${amount.toFixed(2)} ${cr.currency}`; }
         };
+        if (!cr.enabled) pills.push({ text: 'credits off', tone: 'warn' });
         blocks.push({
             kind: 'note',
             tone: cr.enabled ? 'plain' : 'warn',
@@ -123,7 +175,8 @@ function limits(d, h, env) {
     }
 
     if (env.stale) blocks.push({ kind: 'note', tone: 'warn', text: 'showing cached data — refresh failed' });
-    if (env.updatedAt) blocks.push({ kind: 'note', tone: 'muted', text: `updated ${h.fmtAbs(env.updatedAt)}` });
+    if (env.updatedAt) blocks.push({ kind: 'band', facts: [`updated ${h.fmtAbs(env.updatedAt)}`] });
+    if (pills.length) blocks.unshift({ kind: 'pills', items: pills });
     return { id: 'limits', title: 'Limits', blocks };
 }
 
@@ -136,12 +189,17 @@ function limits(d, h, env) {
  * instructions — and the memory files are on disk, so those are weighed here,
  * each at four characters to a token and each marked as the estimate it is.
  *
- * The rest is one row called `unaccounted`, and it is the honest part of this
+ * The rest is one row called `rest in use`, and it is the honest part of this
  * panel: the system prompt and the tool schemas are the largest thing in a real
  * window and none of it reaches the transcript. Splitting the difference among
  * the rows that *can* be measured would make every one of them wrong; leaving it
- * out would draw a window emptier than it is. So the rows always add up to the
- * whole window, and the unmeasurable part carries its own name.
+ * out would draw a window emptier than it is. So the rows always add up to what
+ * is in use, and the unmeasurable part carries its own name.
+ *
+ * What is *not* here is free space and the window total: those are the gauge
+ * this list hangs under. A row of parts and a row for the whole they are parts
+ * of are two different facts, and drawn as one run of meters — which is what
+ * this was — the total reads as one more component of itself.
  */
 function breakdown(d, h) {
     const ctx = d.ctx;
@@ -150,43 +208,68 @@ function breakdown(d, h) {
 
     const window = ctx.window;
     const rows = [];
-    const add = (label, tokens, { estimated = true, note = '' } = {}) => {
+    const add = (label, tokens, note = '') => {
         if (tokens <= 0) return;
         const pct = Math.round((tokens / window) * 1000) / 10;
         rows.push({
             label,
-            value: `${estimated ? '~' : ''}${pct < 0.1 ? '<0.1' : pct}%`,
+            // The share is the emphasis and the size is the number to act on, so
+            // they are separate fields rather than one string: the page gives
+            // each its own column and the hover writes them side by side.
+            value: `~${pct < 0.1 ? '<0.1' : pct}%`,
+            figure: h.tok(tokens),
             pct,
             tokens,
-            note: note || h.tok(tokens),
+            note,
         });
     };
 
     // Labels are one word wherever a word will do: the column is narrow in the
-    // sidebar, and a label that wraps pushes its own meter onto a second line.
-    add('memory', d.memoryTokens || 0, { note: `${h.tok(d.memoryTokens || 0)} · instruction files` });
+    // sidebar, and a label that wraps pushes its own row onto a second line.
+    add('memory', d.memoryTokens || 0, 'instruction files');
     add('skills', parts.skills);
     add('agents', parts.agents);
-    add('mcp', parts.mcp, { note: `${h.tok(parts.mcp)} · server instructions` });
-    add('tools', parts.tools, { note: `${h.tok(parts.tools)} · names only` });
+    add('mcp', parts.mcp, 'server instructions');
+    add('tools', parts.tools, 'names only');
     add('hooks', parts.hooks);
+
+    // What this setup costs every prompt, before a word is typed. It is the one
+    // number here anybody can act on — the rows above are the bill for skills,
+    // agents, servers and instruction files somebody chose to load — so it goes
+    // in the caption rather than being left for the reader to add up.
+    const measured = rows.reduce((sum, r) => sum + r.tokens, 0);
+    const share = Math.round((measured / window) * 1000) / 10;
 
     // The remainder, and it is deliberately not called "messages". The
     // conversation, the system prompt and the tool schemas arrive as one number
     // — the input the last reply was billed for — and nothing on disk separates
     // them. Naming this row after the conversation alone would be a guess
     // presented as a measurement; naming what is in it is not.
-    const measured = rows.reduce((sum, r) => sum + r.tokens, 0);
-    const rest = Math.max(0, ctx.tokens - measured);
-    add('rest in use', rest, { note: `${h.tok(rest)} · chat, system prompt, tool schemas` });
+    add('rest in use', Math.max(0, ctx.tokens - measured), 'chat, system prompt, tool schemas');
     // Biggest share first: the rows worth seeing are the largest ones, and a
     // fixed order buries them under whichever parts happen to be measurable.
     rows.sort((a, b) => b.tokens - a.tokens);
-    // Free space is last whatever its size — it is what the others are measured
-    // against, not one of them, and an empty window would otherwise open the
-    // list with the one row that says nothing about what is in it.
-    add('free', Math.max(0, window - ctx.tokens), { estimated: false });
-    return { kind: 'meters', rows };
+    if (!rows.length) return null;
+
+    // Two facts about the whole, on the line that introduces the parts: what the
+    // setup costs, and where the client will compact. Both qualify the bar right
+    // under them, and as rows of their own they were the reason this panel used
+    // to end in a table nobody read.
+    const figure = [];
+    if (measured > 0) figure.push(`your setup ~${share < 0.1 ? '<0.1' : share}%`);
+    if (d.compactPct > 0) {
+        figure.push(d.compactPct > ctx.pct
+            ? `compact at ${d.compactPct}%`
+            : `compact due at ${d.compactPct}%`);
+    }
+    return [{
+        kind: 'parts',
+        // "in use", because that is what these rows add up to — the window is
+        // the gauge above and the free space is the empty end of this bar.
+        caption: 'in use',
+        figure: figure.join(' · '),
+        rows,
+    }];
 }
 
 function context(d, h) {
@@ -196,53 +279,71 @@ function context(d, h) {
     const version = d.version || {};
     const blocks = [];
 
-    // The terminal packs model, effort, thinking and advisor into one line
-    // because it has one line. Here each is a labelled row: the values are
-    // unrelated to each other, and reading them as a run of dot-separated words
-    // means parsing the separator rather than the fact.
+    // Effort, thinking, advisor and output style are how this session is set up,
+    // not measurements of it — one line of state beside the model's name rather
+    // than four labelled rows above everything else, which is what pushed the
+    // window itself below the fold. The value carries the emphasis where there
+    // is one to carry: `advisor fable 5`, not `advisor: fable 5`.
+    // In the order they survive a narrow sidebar, where the renderer drops the
+    // tail: effort and advisor decide what the session costs and how hard it
+    // thinks, and the two after them are settings you already know you set.
     const advisor = ctx.advisor || settings.advisor;
-    const model = [];
-    if (ctx.effort) model.push(['effort', ctx.effort]);
+    const pills = [];
+    if (ctx.effort) pills.push({ text: ctx.effort, tone: 'active' });
+    if (advisor) pills.push({ text: 'advisor', value: h.shortModel(advisor) });
     // The setting, not the last reply: an answer that is a tool call carries no
     // thinking block even while the model thinks on every turn. Summaries being
     // hidden is worth saying — the reasoning still happens and simply never
     // appears, here or anywhere else.
-    model.push(['thinking', settings.thinking
-        ? (settings.thinkingSummaries ? 'on' : 'on · summaries hidden')
-        : 'off']);
-    if (advisor) model.push(['advisor', h.shortModel(advisor)]);
-    if (settings.outputStyle) model.push(['output style', settings.outputStyle]);
-    blocks.push({ kind: 'table', rows: model });
-
-    blocks.push({ kind: 'subtitle', text: 'Context' }, {
-        kind: 'meters',
-        rows: [{
-            label: 'window',
-            value: `${ctx.estimated ? '~' : ''}${ctx.pct}%`,
-            pct: ctx.pct,
-            note: `${h.tok(ctx.tokens)} / ${h.tok(ctx.window)}`,
-        }],
+    pills.push({
+        text: 'thinking',
+        value: settings.thinking
+            ? (settings.thinkingSummaries ? 'on' : 'on · summaries hidden')
+            : 'off',
     });
-    const parts = breakdown(d, h);
-    if (parts) blocks.push(parts);
+    if (settings.outputStyle) pills.push({ text: settings.outputStyle });
+    blocks.push({ kind: 'pills', items: pills });
 
-    const fill = [];
-    if (ctx.estimated) fill.push(['note', 'window size unknown for this model']);
-    if (ctx.cachePct >= 0) fill.push(['from cache', `${ctx.cachePct}%`]);
-    if (d.compactPct > 0) {
-        const left = d.compactPct - ctx.pct;
-        fill.push(['auto-compact', left > 0 ? `at ${d.compactPct}% — ${left}% away` : `at ${d.compactPct}% — due`]);
+    // The window as one headline rather than a meter row indistinguishable from
+    // the parts under it. Everything that only qualifies the window — how much
+    // is left, how much of it came from cache, where auto-compact waits — rides
+    // under the bar as chips: as rows they were three more lines of label and
+    // value between the reader and the breakdown, each repeating a word already
+    // in the heading above them.
+    const left = Math.max(0, ctx.window - ctx.tokens);
+    const sub = [];
+    if (left > 0) sub.push(`${h.tok(left)} free`);
+    if (ctx.cachePct >= 0) sub.push(`${ctx.cachePct}% cached`);
+    if (ctx.estimated) sub.push('window size is a guess for this model');
+    // The share still travels — it is what turns the headline red as the window
+    // fills — but this one draws no track of its own: the breakdown's colour bar
+    // right under it is the same measurement, and two bars of one number stacked
+    // on each other is the repetition this layout exists to remove.
+    blocks.push({
+        kind: 'gauge',
+        headline: `${ctx.estimated ? '~' : ''}${ctx.pct}%`,
+        value: `${h.tok(ctx.tokens)} / ${h.tok(ctx.window)}`,
+        sub: sub.join(' · '),
+        pct: ctx.pct,
+        bar: false,
+        chips: [],
+    });
+    for (const block of breakdown(d, h) || []) {
+        if (block.rows.length) blocks.push(block);
     }
-    if (fill.length) blocks.push({ kind: 'table', rows: fill });
 
-    const envRows = [];
-    if (ctx.branch) envRows.push(['branch', ctx.branch]);
-    if (version.current) envRows.push(['client', `v${version.current}`]);
-    if (envRows.length) blocks.push({ kind: 'subtitle', text: 'Environment' }, { kind: 'table', rows: envRows });
-
-    if (version.latest) {
-        blocks.push({ kind: 'note', tone: 'update', text: `${version.latest} is unpacked and starts with the next launch` });
-    }
+    // Where this session runs, as the footer it always was: two facts nobody
+    // reads twice, and — only when there is one — the update, which is the one
+    // thing on this panel that asks to be acted on.
+    const facts = [];
+    if (ctx.branch) facts.push(ctx.branch);
+    if (version.current) facts.push(`v${version.current}`);
+    const band = { kind: 'band', facts };
+    // The chip is the whole statement, not a headline over a sentence saying the
+    // same thing again: an update that is "ready" here is one already unpacked
+    // on disk, which the README explains once instead of every render.
+    if (version.latest) band.chip = { label: 'update', value: version.latest, tail: 'ready', tone: 'update' };
+    if (facts.length || band.chip) blocks.push(band);
     return { id: 'context', title: h.shortModel(ctx.model) || 'Session', blocks };
 }
 
@@ -251,59 +352,77 @@ function money(d, h) {
     if (!stats) return null;
     const blocks = [];
 
-    const spend = [['today', `~${h.fmtCost(d.todayUsd || 0)}`]];
-    if (stats.burn > 0) spend.push(['burn rate', `~${h.fmtCost(stats.burn)}/h`]);
-    blocks.push({ kind: 'table', rows: spend });
+    // Burn rate and today's spend are the state of the wallet, not two more
+    // measurements of the session — they sit beside the heading, and the figure
+    // this panel exists for gets the room they used to take.
+    const pills = [{ text: 'today', value: `~${h.fmtCost(d.todayUsd || 0)}` }];
+    if (stats.burn > 0) pills.unshift({ text: 'burn', value: `~${h.fmtCost(stats.burn)}/h` });
+    blocks.push({ kind: 'pills', items: pills });
+
+    // No track: money is not a share of anything the extension knows — the plan
+    // is a token allowance, not a budget in dollars.
+    blocks.push({
+        kind: 'gauge',
+        headline: `~${h.fmtCost(stats.cost)}`,
+        value: 'this session',
+        sub: stats.durationMs > 0 ? `${h.fmtDuration(stats.durationMs)} of work` : '',
+        pct: null,
+        chips: [],
+    });
 
     const rows = [];
     if (stats.durationMs > 0) rows.push(['duration', h.fmtDuration(stats.durationMs)]);
     rows.push(['requests', String(stats.messages)]);
     if (stats.apiPct >= 0) rows.push(['waiting on model', `~${stats.apiPct}% of that time`]);
     if (stats.added || stats.removed) rows.push(['edits', `+${stats.added} / −${stats.removed} lines`]);
-    blocks.push({ kind: 'subtitle', text: 'This session' }, { kind: 'table', rows });
+    blocks.push({ kind: 'subtitle', text: 'What it took' }, { kind: 'table', rows });
 
     // An unpriced model is charged at Opus rates, and a figure that says so is
     // worth more than one that quietly rounds up.
     const known = d.ctx ? ratesFor(d.ctx.model).known : true;
     blocks.push({
-        kind: 'note',
-        tone: 'muted',
-        text: known
+        kind: 'band',
+        facts: [known
             ? 'estimated from public rates — not a bill'
-            : 'estimated at Opus rates: this model has no published rate',
+            : 'estimated at Opus rates: this model has no published rate'],
     });
-    return { id: 'money', title: `~${h.fmtCost(stats.cost)} this session`, blocks };
+    return { id: 'money', title: 'Spend', blocks };
 }
 
 function work(d) {
     const { peers, todo } = d;
     if (!todo && !(peers && peers.total > 0)) return null;
     const blocks = [];
-    // How far along the list is, as a share — the title counts the tasks, so
-    // this says the thing counting them cannot: how much of it is behind you.
+
+    // The other sessions on this machine are state, not a table: how many are
+    // open and how many are working right now, in the two words each needs.
+    const pills = [];
+    if (peers && peers.total > 0) {
+        pills.push({ text: `${peers.total} ${peers.total === 1 ? 'session' : 'sessions'}` });
+        if (peers.busy > 0) pills.push({ text: `${peers.busy} busy`, tone: 'active' });
+    }
+    if (pills.length) blocks.push({ kind: 'pills', items: pills });
+
+    // The count is the figure and the share is beside it: "4/7" is what anyone
+    // asks for, and it used to live in the section's own title with a separate
+    // meter under it saying the same thing from the other end.
     if (todo && todo.total > 0) {
+        const pct = Math.round((todo.done / todo.total) * 100);
         blocks.push({
-            kind: 'meters',
-            rows: [{
-                label: 'done',
-                value: `${Math.round((todo.done / todo.total) * 100)}%`,
-                pct: Math.round((todo.done / todo.total) * 100),
-                note: '',
-            }],
+            kind: 'gauge',
+            headline: `${todo.done}/${todo.total}`,
+            value: `${pct}% done`,
+            sub: `${todo.total - todo.done} left`,
+            pct,
+            chips: [],
         });
     }
-    if (todo && todo.active) blocks.push({ kind: 'note', tone: 'active', text: todo.active });
-    if (peers && peers.total > 0) {
-        const rows = [['sessions', String(peers.total)]];
-        if (peers.busy > 0) rows.push(['busy right now', String(peers.busy)]);
-        // Without a task list the neighbours are what this section is, and the
-        // title already says so — a subtitle here would print it twice.
-        if (todo) blocks.push({ kind: 'subtitle', text: 'Other sessions here' });
-        blocks.push({ kind: 'table', rows });
-    }
+    if (todo && todo.active) blocks.push({ kind: 'note', tone: 'active', label: 'in progress', text: todo.active });
     return {
         id: 'work',
-        title: todo ? `Tasks ${todo.done}/${todo.total}` : 'Other sessions here',
+        // Not the count: the gauge under it carries that, and a title that
+        // answers its own panel leaves the panel with nothing to say.
+        title: todo ? 'Tasks' : 'Other sessions here',
         blocks,
     };
 }

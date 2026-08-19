@@ -438,10 +438,28 @@ test('a share in the hover is the bar the status bar itself draws', () => {
         id: 'demo',
         title: 'Demo',
         blocks: [
+            { kind: 'pills', items: [{ text: 'max' }, { text: 'advisor', value: 'fable 5' }] },
             { kind: 'meters', rows: [{ label: '7d', value: '52%', pct: 52, note: 'Thu 13.08' }] },
+            { kind: 'gauge', headline: '29%', value: '294k / 1M', sub: '706k free · 82% cached', pct: 29, chips: [] },
+            { kind: 'parts', caption: 'in use', figure: 'your setup ~8.6%', rows: [
+                { label: 'memory', value: '~6.7%', pct: 6.7, figure: '67k', note: 'instruction files' },
+            ] },
+            { kind: 'band', facts: ['master', 'v2.1.234'], chip: { label: 'update', value: '2.1.235', tail: 'ready' } },
             { kind: 'table', rows: [['from cache', '99%']] },
         ],
     });
+
+    // The page has a heading row, a big figure and colour; a tooltip has one
+    // width and one type size, so it says the same things with emphasis and
+    // order — state, then the figure, then what it is made of, then the footer.
+    assert.ok(md.includes('**max** · advisor **fable 5**'), `the pills are one line: ${md}`);
+    assert.ok(md.includes('**29%** — 294k / 1M · 706k free · 82% cached'), `the gauge is one line: ${md}`);
+    assert.ok(md.includes(`\`${u.bar(29, 29)}\` **29%**`), `the gauge keeps the bar: ${md}`);
+    assert.ok(md.includes('master · v2.1.234 · update **2.1.235** ready'), `the band is one line: ${md}`);
+    // Size and qualifier share the last column here — the page gives each its
+    // own, a tooltip that wraps cannot.
+    assert.ok(md.includes('67k · instruction files'), `the part keeps both facts: ${md}`);
+    assert.ok(md.includes('**in use**'), `the caption survives: ${md}`);
 
     const lines = md.split('\n');
     const row = lines.find((line) => line.startsWith('| 7d '));
@@ -1032,12 +1050,43 @@ test('the Now tab and the tooltips are cut from the same sections', async () => 
             // Every value the tooltip shows is on the page too — same strings,
             // not a paraphrase.
             for (const block of section.blocks) {
-                if (block.kind === 'meters') {
+                if (block.kind === 'meters' || block.kind === 'parts') {
                     for (const row of block.rows) {
-                        for (const cell of [row.label, row.value, row.note]) {
+                        for (const cell of [row.label, row.value, row.note, row.figure]) {
                             if (!cell) continue;
                             assert.ok(html.includes(db.esc(cell)), `"${cell}" is in the tooltip but not on the page`);
                         }
+                    }
+                    // The caption and the sum beside it are the block's own
+                    // words and go the same way as its rows.
+                    for (const cell of [block.caption, block.figure]) {
+                        if (!cell) continue;
+                        assert.ok(html.includes(db.esc(cell)), `"${cell}" is in the tooltip but not on the page`);
+                    }
+                }
+                // Every field a gauge actually carries: `headline` is the figure
+                // the panel exists for and `sub` the line beside it, and both
+                // were unchecked here while the loop read a `label` that the
+                // block had stopped having — green about nothing.
+                if (block.kind === 'gauge') {
+                    for (const cell of [block.headline, block.value, block.sub, ...(block.chips || [])]) {
+                        if (!cell) continue;
+                        assert.ok(html.includes(db.esc(cell)), `"${cell}" is in the tooltip but not on the page`);
+                    }
+                }
+                if (block.kind === 'pills') {
+                    for (const item of block.items || []) {
+                        for (const cell of [item.text, item.value]) {
+                            if (!cell) continue;
+                            assert.ok(html.includes(db.esc(cell)), `"${cell}" is in the tooltip but not on the page`);
+                        }
+                    }
+                }
+                if (block.kind === 'band') {
+                    const chip = block.chip ? [block.chip.label, block.chip.value, block.chip.tail] : [];
+                    for (const cell of [...(block.facts || []), ...chip]) {
+                        if (!cell) continue;
+                        assert.ok(html.includes(db.esc(cell)), `"${cell}" is in the tooltip but not on the page`);
                     }
                 }
                 if (block.kind !== 'table') continue;

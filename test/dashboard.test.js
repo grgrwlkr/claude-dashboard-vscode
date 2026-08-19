@@ -172,8 +172,12 @@ test('the bar puts spend and time on one axis, so the gap between them is the ov
     assert.equal(leftOf(html, 'wk-excess'), 57.14);
     assert.equal(widthOf(html, 'wk-excess'), 4.86);
     assert.equal(Math.round(leftOf(html, 'wk-now')), Math.round((4 / 7) * 100));
-    assert.match(html, /62% spent · 5% over/);
-    assert.match(html, />62%<i> \+5%<\/i>/);
+    // The verdict is two pills rather than a sentence, and the rail carries no
+    // text at all: the figure that used to sit on the fill said in words what
+    // the fill was already showing.
+    assert.match(html, /class="pill">62% spent</);
+    assert.match(html, /class="pill pill-warn">5% over</);
+    assert.ok(!html.includes('wk-in'), 'the rail holds no figures');
     assert.ok(!html.includes('wk-slack'), 'nothing is under the plan here');
 });
 
@@ -182,29 +186,30 @@ test('under the plan the gap is drawn the other way and signed the other way', (
     assert.equal(widthOf(html, 'wk-spent'), 40);
     assert.equal(leftOf(html, 'wk-slack'), 40);
     assert.equal(widthOf(html, 'wk-slack'), 17.14, 'the gap reaches the mark, not the rounded figure');
-    assert.match(html, />40%<i> −17%<\/i>/);
+    assert.match(html, /class="pill pill-safe">17% under</);
     assert.ok(!html.includes('wk-excess'));
 });
 
 test('the forecast is stated in every state, and only stands on the rail when it lands on it', () => {
-    // Inside the window: a mark of its own, with how long until it and the day.
+    // Inside the window: a mark on the rail, and a pill wearing that mark's
+    // colour — which is what lets the caption above the rail go. Both the time
+    // to it and the day it lands on ride in the pill, said once.
     const soon = db.paceTrack(week());
-    assert.match(soon, /class="wk-lbl wk-dry-t"/);
-    assert.match(soon, /dry 1d12h → Sun 16\.08, ~00h/);
-    assert.match(soon, /runs out Sun 16\.08, ~00h, in 1d12h/);
+    assert.match(soon, /class="pill pill-alarm"><i class="pill-dot" style="background:var\(--vscode-charts-red/);
+    assert.match(soon, /dry in 1d12h → Sun 16\.08, ~00h/);
+    assert.equal(soon.match(/Sun 16\.08, ~00h/g).length, 1, 'the forecast is stated once, not in a foot as well');
+    assert.match(soon, /class="wk-dry"/, 'and the rail carries the mark it names');
 
-    // Past the reset: no position on this rail, so it is pinned to the edge it
-    // lies beyond and drawn quiet — not running out is not an alarm.
+    // Past the reset: no position on this rail, so no dot either — a colour
+    // pointing at nothing is worse than no colour, and not running out is not an
+    // alarm.
     const far = db.paceTrack(week({ pct: 20, dryAt: NOON + 20 * 86400 }));
-    assert.match(far, /class="wk-lbl wk-beyond"/);
-    assert.match(far, /dry 16d0h → Sun 30\.08, ~12h ⟶/);
-    assert.match(far, /lasts to the reset/);
+    assert.match(far, /class="pill pill-safe">dry Sun 30\.08, ~12h, after the reset</);
     assert.ok(!far.includes('class="wk-dry"'), 'a forecast off the rail draws no line on it');
 
     // Too early to say anything: the pace module hands over no date at all.
     const early = db.paceTrack(week({ pct: 1, dryAt: null }));
-    assert.match(early, /too early to forecast/);
-    assert.ok(!early.includes('wk-dry-t'));
+    assert.match(early, /class="pill pill-muted">too early to forecast</);
 });
 
 test('out of quota the bar stops forecasting and states the moment it happened', () => {
@@ -217,8 +222,10 @@ test('out of quota the bar stops forecasting and states the moment it happened',
     assert.equal(Math.round(leftOf(html, 'wk-dry')), Math.round((3 / 7) * 100));
     // And `now` keeps moving, which is what says how long the wait has been.
     assert.equal(Math.round(leftOf(html, 'wk-now')), Math.round((4 / 7) * 100));
-    assert.match(html, /out of quota · 3d0h until the reset/);
     assert.ok(!/runs out/.test(html), 'nothing left to forecast');
+    // How long the wait has been is the foot's business — `resets … · in 3d0h`
+    // — and the pill states what happened rather than repeating it.
+    assert.match(html, /in 3d0h/);
 });
 
 test('out of quota with nothing recorded says so rather than pointing at now', () => {
@@ -1015,6 +1022,122 @@ test('the page names itself the same way the command that opens it does', () => 
 // header alone the body kept a cell the header had dropped, and every heading
 // to its right sat over the wrong column — invisible at full width, and no
 // overflow for a probe to find.
+// The stylesheet is a file now, and a file can be left out of the package in a
+// way a template literal never could: .vscodeignore excludes whole directories
+// by pattern, and a page whose CSS did not ship still renders — as unstyled
+// markup nobody would call broken until they saw it.
+test('the stylesheet is read from dashboard.css and is actually there', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const file = path.join(__dirname, '..', 'dashboard.css');
+    assert.ok(fs.existsSync(file), 'dashboard.css is missing from the repository');
+    assert.equal(db.STYLE, fs.readFileSync(file, 'utf8'), 'STYLE is not this file');
+    // A few rules every page depends on, so an empty or truncated file fails
+    // here rather than in a screenshot.
+    for (const rule of ['.panel {', '.tiles {', '.wk-rail {', '.pill {', '.strip {']) {
+        assert.ok(db.STYLE.includes(rule), `${rule} is missing from the stylesheet`);
+    }
+    assert.ok(db.STYLE.length > 40000, `the stylesheet is only ${db.STYLE.length} bytes`);
+});
+
+// Every field of every block, on every section status.js can produce — the older
+// parity test drives activate() with only a limit cache pinned, so it walks one
+// section and has never seen `context`, `money` or `work` at all. It was green
+// while the strip silently dropped two fields the hover was showing.
+test('every value a section carries reaches the page, in all four of them', () => {
+    const status = require('../status');
+    const NOW = 1755000000;
+    const h = {
+        fmtCost: (n) => `$${n.toFixed(2)}`,
+        fmtLeft: () => '1d13h',
+        fmtAbs: () => 'Thu 14:59',
+        fmtWhen: () => 'Thu 20.08, ~10h',
+        fmtDuration: () => '4d1h',
+        tok: (n) => `${Math.round(n / 1000)}k`,
+        shortModel: (m) => String(m).replace(/^claude-/, ''),
+    };
+    const sections = status.statusSections({
+        now: NOW,
+        limits: {
+            session: { pct: 3, reset: NOW + 3600 },
+            weekly: { pct: 80, reset: NOW + 130000 },
+            scoped: [{ scope: 'Fable', pct: 34, reset: NOW + 130000 }],
+            credits: { enabled: false, used: 103.67, currency: 'USD', reason: 'out_of_credits' },
+        },
+        weekly: { pct: 80 },
+        pace: { settled: true, plan: 77, dryAt: NOW + 90000, elapsed: 99999, beforeReset: true },
+        ctx: {
+            model: 'claude-opus-5', window: 1000000, tokens: 318000, pct: 31,
+            estimated: false, effort: 'max', cachePct: 99, branch: 'master',
+        },
+        contextParts: { skills: 8000, agents: 5000, mcp: 2000, tools: 2000, hooks: 2000 },
+        memoryTokens: 61000,
+        compactPct: 97,
+        settings: { thinking: true, thinkingSummaries: true, advisor: 'claude-fable-5', outputStyle: 'explanatory' },
+        version: { current: '2.1.234', latest: '2.1.235' },
+        stats: { cost: 1287.7, burn: 13.16, durationMs: 1, messages: 2497, apiPct: 7, added: 3161, removed: 614 },
+        todayUsd: 0,
+        todo: { done: 4, total: 7, active: 'Backfill the orders table' },
+        peers: { total: 3, busy: 1 },
+    }, h, { updatedAt: NOW });
+
+    assert.deepEqual(sections.map((s) => s.id), ['limits', 'context', 'money', 'work']);
+    const html = db.nowTab(sections, [], {});
+    const seen = (cell, where) => {
+        if (!cell) return;
+        assert.ok(html.includes(db.esc(cell)), `"${cell}" (${where}) is in the tooltip but not on the page`);
+    };
+    for (const section of sections) {
+        assert.ok(html.includes(`data-panel="${section.id}"`), `${section.id} missing from the page`);
+        for (const b of section.blocks) {
+            if (b.kind === 'pills') for (const p of b.items) { seen(p.text, 'pill'); seen(p.value, 'pill value'); }
+            if (b.kind === 'gauge') for (const c of [b.headline, b.value, b.sub, ...(b.chips || [])]) seen(c, 'gauge');
+            if (b.kind === 'parts' || b.kind === 'meters') {
+                seen(b.caption, 'caption'); seen(b.figure, 'caption figure');
+                for (const r of b.rows) for (const c of [r.label, r.value, r.note, r.figure]) seen(c, 'row');
+            }
+            if (b.kind === 'band') {
+                for (const f of b.facts || []) seen(f, 'band');
+                if (b.chip) for (const c of [b.chip.label, b.chip.value, b.chip.tail]) seen(c, 'chip');
+            }
+            if (b.kind === 'note') { seen(b.label, 'note label'); seen(b.text, 'note'); }
+            if (b.kind === 'subtitle') seen(b.text, 'subtitle');
+            if (b.kind === 'table') for (const row of b.rows) for (const c of row) seen(c, 'table');
+        }
+    }
+});
+
+// Four panels in a three-column flow leave one column carrying two and the
+// others ending high, and no size of card fixes that — the browser balances the
+// columns and tasks are always the odd panel out. So they leave the flow.
+test('the task list is a strip across the page, not a fourth column', () => {
+    const work = {
+        id: 'work',
+        title: 'Tasks',
+        blocks: [
+            { kind: 'pills', items: [{ text: '3 sessions' }, { text: '1 busy', tone: 'active' }] },
+            { kind: 'gauge', headline: '4/7', value: '57% done', sub: '3 left', pct: 57, chips: [] },
+            { kind: 'note', tone: 'active', label: 'in progress', text: 'Backfill the orders table' },
+        ],
+    };
+    const html = db.nowTab([{ id: 'money', title: 'Spend', blocks: [{ kind: 'table', rows: [['today', '~$0']] }] }, work], [], {});
+
+    const cols = html.match(/<div class="cols">[\s\S]*?<\/div>\s*<div class="strip"/);
+    assert.ok(cols, 'the strip follows the columns rather than sitting inside them');
+    assert.ok(!/<section class="panel"[^>]*data-panel="work"/.test(html), 'tasks are not a panel');
+
+    // Assembled from the section's blocks by kind, so the strip and the hover
+    // cannot drift: every figure status.js wrote is on the page.
+    for (const cell of ['Tasks', '4/7', '57% done', 'Backfill the orders table', '3 sessions', '1 busy']) {
+        assert.ok(html.includes(db.esc(cell)), `"${cell}" is missing from the strip`);
+    }
+    assert.match(html, /class="strip-track"><i class="t-warm" style="width:57%"/);
+
+    // Nothing to say, nothing drawn — a session with neither a list nor a
+    // neighbour would otherwise get an empty bar across the page.
+    assert.ok(!db.nowTab([{ id: 'work', title: 'Tasks', blocks: [] }], [], {}).includes('class="strip"'));
+});
+
 test('every hideable column hides its header and its cells together', () => {
     const total = ix.summarize(demoIndex());
     const html = db.render(demoIndex(), total, { files: 1, lastRun: Date.now(), history: [] })
@@ -1237,6 +1360,28 @@ test('save sits outside the panels and says when there is something to save', ()
     assert.match(html.slice(bar), /<button class="btn primary" id="save" disabled>/);
 });
 
+// Groups of meters that follow one another are different kinds of fact — a
+// total, its parts, the remainder — and without a rule between them they read as
+// one undifferentiated list. Keyed on `.rows + .rows`, so it needs the blocks to
+// be adjacent in the markup, which is the half a stylesheet cannot promise on
+// its own.
+test('adjacent meter groups are separated by a rule', () => {
+    const rule = db.STYLE.split('.rows + .rows')[1].split('}')[0];
+    assert.match(rule, /border-top:/);
+    const html = db.sidebarNow([{
+        id: 'context',
+        title: 'opus 5',
+        blocks: [
+            { kind: 'meters', rows: [{ label: 'window', value: '92%', pct: 92, note: '928k / 1M' }] },
+            { kind: 'meters', rows: [{ label: 'memory', value: '~7%', pct: 7, note: '70k' }] },
+            { kind: 'meters', rows: [{ label: 'free', value: '7.2%', pct: 7.2, note: '72k' }] },
+        ],
+    }], 'session');
+    // Three groups in a row, with nothing between them for the rule to miss.
+    assert.equal((html.match(/<div class="rows">/g) || []).length, 3);
+    assert.doesNotMatch(html, /<\/div><h3/, 'nothing separates the groups but the rule itself');
+});
+
 // The inputs on this tab were styled through `.form`, a class the page never
 // puts on anything — so they fell back to the browser's own control, which under
 // `color-scheme: light dark` is drawn dark whatever the page's theme is. On a
@@ -1428,10 +1573,12 @@ test('a window too young to judge states the share and nothing about pace', () =
     assert.ok(!/over|under/.test(fresh.replace(/wk-over|wk-under/g, '')), 'no verdict yet');
     assert.ok(!fresh.includes('plan 0%'), 'and no mark claiming what was allowed');
 
-    // An hour in and past 2%, the comparison starts.
+    // An hour in and past 2%, the comparison starts — as its own pill, with the
+    // plan getting one too and wearing the colour of the line it names.
     const settled = db.paceTrack(week({ pct: 3, plan: 1, at: NOON + 3600, dryAt: null }));
-    assert.match(settled, /3% spent · 2% over/);
-    assert.match(settled, /plan 1%/);
+    assert.match(settled, /class="pill">3% spent</);
+    assert.match(settled, /class="pill pill-warn">2% over</);
+    assert.match(settled, /<i class="pill-dot" style="background:var\(--vscode-foreground\)"><\/i>plan 1%/);
 });
 
 // The defect this pins: `plan` is floored to a whole percent by pace(), so a

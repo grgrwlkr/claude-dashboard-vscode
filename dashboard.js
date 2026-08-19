@@ -8,6 +8,8 @@
 // Colours come from VS Code theme variables, so the page follows light, dark and
 // high-contrast themes without a palette of its own.
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { fmtCost, ratesFor } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
@@ -542,8 +544,13 @@ const tiles = (...items) => `<div class="tiles">${items.filter(Boolean).join('')
  * heading and its border and the table runs edge to edge inside it, rather than
  * losing a column's worth of width to padding on both sides.
  */
-const panel = (title, body, { note, flush, id } = {}) => `<section class="panel${flush ? ' panel-flush' : ''}"${id ? ` data-panel="${esc(id)}"` : ''}>
-    ${title ? `<h2 class="panel-title">${esc(title)}</h2>` : ''}
+// `aside` is markup the caller has already escaped — the state of the thing the
+// panel is about, drawn on the title's own line. Without it the title stays
+// exactly as it was, because most panels on this page have no state to show.
+const panel = (title, body, { note, flush, id, aside } = {}) => `<section class="panel${flush ? ' panel-flush' : ''}"${id ? ` data-panel="${esc(id)}"` : ''}>
+    ${title && aside
+        ? `<div class="panel-head"><h2 class="panel-title">${esc(title)}</h2>${aside}</div>`
+        : title ? `<h2 class="panel-title">${esc(title)}</h2>` : ''}
     ${note ? `<div class="panel-note">${note}</div>` : ''}
     <div class="panel-body">${body}</div>
 </section>`;
@@ -1877,22 +1884,8 @@ const DAY_LABELS = [
 // mark being smeared. The mark wins: it is one midnight of seven.
 const TICK_CLEARANCE = 0.9;
 
-// Below this share of the rail the figure has no room inside the fill and is
-// written just past its edge instead. The delta rides with it, so the threshold
-// is wider than the figure alone would need.
-const FIGURE_INSIDE = 20;
-
 const p2 = (n) => String(n).padStart(2, '0');
 const trackAt = (x) => `${Math.max(0, Math.min(100, x)).toFixed(2)}%`;
-
-// Centred on its position and clamped to the rail, in `ch` of the label's own
-// length: the exact width is a webview font away, half a character of slack is
-// not. Written this way rather than pinned to the edge, because a mark names a
-// position and a label sitting off it names the wrong one.
-const trackLabel = (x, text) => {
-    const half = `${(String(text).length / 2 + 0.5).toFixed(1)}ch`;
-    return `left:clamp(${half}, ${trackAt(x)}, calc(100% - ${half}))`;
-};
 
 // Every local midnight strictly inside the window. Calendar days, not sevenths:
 // a fixed window opens at whatever hour it opens, and cells bounded at 14:59
@@ -1944,44 +1937,39 @@ function paceTrack(w) {
         return { ts, left: pos(ts), width: ((end - ts) / span) * 100, today: at >= ts && at < end };
     });
 
-    // The figure and its distance from the plan, in the one place the eye is
-    // already looking. The sign carries the meaning; the colour under it has
-    // said the same thing already.
-    const delta = plan === null || pct === plan ? ''
-        : over ? ` +${pct - plan}%` : ` −${plan - pct}%`;
-    const verdict = plan === null ? `${pct}% spent`
-        : over ? `<span class="wk-over-t">${pct}% spent · ${pct - plan}% over</span>`
-            : under ? `<span class="wk-under-t">${pct}% spent · ${plan - pct}% under</span>`
-                : `${pct}% spent · exactly on plan`;
-
+    // Everything this rail used to say in words is now a pill beside the
+    // heading, in the order it gets read: how much is gone, where an evenly
+    // spent week would be, which side of that the spend is on, and when the
+    // quota runs out. The two pills that name a mark on the rail wear a dot in
+    // that mark's colour — which is what lets the labels go: the mark is found
+    // by its colour rather than by a caption pinned above or below it.
+    const pill = (text, tone, colour) => ({ text, tone, colour });
+    const pills = [pill(`${pct}% spent`)];
+    // The plan mark IS the now line: the plan is the share of the window that
+    // has elapsed, so it always stands exactly where the current moment does.
+    if (plan !== null) pills.push(pill(`plan ${plan}%`, null, 'var(--vscode-foreground)'));
+    if (plan !== null && pct !== plan) {
+        pills.push(over ? pill(`${pct - plan}% over`, 'warn') : pill(`${plan - pct}% under`, 'safe'));
+    }
     // The forecast is stated in every state, the way the terminal states it —
     // how long until it, then the day and hour. "You will not run out" is worth
-    // far more with the date that would have been.
-    let mark = '';
+    // far more with the date that would have been. A dot only where there is a
+    // mark to point at: past the reset the rail has none, and a colour pointing
+    // at nothing is worse than no colour.
+    const dryColour = 'var(--vscode-charts-red, hsl(0 60% 57%))';
     if (spent) {
-        mark = w.ranOut
-            ? `<span class="wk-lbl wk-dry-t" style="${trackLabel(ranOutPos, `ran out ${fmtWhen(Math.floor(w.ranOut / 1000))}`)}">ran out ${esc(fmtWhen(Math.floor(w.ranOut / 1000)))}</span>`
-            : '<span class="wk-lbl wk-dry-t" style="right:0;left:auto">out of quota</span>';
+        pills.push(w.ranOut
+            ? pill(`ran out ${fmtWhen(Math.floor(w.ranOut / 1000))}`, 'alarm', dryColour)
+            : pill('out of quota', 'alarm'));
     } else if (dryInside) {
-        const text = `dry ${fmtLeft(w.dryAt, at)} → ${fmtWhen(w.dryAt)}`;
-        mark = `<span class="wk-lbl wk-dry-t" style="${trackLabel(dryPos, text)}">${esc(text)}</span>`;
+        pills.push(pill(`dry in ${fmtLeft(w.dryAt, at)} → ${fmtWhen(w.dryAt)}`, 'alarm', dryColour));
     } else if (w.dryAt) {
-        // Past the reset it has no position on this rail at all, so it is pinned
-        // to the edge it lies beyond, and drawn quiet: not running out is not an
-        // alarm.
-        const text = `dry ${fmtLeft(w.dryAt, at)} → ${fmtWhen(w.dryAt)} ⟶`;
-        mark = `<span class="wk-lbl wk-beyond" style="right:0;left:auto">${esc(text)}</span>`;
+        pills.push(pill(`dry ${fmtWhen(w.dryAt)}, after the reset`, 'safe'));
+    } else {
+        pills.push(pill('too early to forecast', 'muted'));
     }
 
-    const foot = spent
-        ? `out of quota · ${fmtLeft(w.reset, at)} until the reset`
-        : !w.dryAt ? 'too early to forecast'
-            : dryInside ? `runs out ${fmtWhen(w.dryAt)}, in ${fmtLeft(w.dryAt, at)}`
-                : 'lasts to the reset';
-
-    return `<div class="wk">
-        <div class="wk-head"><b>this week</b><span>${verdict}</span></div>
-        <div class="wk-over">${mark}</div>
+    return panel('This week', `<div class="wk">
         <div class="wk-rail">
           <div class="wk-spent" style="width:${trackAt(over ? nowPos : pct)}"></div>
           ${over ? `<div class="wk-excess" style="left:${trackAt(nowPos)};width:${trackAt(pct - nowPos)}"></div>` : ''}
@@ -1995,15 +1983,12 @@ function paceTrack(w) {
         const fit = DAY_LABELS.find((f) => c.width >= f.min);
         return fit ? `<span class="wk-date${c.today ? ' today' : ''}" style="left:${trackAt(c.left + c.width / 2)}">${esc(fit.of(new Date(c.ts * 1000)))}</span>` : '';
     }).join('')}
-          <span class="wk-in${pct < FIGURE_INSIDE ? ' outside' : ''}" style="left:${trackAt(pct)}">${pct}%<i>${esc(delta)}</i></span>
         </div>
-        <div class="wk-under">${plan === null ? '' : `<span class="wk-lbl" style="${trackLabel(nowPos, `plan ${plan}%`)}">plan ${plan}%</span>`}</div>
         <div class="wk-feet">
           <span>opened ${esc(fmtDateTime(w.opened * 1000))}</span>
-          <span>${esc(foot)}</span>
           <span>resets ${esc(fmtDateTime(w.reset * 1000))} · in ${esc(fmtLeft(w.reset, at))}</span>
         </div>
-      </div>`;
+      </div>`, { id: 'week', aside: pillsHtml({ items: pills }) });
 }
 
 // A tone is meaning, not colour: status.js says what a note means and each
@@ -2016,6 +2001,77 @@ const TONE_LABEL = {
     update: 'update',
     active: 'in progress',
 };
+
+const clampPct = (n) => Math.max(0, Math.min(100, Number(n) || 0));
+
+/**
+ * A hue per part, keyed by the part's name and never by its place in the list.
+ * The breakdown is sorted by size, so an index-keyed palette repaints every row
+ * the moment two parts swap order — the same trap `assignModelColors` exists to
+ * avoid on the charts. A part this table does not know still gets a stable
+ * colour: the hash is of its name, so it keeps it between renders.
+ */
+const PART_HUES = {
+    'rest in use': 210, memory: 265, skills: 160, agents: 35, hooks: 320, mcp: 190, tools: 95,
+};
+const partColor = (label) => {
+    const known = PART_HUES[label];
+    if (known !== undefined) return `hsl(${known} 62% 58%)`;
+    let hash = 0;
+    for (let i = 0; i < String(label).length; i++) hash = (hash * 31 + String(label).charCodeAt(i)) % 360;
+    return `hsl(${hash} 62% 58%)`;
+};
+
+// `colour` is a mark this pill names elsewhere on the panel — the plan line and
+// the dry tick on the week rail. The dot is how those marks kept their meaning
+// after their captions came off: the pill says what, the rail says where, and
+// the colour is the only thing joining the two.
+const pillsHtml = (block) => (block && (block.items || []).length
+    ? `<div class="pills">${block.items.map((p) => `<span class="pill${p.tone ? ` pill-${esc(p.tone)}` : ''}">${
+        p.colour ? `<i class="pill-dot" style="background:${p.colour}"></i>` : ''}${
+        esc(p.text)}${p.value ? ` <b>${esc(p.value)}</b>` : ''}</span>`).join('')}</div>`
+    : '');
+
+/**
+ * Pills describe the section rather than sit inside it, so both renderers lift
+ * them out of the block list and draw them beside their own heading. Returned as
+ * a pair so neither has to know that a section may have none.
+ */
+const splitPills = (blocks) => {
+    const list = blocks || [];
+    const pills = list.find((b) => b.kind === 'pills');
+    return [pillsHtml(pills), pills ? list.filter((b) => b !== pills) : list];
+};
+
+/**
+ * The task list as one strip across the page rather than a fourth panel.
+ *
+ * Four panels in a three-column flow leave the shortest column carrying two and
+ * the other two ending high — a ragged foot no size of card fixes, because the
+ * browser balances the columns and this one is always the odd panel out. Out of
+ * the flow it also reads truer: tasks are the state of the work, not a subject
+ * beside limits and money.
+ *
+ * Assembled from the section's own blocks by kind, never by position, so the
+ * hover and this strip cannot drift: what `status.js` writes is what both show.
+ */
+function tasksStrip(section) {
+    if (!section) return '';
+    const gauge = section.blocks.find((b) => b.kind === 'gauge');
+    const active = section.blocks.find((b) => b.kind === 'note' && b.tone === 'active');
+    const [pills] = splitPills(section.blocks);
+    if (!gauge && !pills) return '';
+    return `<div class="strip" data-panel="${esc(section.id)}">
+        <span class="strip-name">${esc(section.title)}</span>
+        ${gauge ? `<span class="strip-count">${esc(gauge.headline)}</span>
+        <span class="strip-track"><i class="t-${meterTone(gauge.pct)}" style="width:${clampPct(gauge.pct)}%"></i></span>
+        <span class="strip-pct">${esc(gauge.value)}</span>${
+    gauge.sub ? `<span class="strip-sub">${esc(gauge.sub)}</span>` : ''}` : ''}
+        ${active ? `<span class="strip-now"><i></i>${
+    active.label ? `<em>${esc(active.label)}</em>` : ''}<span>${esc(active.text)}</span></span>` : '<span class="strip-now"></span>'}
+        ${pills}
+    </div>`;
+}
 
 function statusBlocks(blocks) {
     return blocks.map((block) => {
@@ -2030,6 +2086,58 @@ function statusBlocks(blocks) {
                 <span class="row-note">${esc(r.note || '')}</span>
             </div>`).join('')}</div>`;
         }
+        // The one figure a section exists for. `pct` is what makes it a share:
+        // without one there is no track, because money is not a share of
+        // anything this extension knows, and the context bar is drawn by the
+        // breakdown right under it rather than twice.
+        if (block.kind === 'gauge') {
+            const share = Number.isFinite(block.pct);
+            // `bar: false` is a share that draws no track — the context gauge,
+            // whose track is the colour bar of the breakdown under it. The tone
+            // still comes from the share, which is what turns 98% red.
+            const track = share && block.bar !== false;
+            const plan = Number.isFinite(block.plan);
+            return `<div class="gauge">
+                <div class="gauge-top">
+                    <div class="gauge-big${share ? ` g-${meterTone(block.pct)}` : ''}">${esc(block.headline)}</div>
+                    <div class="gauge-side"><b>${esc(block.value || '')}</b>${block.sub ? `<span>${esc(block.sub)}</span>` : ''}</div>
+                </div>
+                ${track ? `<div class="gauge-track"><i class="t-${meterTone(block.pct)}" style="width:${clampPct(block.pct)}%"></i>${
+    plan ? `<span class="gauge-plan" style="left:${clampPct(block.plan)}%"></span>` : ''}</div>` : ''}
+                ${track && plan ? `<div class="gauge-plan-lbl">plan ${block.plan}%</div>` : ''}
+                ${(block.chips || []).length ? `<p class="gauge-chips">${block.chips.map((c) => `<span>${esc(c)}</span>`).join('')}</p>` : ''}
+            </div>`;
+        }
+        // One colour bar for the whole, and the list under it is its legend: at
+        // 89% against 0.2% a meter column would be seven empty tracks, and a
+        // fill behind the text reads as a selected row rather than a share.
+        if (block.kind === 'parts') {
+            if (!block.rows.length) return '';
+            return `<div class="parts">
+                <div class="parts-stack">${block.rows.map((r) => `<i style="width:${clampPct(r.pct)}%;background:${partColor(r.label)}"></i>`).join('')}</div>
+                <div class="parts-cap"><span>${esc(block.caption)}</span>${block.figure ? `<i>${esc(block.figure)}</i>` : ''}</div>
+                ${block.rows.map((r) => `<div class="part" title="${esc(`${r.label}${r.note ? ` — ${r.note}` : ''}`)}">
+                    <span class="part-dot" style="background:${partColor(r.label)}"></span>
+                    <span class="part-name">${esc(r.label)}${r.note ? `<em>${esc(r.note)}</em>` : ''}</span>
+                    <span class="part-figure">${esc(r.figure || '')}</span>
+                    <span class="part-value">${esc(r.value)}</span>
+                </div>`).join('')}
+            </div>`;
+        }
+        // The footer: what never changes mid-session, and at most one chip for
+        // the single thing here that asks to be acted on.
+        if (block.kind === 'band') {
+            const facts = (block.facts || []).map((f) => `<span>${esc(f)}</span>`).join('<i>·</i>');
+            const c = block.chip;
+            return `<div class="band${c ? '' : ' band-quiet'}">
+                <span class="band-facts">${facts}</span>
+                ${c ? `<span class="band-chip">${esc(c.label)} <b>${esc(c.value)}</b>${c.tail ? ` ${esc(c.tail)}` : ''}</span>` : ''}
+            </div>`;
+        }
+        // Pills belong beside the section's own heading, and both renderers lift
+        // them out before calling this. One reaching here is a section drawn by
+        // something that has not been taught to — draw it rather than drop it.
+        if (block.kind === 'pills') return pillsHtml(block);
         if (block.kind === 'note') {
             const label = block.label ? `<b>${esc(block.label)}</b> — ` : '';
             const tag = TONE_LABEL[block.tone] && !block.label
@@ -2103,8 +2211,12 @@ function nowTab(sections, workflows, metrics) {
         ${head.length ? tiles(...head) : ''}
         ${paceTrack(m.weekly)}
         <div class="cols">
-          ${rows.map((section) => panel(section.title, statusBlocks(section.blocks), { id: section.id })).join('')}
+          ${rows.filter((section) => section.id !== 'work').map((section) => {
+        const [aside, blocks] = splitPills(section.blocks);
+        return panel(section.title, statusBlocks(blocks), { id: section.id, aside });
+    }).join('')}
         </div>
+        ${tasksStrip(rows.find((section) => section.id === 'work'))}
         ${active.length ? panel('Workflows in the last hour', runsTableOf(runRows(active)), {
         flush: true,
         note: 'Every run that wrote something in the last hour — still going, just finished, or stalled without a snapshot. Open one for its agents: what each was told, what it answered, the model and the effort it got, and what it cost. The same table over every run on the machine is under Work → Agents &amp; workflows.',
@@ -2163,10 +2275,13 @@ function sidebarNow(sections, which) {
     }
 
     return `<div class="side">
-        ${rows.map((section) => `<section class="side-sec" data-sec="${esc(section.id || '')}">
-            <h3>${esc(section.title)}</h3>
-            ${statusBlocks(section.blocks)}
-        </section>`).join('')}
+        ${rows.map((section) => {
+        const [aside, blocks] = splitPills(section.blocks);
+        return `<section class="side-sec" data-sec="${esc(section.id || '')}">
+            <div class="side-head"><h3>${esc(section.title)}</h3>${aside}</div>
+            ${statusBlocks(blocks)}
+        </section>`;
+    }).join('')}
     </div>`;
 }
 
@@ -2386,578 +2501,15 @@ function settingsTab(config) {
 
 // --- page -------------------------------------------------------------------
 
-const STYLE = `
-:root { color-scheme: light dark; }
-/* The page has to fit the panel it is dropped into, whatever width that is, and
-   a horizontal scrollbar is a failure rather than a fallback: the panel is
-   often half a window wide. Everything below follows from that — grid children
-   that may shrink, cells that may wrap, and a handful of columns that drop out
-   when there is genuinely no room. */
-* { box-sizing: border-box; }
-body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vscode-foreground);
-  background: var(--vscode-editor-background); margin: 0; padding: 16px 20px 40px;
-  overflow-x: hidden; }
-h1 { font-size: 18px; margin: 0 0 2px; font-weight: 600; }
-/* The extension's own mark, inline rather than an <img>: a webview image would
-   need asWebviewUri plumbed through and img-src opened in the CSP, for one
-   26-pixel glyph that is four shapes. */
-.mark { display: flex; align-items: center; gap: 9px; }
-.mark svg { display: block; flex: none; border-radius: 6px; }
-.ver { font-size: 11.5px; font-weight: 500; opacity: .45; letter-spacing: .02em;
-  font-family: var(--vscode-editor-font-family); vertical-align: 2px; }
-h2 { font-size: 13px; margin: 22px 0 8px; font-weight: 600; opacity: .85; }
-.sub { opacity: .6; margin: 0 0 16px; }
-.note { opacity: .65; margin: 0 0 12px; max-width: 78ch; line-height: 1.5; }
-.empty { opacity: .5; padding: 12px 0; }
-nav { display: flex; gap: 2px; flex-wrap: wrap; }
-nav button { background: none; border: none; color: inherit; padding: 7px 12px;
-  cursor: pointer; font: inherit; opacity: .6; }
-nav button:hover { opacity: 1; }
-nav.sections { gap: 4px; margin-bottom: 2px; }
-nav.sections button { font-size: 15px; font-weight: 600; padding: 4px 12px; border-radius: 5px; }
-nav.sections button[aria-selected="true"] { opacity: 1; background: var(--vscode-editorWidget-background); }
-nav.tabs { border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 18px; min-height: 30px; }
-nav.tabs.empty { min-height: 0; margin-bottom: 14px; }
-nav.tabs button { border-bottom: 2px solid transparent; }
-nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--vscode-focusBorder); }
-/* A loaded file: its name and size on one line, its text under it. <details>
-   rather than a handler, for the same reason the agents of a run use one — the
-   page opens it without a script. */
-.memory { border-bottom: 1px solid var(--vscode-panel-border); padding: 4px 0; }
-.memory > summary { cursor: pointer; display: flex; align-items: baseline; gap: 10px;
-  padding: 3px 0; font-size: 12.5px; }
-.mem-name { font-family: var(--vscode-editor-font-family); font-size: 11.5px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
-.memory > summary .dim { font-size: 11px; margin-left: auto; white-space: nowrap; }
-.mem-open { flex: none; }
-/* Carried in the page, out of the way until asked for. */
-.memory.folded { display: none; }
-.more-open .memory.folded { display: block; }
-.mem-text { margin: 6px 0 10px; padding: 10px 12px; border-radius: 5px; max-height: 460px;
-  overflow: auto; background: var(--vscode-editor-background);
-  border: 1px solid var(--vscode-panel-border);
-  font-family: var(--vscode-editor-font-family); font-size: 11.5px; line-height: 1.55;
-  white-space: pre-wrap; overflow-wrap: anywhere; }
+// The stylesheet lives in dashboard.css and is read from disk rather than
+// carried in a template literal here. A backtick inside a CSS comment broke this
+// module at require time four times in one session, and the editor gave no
+// highlighting, no bracket matching and no stylelint to 700 lines of CSS
+// pretending to be a string. `STYLE` is still a string, so both pages, both
+// preview tools and the tests that hold rules against the vocabularies are
+// untouched by the move.
+const STYLE = fs.readFileSync(path.join(__dirname, 'dashboard.css'), 'utf8');
 
-/* A setting where it stands. The box is drawn rather than native so it reads
-   the same in both themes and beside a table. */
-.switch { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0 12px;
-  cursor: pointer; max-width: 78ch; }
-.switch input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
-.switch-box { flex: none; width: 30px; height: 17px; border-radius: 9px; margin-top: 1px;
-  background: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
-  border: 1px solid var(--vscode-panel-border); position: relative; transition: background .12s; }
-.switch-box::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
-  border-radius: 50%; background: var(--vscode-foreground); opacity: .6; transition: transform .12s, opacity .12s; }
-.switch input:checked + .switch-box { background: var(--vscode-charts-blue, #3794ff); border-color: transparent; }
-.switch input:checked + .switch-box::after { transform: translateX(13px); opacity: 1; background: #fff; }
-.switch input:focus-visible + .switch-box { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.switch-text { font-size: 12.5px; line-height: 1.45; }
-.switch-text b { font-weight: 500; }
-.switch-text .dim { display: block; font-size: 11.5px; margin-top: 2px; }
-.switch.numeric input[type="number"] { flex: none; width: 9ch; font: inherit; padding: 3px 6px;
-  border-radius: 4px; background: var(--vscode-input-background, var(--vscode-editor-background));
-  color: inherit; border: 1px solid var(--vscode-panel-border); }
-
-/* A block of the page: heading, the sentence under it, and the answer. The
-   panel is what makes a tab read as a set of answers instead of a scroll; a
-   flush one is for a wide table, which keeps its full width inside the border
-   rather than paying for padding twice. */
-.panel { background: var(--vscode-editorWidget-background);
-  border: 1px solid var(--vscode-panel-border); border-radius: 6px;
-  padding: 13px 15px 15px; margin: 0 0 14px; }
-.panel-title { font-size: 13px; font-weight: 600; margin: 0 0 2px; opacity: .85; }
-/* A div, not a p: a note carries lists and sentences after them, and a <ul>
-   inside a <p> is closed by the parser before the list — everything after it
-   stopped being the note and lost its indent with it. */
-.panel-note { opacity: .6; margin: 4px 0 10px; max-width: 78ch; line-height: 1.5; font-size: 12px; }
-.panel-note ul { margin: 6px 0; padding-left: 18px; }
-.panel-title + .panel-body, .panel-note + .panel-body { margin-top: 9px; }
-.panel-body > :first-child { margin-top: 0; }
-.panel-body > :last-child { margin-bottom: 0; }
-.panel-flush { padding-left: 0; padding-right: 0; }
-.panel-flush > .panel-title, .panel-flush > .panel-note { padding: 0 15px; }
-.panel-flush > .panel-body { overflow-x: auto; }
-/* A flush panel drops its side padding so the table can run to the edge. Only
-   the table wants that: anything else in the body — a switch, a paragraph —
-   has to be put back in line with the heading above it. */
-.panel-flush > .panel-body > :not(table) { padding-left: 15px; padding-right: 15px; }
-.panel-flush th:first-child, .panel-flush td:first-child { padding-left: 15px; }
-.panel-flush th:last-child, .panel-flush td:last-child { padding-right: 15px; }
-/* Two panels side by side where the page is wide enough for it. */
-.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 14px; margin-bottom: 14px; }
-.pair > .panel { margin: 0; }
-
-/* The full name of a label that did not fit, on hover. The title attribute
-   covers the same ground and stays as the fallback, but it waits about a second
-   and cannot be styled; this appears at once. Only cells the script found
-   clipped get it, so it never covers a name that was already whole. */
-[data-clipped] { position: relative; }
-[data-clipped]:hover::after {
-  content: attr(title); position: absolute; left: 0; top: calc(100% + 2px); z-index: 40;
-  padding: 3px 8px; border-radius: 4px; white-space: nowrap; font-size: 11.5px;
-  font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 1;
-  color: var(--vscode-foreground);
-  /* Two layers, and the first one is the point: a hover widget colour a webview
-     was never given leaves the box transparent, and a transparent tooltip is
-     the row underneath read through the row above it. The editor background is
-     always defined and always opaque, so it goes underneath whatever the theme
-     does or does not provide. */
-  background-color: var(--vscode-editor-background);
-  background-image: linear-gradient(var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background)),
-    var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background)));
-  border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border));
-  box-shadow: 0 2px 10px rgb(0 0 0 / .45); pointer-events: none; }
-
-/* A share drawn under the number rather than beside it: it costs no column, and
-   a rule under the figure cannot fight the figure. A block behind the text was
-   tried first and read as a selection highlight rather than as a magnitude. */
-td.share { position: relative; }
-td.share i { position: absolute; right: 0; bottom: 2px; height: 2px; border-radius: 1px;
-  background: var(--vscode-charts-blue, #3794ff); opacity: .55; }
-td.share.wide i { left: 0; right: auto; }
-
-/* The headline row of any tab. Numbers are set in the editor's own monospace at
-   a size the rest of the page never uses, so the answers read before any label
-   does; labels drop to a small-caps treatment and get out of the way. One strip
-   with hairline separators rather than a row of separate boxes: the tiles of a
-   tab answer one question together.
-
-   A tile deliberately has no min-width of zero. A grid item allowed to shrink
-   below its content clips the number instead of wrapping the row, and a clipped
-   number is a wrong number. */
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(152px, 1fr));
-  gap: 1px; border-radius: 6px; overflow: hidden; margin-bottom: 16px; }
-/* The hairline belongs to each tile rather than to the strip behind them: with
-   a background on the strip, six tiles across five columns left the sixth
-   beside an empty cell painted like a tile that is not there. */
-.tile { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px 13px;
-  background: var(--vscode-editor-background);
-  box-shadow: 0 0 0 1px var(--vscode-panel-border); }
-.tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; opacity: .5; }
-.tile-value { font-family: var(--vscode-editor-font-family); font-size: 24px; line-height: 1.05;
-  font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-.tile-meter { display: block; height: 3px; border-radius: 2px; overflow: hidden;
-  background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
-.tile-meter i { display: block; height: 100%; border-radius: 2px; }
-/* Pushed to the bottom so a tile with no meter keeps its sub on the same
-   baseline as the tiles beside it. */
-.tile-sub { font-size: 11px; opacity: .55; min-height: 14px; margin-top: auto; }
-.chart { width: 100%; height: auto; overflow: visible; }
-.chart.heat { max-width: 420px; }
-.tick { fill: currentColor; opacity: .5; font-size: 9px; }
-.hm { fill: currentColor; opacity: .07; }
-.hm.l1 { opacity: .25; } .hm.l2 { opacity: .45; } .hm.l3 { opacity: .68; } .hm.l4 { opacity: .92; }
-.legend { display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 14px; }
-.chip { display: inline-flex; align-items: center; gap: 5px; opacity: .75; font-size: 11px; }
-.chip i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-/* .dim inside an already-faded chip would multiply down to a third of the text
-   colour, which is past legible for something that carries a date. */
-.chip .dim { opacity: .7; }
-/* min-width: 0 is the whole trick: a grid child defaults to min-content, so one
-   wide table inside a column pushes the other column off the page instead of
-   letting its own content wrap. */
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-.two > * { min-width: 0; }
-@media (max-width: 1100px) { .two { grid-template-columns: 1fr; gap: 4px; } }
-/* Fixed layout, so the three columns are shares of the panel rather than of
-   their own content. Under the default auto layout the label and the value both
-   claimed their full width and the table grew past the panel — visible only as
-   text crossing into the panel beside it, because the body clips horizontally
-   and so nothing scrolls to give it away. */
-.bars { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.bars th, .bars td { border: none; padding: 3px 0; vertical-align: middle; }
-.bars th { font: inherit; text-transform: none; letter-spacing: 0; opacity: .85;
-  text-align: left; white-space: nowrap; padding-right: 14px; width: 38%; }
-/* A long key — a file path, an MCP tool id — otherwise takes the whole row and
-   squeezes the bar out of existence, which is the one thing the bar is for. The
-   clamp is on a span rather than on the cell: a max-width on a table cell is
-   advisory under the default auto layout, and was being ignored. The full text
-   is on the row's title attribute. */
-.bars th span { display: block; overflow: hidden; text-overflow: ellipsis; }
-.bar-cell { width: auto; padding-right: 12px !important; }
-/* Tinted from the foreground rather than painted with a surface colour: inside
-   a panel the widget background IS the panel, and the track disappeared. */
-.bar-track { display: block; border-radius: 3px; height: 14px; overflow: hidden;
-  background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
-.bar-fill { display: block; height: 100%; border-radius: 3px;
-  background: var(--vscode-charts-blue, hsl(200 62% 55%)); }
-/* A value wraps rather than clipping: half a figure is a wrong figure, and an
-   ellipsis inside a number is worse than a second line. keep-all stops a break
-   from landing inside one. */
-.bar-val { opacity: .7; text-align: right; white-space: normal; word-break: keep-all;
-  font-variant-numeric: tabular-nums; width: 30%; }
-/* The control a row can carry, in a column wide enough to hold it. This table is
-   laid out fixed, where a declared width is the whole story: content does not
-   widen a cell, it hangs out of it. At the 1% that shrink-to-fit would mean
-   anywhere else, the button stood 33 px outside its own cell and 17 px past the
-   panel — measured, not guessed. */
-.bar-act { width: 62px; text-align: right; white-space: nowrap; padding-left: 10px; }
-.hour-bar { fill: var(--vscode-charts-blue, hsl(200 60% 55%)); }
-table { width: 100%; border-collapse: collapse; }
-/* A path, a JSON setting or a hook command is one long unbreakable token as far
-   as the browser is concerned; anywhere-wrapping is what keeps it inside its
-   column instead of widening the table past the panel. */
-th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--vscode-panel-border);
-  overflow-wrap: break-word; }
-/* break-word, not anywhere, and the difference is not cosmetic: only anywhere
-   lets a break count towards a cell's min-content width, so a shrink-to-fit
-   column could be one character wide. That is what "model" and "allow" and
-   "service" became — a letter per line down the page. break-word still breaks a
-   token that genuinely cannot fit; it simply does not offer to. The cells that
-   really do hold unbreakable strings — paths, hook commands, JSON — ask for
-   anywhere by name below. */
-th { font-weight: 600; opacity: .6; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-  overflow-wrap: normal; }
-/* A path, a permission rule, a hook command or a settings value is one long
-   token with nothing to break on, and holding it whole widens the table past
-   its panel. Every selector here is a cell that takes the width left over, so
-   it has no shrink-to-fit column to collapse into. */
-.mono, td.wrap, .kv td { overflow-wrap: anywhere; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums;
-  white-space: nowrap; overflow-wrap: normal; }
-tbody tr:hover { background: var(--vscode-list-hoverBackground); }
-.mono { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .75; }
-.kind { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--vscode-editorWidget-background); opacity: .85; }
-.k-workflow { color: hsl(265 60% 65%); } .k-agent { color: hsl(200 60% 60%); } .k-main { color: hsl(145 45% 55%); }
-/* How an agent ended, in the five words outcomeOf answers with. A stopped agent
-   takes the colour of an idle thing rather than of a failure: nothing crashed
-   there, the run was cut from outside and the agent never got to finish. */
-.o-done { color: hsl(145 45% 55%); }
-.o-running { color: hsl(200 60% 60%); }
-.o-failed { color: hsl(0 60% 62%); }
-.o-stopped { color: hsl(35 72% 58%); }
-.o-unknown { opacity: .55; }
-/* The agents of a run, opened from the row above them. <details> rather than a
-   handler in SCRIPT: this is the one part of the page that would otherwise need
-   its own script, and a table of two thousand agents that stops opening when the
-   script does is worse than one the browser opens by itself. */
-tr.detail td { padding-top: 0; }
-.agents > summary { cursor: pointer; opacity: .6; font-size: 11px; padding: 2px 0; }
-.agent { margin-left: 14px; }
-.agent > summary { cursor: pointer; padding: 2px 0; }
-.prompt { margin: 4px 0 4px 16px; opacity: .8; max-width: 100ch; line-height: 1.5;
-  white-space: pre-wrap; overflow-wrap: anywhere; }
-.result { margin: 4px 0 10px 16px; padding: 6px 8px; border-radius: 4px; max-width: 100ch;
-  background: var(--vscode-editorWidget-background); font-family: var(--vscode-editor-font-family);
-  font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.cloud { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; max-width: 90ch; line-height: 1.7; }
-.word { opacity: .8; }
-.dim { opacity: .45; }
-td.wrap { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
-/* Columns that carry context rather than the answer. They are the first thing
-   to go when the panel is narrow — the row still says what it is without them. */
-@media (max-width: 1000px) {
-  .opt { display: none; }
-  body { padding: 12px 12px 32px; }
-  th, td { padding: 5px 4px; }
-  td.wrap { max-width: 24ch; }
-}
-@media (max-width: 900px) {
-  .opt2 { display: none; }
-  .tiles { grid-template-columns: repeat(auto-fit, minmax(124px, 1fr)); }
-  .tile { padding: 9px 11px 10px; }
-  .tile-value { font-size: 19px; }
-}
-/* Narrower than this the panel is a sidebar, not a page: what is left is the
-   name of the thing and the number being asked about. */
-@media (max-width: 720px) {
-  .opt3 { display: none; }
-  table { font-size: 12px; }
-  td.wrap { max-width: 14ch; }
-  .chart.heat { max-width: 100%; }
-}
-.matrix th[scope="row"] { white-space: nowrap; text-transform: none; letter-spacing: 0;
-  font-size: inherit; opacity: .85; }
-.matrix td { font-variant-numeric: tabular-nums; }
-/* A five-column summary stretched across a full-width panel puts a metre of
-   whitespace between a label and its number. It is as wide as it needs to be. */
-.panel-body > .matrix { width: auto; min-width: min(100%, 460px); }
-.heat-cell { border-radius: 2px; }
-.grid { stroke: currentColor; opacity: .12; }
-.plan { stroke: currentColor; opacity: .35; stroke-dasharray: 4 4; }
-.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity: .85; }
-.kv { width: 100%; }
-/* The key column stays as narrow as its content allows but may wrap: an env
-   var name is forty characters, which on one line was wider than the panel it
-   sits in on a split editor.
-
-   break-word rather than the anywhere every other cell gets, and the difference
-   is the whole rule: only anywhere lets a break count towards the min-content
-   width, and a shrink-to-fit column whose min-content is one character
-   collapses to one character — which is what "model" rendered as, stacked down
-   the page a letter at a time. */
-.kv th[scope="row"] { text-transform: none; letter-spacing: 0; font-size: inherit;
-  font-weight: 500; opacity: .75; width: 1%; padding-right: 14px; }
-/* The clamp is on a span, because a max-width on a table cell is advisory under
-   the default auto layout — the same trap the bar lists fell into. Inside it,
-   break-word rather than the anywhere every other cell gets: only anywhere lets
-   a break count towards min-content, and a shrink-to-fit column whose
-   min-content is one character collapses to one character, which is what
-   "model" rendered as — stacked down the page a letter at a time. */
-.kv th[scope="row"] span { display: block; max-width: 26ch; overflow-wrap: break-word; }
-/* A label inside a header cell wraps like text: the form's row headings are
-   sentences, not identifiers. */
-.kv th[scope="row"] label { overflow-wrap: break-word; }
-.kv td { font-variant-numeric: tabular-nums; }
-/* An environment variable is an identifier, not prose: the longest one here is
-   40 characters. It gets the whole width of its own line, and what it means is
-   written under it — the sentence used to live in a title attribute, where the
-   browser drew all 180 characters of it on one line across the panel beside it. */
-.envrows { list-style: none; margin: 0; padding: 0; }
-.envrow { padding: 6px 0; border-top: 1px solid var(--vscode-panel-border); }
-.envrow:first-child { border-top: none; }
-.envrow-head { display: flex; align-items: baseline; gap: 10px; }
-/* The name gets the room: it is what the row is about, and a variable broken
-   across two lines mid-word — CLAUDE_CODE_EXECP / ATH — is unreadable in a way a
-   wrapped path is not. */
-.envrow-key { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-/* Values are mostly numbers, but some are a path — kept on one line, one of
-   those ran 63 px past the panel at 800 px. It breaks anywhere rather than
-   widening the row, since a path has no spaces to break at. */
-.envrow-val { flex: 0 1 auto; max-width: 55%; margin-left: auto;
-  font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
-.envrow-val.undoc::after { content: ' · undocumented'; opacity: .55; }
-.envrow-about { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; margin-top: 2px; }
-.envrow-about .dim { flex: 1 1 auto; }
-.envrow-def { flex: none; white-space: nowrap; opacity: .7; font-variant-numeric: tabular-nums; }
-/* Right-aligned, but allowed to wrap: the last cell of a .kv table is a figure
-   on some tabs and a file path on others, and kept on one line the path was
-   what pushed Health past its panel in a narrow window. */
-/* Wraps, but on words: the last cell of a .kv table holds a settings path, and
-   anywhere from the rule above broke a settings path into three lines down a
-   narrow column. */
-.kv td:last-child { text-align: right; white-space: normal; overflow-wrap: break-word; }
-/* The settings form reuses .kv for its layout, but its last column is a
-   sentence, not a figure — kept on one line it was what pushed the tab past a
-   narrow window. */
-.kv.form td:last-child { text-align: left; white-space: normal; }
-.ok { color: hsl(145 45% 55%); font-size: 11px; }
-.idle { color: hsl(35 72% 58%); font-size: 11px; }
-tr.off { opacity: .45; }
-.j-working { color: hsl(145 45% 55%); }
-.j-done { color: hsl(200 60% 60%); }
-.j-stopped { color: hsl(35 72% 58%); }
-ul.log { margin: 4px 0 14px; padding-left: 20px; line-height: 1.6; max-width: 90ch; }
-ul.log li { margin: 2px 0; opacity: .85; }
-.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 8px; margin-bottom: 6px; max-width: 130ch; }
-.preset { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
-  font: inherit; color: inherit; cursor: pointer; padding: 8px 10px; border-radius: 5px;
-  background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); }
-.preset:hover { border-color: var(--vscode-focusBorder); }
-.preset-name { font-weight: 600; }
-.preset-about { opacity: .6; font-size: 11.5px; line-height: 1.4; }
-.preset-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-.chip-seg { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8;
-  background: var(--vscode-list-hoverBackground); border-radius: 3px; padding: 1px 5px; }
-/* Spend, plan and forecast are three different jobs, so they get three roles
-   from the theme's own chart ramp rather than three invented hues. */
-.t-cool { background: var(--vscode-charts-blue, hsl(200 62% 55%)); }
-.t-warm { background: var(--vscode-charts-yellow, hsl(35 72% 55%)); }
-.t-hot { background: var(--vscode-charts-red, hsl(0 60% 57%)); }
-
-/* The signature: the week as its own axis, with the spend drawn on it. An even
-   burn puts x% of the limit at x% of the week, so the gap between the fill and
-   the plan mark is the over- or underspend itself, and needs no legend.
-
-   Every vertical is centred on its position by the same rule. Drawn any other
-   way — a day tick from its position rightwards while a mark sits around its
-   own — they land half a pixel apart and the ticks read as sliding against the
-   fill. Text is drawn after the lines and therefore over them, because a mark
-   landing on a date used to eat its first letter. */
-.wk { margin: 0 0 20px; max-width: 980px; }
-.wk-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
-.wk-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
-  opacity: .5; font-weight: 600; }
-.wk-head span { font-size: 12px; opacity: .75; }
-.wk-over-t { color: var(--vscode-charts-red, hsl(0 60% 57%)); }
-.wk-under-t { color: var(--vscode-charts-green, hsl(160 50% 45%)); }
-/* Two floors for the names: the forecast above the rail, the plan below it, so
-   neither can overprint the other however close the two positions get. */
-.wk-over, .wk-under { position: relative; height: 15px; }
-.wk-lbl { position: absolute; top: 0; font-size: 9.5px; text-transform: uppercase;
-  letter-spacing: .06em; white-space: nowrap; opacity: .8; transform: translateX(-50%); }
-.wk-dry-t { color: var(--vscode-charts-red, hsl(0 60% 57%)); opacity: 1; }
-/* A forecast landing past the reset is not a warning: it is stated quietly,
-   pinned to the edge it lies beyond, and it names no position on this rail. */
-.wk-beyond { opacity: .5; transform: none; }
-/* Tall enough for two floors of text inside it: the dates on the ceiling, the
-   spent figure on the floor. */
-.wk-rail { position: relative; height: 34px; border-radius: 4px; overflow: hidden;
-  background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
-.wk-spent { position: absolute; top: 0; bottom: 0; left: 0;
-  background: color-mix(in srgb, var(--vscode-charts-blue, hsl(210 80% 55%)) 42%, transparent); }
-.wk-excess { position: absolute; top: 0; bottom: 0;
-  background: color-mix(in srgb, var(--vscode-charts-red, hsl(0 60% 57%)) 45%, transparent); }
-.wk-slack { position: absolute; top: 0; bottom: 0;
-  background: color-mix(in srgb, var(--vscode-charts-green, hsl(160 50% 45%)) 26%, transparent); }
-.wk-day { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -0.5px;
-  background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
-/* Centred in its own day, so a boundary line can never sit inside the label. */
-.wk-date { position: absolute; top: 3px; font-size: 9px; opacity: .5;
-  white-space: nowrap; transform: translateX(-50%); }
-.wk-date.today { opacity: .95; font-weight: 600; }
-.wk-in { position: absolute; bottom: 2px; transform: translateX(-100%); padding-right: 5px;
-  font-size: 10px; font-weight: 600; font-family: var(--vscode-editor-font-family);
-  white-space: nowrap; }
-.wk-in.outside { transform: none; padding: 0 0 0 5px; opacity: .8; }
-/* The distance from the plan rides with the figure it belongs to, set apart by
-   weight rather than by colour: it sits on the fill, where red on red and green
-   on green would both be unreadable. */
-.wk-in i { font-style: normal; font-weight: 400; opacity: .8; }
-.wk-now { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
-  background: var(--vscode-foreground); }
-.wk-dry { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
-  background: var(--vscode-charts-red, hsl(0 60% 57%)); }
-.wk-feet { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px;
-  font-size: 11px; opacity: .5; }
-.wk-feet span:nth-child(2) { flex: 1; text-align: center; }
-.wk-feet span:last-child { text-align: right; }
-
-/* Columns rather than a grid: panels of wildly different heights leave a grid
-   row half empty, and multicol packs them. A panel may not be split across a
-   column break — half a table at the foot of one column is unreadable. */
-.cols { columns: 3 300px; column-gap: 14px; margin-bottom: 8px; }
-.cols > .panel { break-inside: avoid; }
-.now-sub { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; opacity: .45;
-  margin: 14px 0 4px; font-weight: 600; padding-top: 9px;
-  border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
-/* label · meter · value · when — four columns that stay in their lanes, so a
-   column of windows reads down as easily as across. */
-.rows { display: flex; flex-direction: column; gap: 6px; }
-.row { display: grid; grid-template-columns: 3.2rem 1fr auto; gap: 4px 9px; align-items: center; }
-.row-label { font-size: 11.5px; opacity: .55; }
-.row-meter { height: 4px; border-radius: 2px; overflow: hidden;
-  background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
-.row-meter i { display: block; height: 100%; border-radius: 2px; }
-.row-value { font-family: var(--vscode-editor-font-family); font-size: 12.5px; font-weight: 600;
-  font-variant-numeric: tabular-nums; }
-.row-note { grid-column: 2 / -1; font-size: 11px; opacity: .45; }
-.row-note:empty { display: none; }
-/* The sidebar view. No panel borders and no card padding: at 250px those two
-   eat a third of the width, and the container already draws a frame and a
-   collapsible heading around everything here. */
-.side { display: flex; flex-direction: column; gap: 14px; padding: 4px 2px 10px; }
-.side-sec h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
-  opacity: .5; margin: 0 0 6px; font-weight: 600; }
-/* Wrapping rather than scrolling: a sidebar is resized by dragging its edge,
-   and a table that scrolls sideways inside it reads as broken rather than wide. */
-.side .now-table th[scope="row"] { white-space: normal; padding-right: 8px; }
-.side .row { grid-template-columns: 2.6rem 1fr auto; }
-.now-table { width: 100%; margin: 0; }
-.now-table th, .now-table td { border: none; padding: 3px 0; }
-.now-table th[scope="row"] { font: inherit; text-transform: none; letter-spacing: 0;
-  opacity: .55; text-align: left; white-space: nowrap; padding-right: 14px; width: 1%; }
-.now-table thead th { font-size: 10px; opacity: .4; padding-bottom: 3px; letter-spacing: .06em; }
-.now-value { font-family: var(--vscode-editor-font-family); font-size: 12.5px;
-  font-variant-numeric: tabular-nums; font-weight: 600; }
-.now-note { margin: 11px 0 0; padding-left: 10px; line-height: 1.5; font-size: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
-.now-note b { font-weight: 600; }
-.now-note.tone-muted { border-left: none; padding-left: 0; opacity: .45; font-size: 11px;
-  margin-top: 12px; }
-.now-note.tone-alarm { border-left-color: var(--vscode-charts-red, hsl(0 60% 57%)); }
-.now-note.tone-safe { border-left-color: var(--vscode-charts-green, hsl(145 45% 50%)); }
-.now-note.tone-warn { border-left-color: var(--vscode-charts-yellow, hsl(35 72% 55%)); }
-.now-note.tone-update { border-left-color: var(--vscode-charts-blue, hsl(200 62% 55%)); }
-.now-note.tone-active { border-left-color: var(--vscode-charts-purple, hsl(265 60% 62%)); }
-.now-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; opacity: .5; }
-.segs { list-style: none; margin: 0 0 10px; padding: 0; max-width: 110ch; }
-.seg { margin-bottom: 8px; }
-.seg-head { display: flex; align-items: center; gap: 6px; }
-.seg-num { opacity: .45; font-size: 11px; width: 14px; text-align: right; }
-.seg-input { flex: 1; min-width: 0; font-family: var(--vscode-editor-font-family); font-size: 12px;
-  padding: 5px 8px; border-radius: 4px; color: var(--vscode-input-foreground, inherit);
-  background: var(--vscode-input-background, var(--vscode-editorWidget-background));
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
-.seg-input:focus { outline: 1px solid var(--vscode-focusBorder); }
-.seg-preview { margin: 3px 0 0 20px; padding: 3px 8px; border-radius: 4px; font-size: 12px;
-  background: var(--vscode-editorWidget-background); display: inline-block; min-height: 20px; }
-.empty-preview { opacity: .45; font-style: italic; }
-.icon { background: none; border: none; color: inherit; opacity: .5; cursor: pointer;
-  font: inherit; padding: 2px 6px; border-radius: 3px; }
-.icon:hover { opacity: 1; background: var(--vscode-list-hoverBackground); }
-.btns { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
-.btn { font: inherit; padding: 5px 12px; border-radius: 4px; cursor: pointer;
-  color: var(--vscode-button-secondaryForeground, inherit);
-  background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
-  border: 1px solid var(--vscode-panel-border); }
-.btn:hover { background: var(--vscode-list-hoverBackground); }
-.btn.primary { color: var(--vscode-button-foreground, #fff);
-  background: var(--vscode-button-background, hsl(210 80% 45%)); border-color: transparent; }
-.saved { color: hsl(145 45% 55%); font-size: 12px; }
-/* Save belongs to the tab rather than to a panel, and it sticks to the bottom of
-   it: the form is long enough that a button at its end is a scroll away from
-   most of what it saves. The background is the editor's own so the panels do not
-   show through as it passes over them. */
-.save-bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center;
-  gap: 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 2px;
-  background: var(--vscode-editor-background);
-  border-top: 1px solid var(--vscode-panel-border); }
-.save-where { font-size: 12px; opacity: .75; }
-.save-bar .btn { margin-left: auto; }
-.save-bar .btn[disabled] { opacity: .45; cursor: default; }
-.dirty { font-size: 12px; color: var(--vscode-editorWarning-foreground, hsl(38 90% 60%)); }
-.palette { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 20px; margin-bottom: 8px; }
-.pal-group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
-  opacity: .55; margin: 8px 0 4px; font-weight: 600; }
-.chip-btn { display: flex; width: 100%; align-items: baseline; gap: 8px; background: none;
-  border: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
-  padding: 2px 6px; border-radius: 3px; }
-.chip-btn:hover { background: var(--vscode-list-hoverBackground); }
-.pal-val { margin-left: auto; opacity: .5; font-size: 11px; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; max-width: 14ch; }
-/* Keyed on .field, the container the settings tab actually uses. These rules
-   named .form for a long time, a class nothing on the page carries, so every
-   input here fell through to the browser's own control — which under
-   color-scheme: light dark is painted dark on a light page. */
-.field select, .field input { font: inherit; padding: 3px 6px; border-radius: 4px;
-  color: var(--vscode-input-foreground, inherit);
-  background: var(--vscode-input-background, var(--vscode-editorWidget-background));
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
-.field input[type="number"] { width: 9ch; }
-/* A line of shell arguments, not a number: the browser's default of about twenty
-   characters shows less than one flag. It stops short of the panel's own width
-   so a long value does not run to the edge of a wide window. Keyed on .field
-   rather than on .form, which the Settings tab is not inside — the same reason
-   the number rule above reaches nothing there. */
-.field input.wide { width: 100%; max-width: 72ch; box-sizing: border-box; }
-.form td:first-of-type { width: 1%; }
-/* A switch with no text of its own sits on the field's own line. */
-.switch.bare { display: inline-flex; padding: 0; }
-.field { padding: 8px 0; border-top: 1px solid var(--vscode-panel-border); }
-.field:first-child { border-top: none; padding-top: 0; }
-.field-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; flex-wrap: wrap; }
-.field-head label, .field-head .field-label { font-weight: 600; }
-.field-head .dim { font-size: 12px; }
-/* The radio itself is the click target, laid over its own label: hiding it with
-   display:none would take it out of the tab order with it. */
-.chip-opts { display: flex; flex-wrap: wrap; gap: 4px; }
-.chip-opt { position: relative; display: inline-flex; }
-.chip-opt input, .card-opt input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.chip-opt span { padding: 3px 10px; border-radius: 4px; font-size: 12px; white-space: nowrap;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-  background: var(--vscode-input-background, var(--vscode-editorWidget-background)); }
-.chip-opt input:hover + span { background: var(--vscode-list-hoverBackground); }
-.chip-opt input:checked + span { background: var(--vscode-button-background); border-color: transparent;
-  color: var(--vscode-button-foreground); }
-.chip-opt input:focus-visible + span, .card-opt input:focus-visible + .card-body {
-  outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.cards { display: grid; gap: 6px; }
-.card-opt { position: relative; display: block; }
-.card-body { display: block; padding: 7px 10px; border-radius: 6px;
-  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
-.card-opt input:hover + .card-body { background: var(--vscode-list-hoverBackground); }
-.card-opt input:checked + .card-body { border-color: var(--vscode-button-background);
-  background: var(--vscode-list-hoverBackground); }
-.card-name { display: block; font-weight: 600; font-size: 12px; }
-.card-about { display: block; font-size: 11px; opacity: .6; }
-footer { margin-top: 28px; opacity: .5; font-size: 11px; }
-`;
 
 /**
  * What the header countdown says, and the deadline it counts to next.

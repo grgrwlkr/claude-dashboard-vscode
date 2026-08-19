@@ -35,6 +35,43 @@ user-visible change, written as each was made. If it is missing or thin, write i
 now from `git diff` and say in the report that it was written late — the rule is
 in `CLAUDE.md`, and a release is exactly when its absence hurts.
 
+**Does the README still tell the truth?** This is a step, not a courtesy: the
+README is the marketplace listing, so a release ships whatever it says to
+everyone who looks the extension up. Read it against what changed since the last
+tag and fix both directions:
+
+```bash
+git diff --stat v<last>..HEAD                  # what moved
+git log --oneline v<last>..HEAD                # and why
+```
+
+- **A feature that is not described gets described.** New settings belong in the
+  settings table, new commands in the command list, a new panel or tab in the
+  prose around it.
+- **A feature that changed gets corrected.** Renamed settings, a moved button, a
+  different default, a screenshot showing a layout that no longer exists — any of
+  those makes the README lie, and a lie in a listing is worse than an omission.
+- Check the mechanical parts too: every settings key from `package.json` present,
+  every `contributes.commands` title mentioned, every image link resolving to a
+  file that exists.
+
+Fix it in the release commit. A README correction is not worth a release of its
+own, and left undone it stays wrong until someone notices from the outside.
+
+**Call the advisor before the tag exists.** A release here always bundles a
+multi-file feature, so it is the "before declaring done" case of the rule in
+`CLAUDE.md` — and the tag is the point of no return: a published version can be
+unpublished, never replaced, so a remark that arrives after it costs another
+number. Do it once, here, with the work finished and the changelog written; if it
+comes back with something that must change, fix it and consult again before
+tagging.
+
+This step exists because the rule kept being skipped in practice. The Stop hook
+asks for tests after every edit, tests go green, and the turn ends feeling
+checked — but that hook guards *tests* and the advisor guards *judgment*. Tying
+the consult to the release gives it one mechanical moment instead of a judgment
+call about whether this change was "big enough".
+
 ## The number
 
 `CLAUDE.md` and project memory `version-bumps-at-release-only` own this. In short:
@@ -59,8 +96,17 @@ rg -m1 -n '^## ' CHANGELOG.md                                 # the two agree
 
 npx @vscode/vsce package --no-dependencies -o <scratch>/vX.Y.Z.vsix
 unzip -l <scratch>/vX.Y.Z.vsix | rg -c '\.claude/' || echo 'ok: no .claude'
+unzip -l <scratch>/vX.Y.Z.vsix | rg 'dashboard\.css'    # the page has no styles without it
 code --install-extension <scratch>/vX.Y.Z.vsix
 ```
+
+**A file that is on disk but not in git ships as nothing.** Every check above
+reads the working tree, while CI builds the package from the tagged commit — so
+an untracked file passes the tests, passes `vsce ls`, passes the local install,
+and reaches both storefronts as an absent file. The page then renders as unstyled
+markup nobody would call broken until they looked. `git status --porcelain` and
+account for every `??` line before committing; screenshots are the same trap from
+the other side, since the listing pulls them from `raw/HEAD`.
 
 Then the release commit — the work and the bump together, Conventional Commits,
 and the tag on it:

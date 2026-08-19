@@ -60,7 +60,7 @@ machine that uses them is the larger half of the bill.
 This extension reads that state and gives it two surfaces: **a status bar you
 write yourself**, and **a dashboard** over every transcript on the machine.
 
-![The Now tab: both limit windows, the week as a track of the time it has left, context, spend, tasks and the agents of a running workflow](media/screenshots/now-dark.png)
+![The Now tab: four headline figures, the week as a track of the time it has left, then three panels — limits, the session with its context broken into what fills it, and the spend — a strip of tasks, and the agents of a running workflow](media/screenshots/now-dark.png)
 
 <a name="what-you-get"></a><a name="user-content-what-you-get"></a>
 
@@ -91,6 +91,7 @@ editor rather than fighting it.
 | ![Starting a session, dark](media/screenshots/launch-dark.png) | ![Starting a session, light](media/screenshots/launch-light.png) |
 | ![The week track with a dry forecast, dark](media/screenshots/dry-dark.png) | ![The week track with a dry forecast, light](media/screenshots/dry-light.png) |
 | ![The week track running under plan, dark](media/screenshots/under-dark.png) | ![The week track running under plan, light](media/screenshots/under-light.png) |
+| ![What fills the context window, dark](media/screenshots/context-dark.png) | ![What fills the context window, light](media/screenshots/context-light.png) |
 
 <a name="install"></a><a name="user-content-install"></a>
 
@@ -182,22 +183,55 @@ Two placeholders answer "when do I run out", and the difference matters: `{dry}`
 is silent when the forecast lands after the reset — running out then never
 happens — while `{dryAt}` names the date either way.
 
+The week track on the Now tab draws the same answer instead of stating it:
+
+![The week as a track of seven days inside a panel headed This week: the blue part is spent, a rule in the theme's text colour marks where an even burn would be by now, the red block is the overspend, a red line marks the day the window runs out, and four pills beside the heading read 76% spent, plan 64%, 12% over and dry in 1d10h](media/screenshots/dry-dark.png)
+
+Every part of it is one fact, and the rail carries no text at all: what each mark
+means is said once, in the pills beside the heading. The **blue** length is the
+week as it has been spent, day by day. The **rule in the theme's own text
+colour** — white on a dark theme, black on a light one — is where an even burn
+would stand right now; the pill `plan 64%` wears a dot of that same colour, which
+is how the two are joined. The **red block** past the rule is the overspend, and
+the pill says `12% over`. The **red line** further along is the forecast, and its
+pill carries a red dot and the whole statement: `dry in 1d10h → Thu 20.08, ~14h`.
+The gap between that line and the end of the track is time without quota, against
+the `resets … · in 2d12h` in the footer.
+
+Only that one rule changes colour between themes, because it is the only mark
+drawn in the editor's foreground rather than in a chart colour: blue for spent,
+red for both the overspend and the forecast, green for the slack when a week is
+running under its plan.
+
+The same week spent *under* its plan is the other half of the vocabulary, and it
+is drawn rather than left blank:
+
+![The same track for a week running under plan: a green block between what is spent and the plan rule, no red anywhere, and the pills read 57% spent, plan 64%, 7% under and dry Sat 22.08 after the reset](media/screenshots/under-dark.png)
+
+Every red mark is gone, and two things take their place. The **green block**
+between the spent length and the plan rule is the slack — seven points of the
+week still in hand at this moment, which the pill states as `7% under`. And the
+forecast pill loses its dot: `dry Sat 22.08, ~13h, after the reset` names the day
+the quota would empty, while the rail has no mark to point at — the window resets
+on Friday and this rate would only empty it on Saturday. A dot with nothing to
+point at would be worse than none, which is the same case in which `{dry}` stays
+empty in the status bar while `{dryAt}` still names the date.
+
+So the bar and the track agree on when to speak: red and a `{dry}` value mean the
+allowance ends before the window does, green and silence mean it does not.
+
 ### What fills the context window
 
-Beside the window meter, the session section lists what is in it — biggest share
-first, free space last:
+The weekly allowance is one limit; the context window is the other, and the
+session section breaks it into what is actually in it. How the session is set up
+— effort, advisor, thinking, output style — sits beside the model's name as
+state, not as rows. Under it the window is one figure with the absolute numbers
+beside it, then a colour bar of everything in use, then that bar's legend: one
+line per part, biggest share first, each in the colour it has in the bar. The
+same block appears on the Now tab and in the sidebar, because both draw this one
+section:
 
-```
-window            82%   828k / 1.0M
-rest in use    ~74.1%   741k · chat, system prompt, tool schemas
-memory          ~6.8%    68k · instruction files
-skills          ~0.8%     8k
-agents          ~0.5%     5k
-tools           ~0.2%     2k · names only
-mcp             ~0.2%     2k · server instructions
-hooks           ~0.2%     2k
-free            17.2%   172k
-```
+![The session panel: the model with its effort and advisor as pills, the context window as one large percentage with its token count beside it, a colour bar of what is in use, and its legend — the rest in use, memory files, skills, agents, tool names, MCP instructions and hooks, each with its token count and its share](media/screenshots/context-dark.png)
 
 The client works this out for `/context` from figures it keeps in memory and
 writes none of them to disk. What it does record are the blocks it adds to the
@@ -212,42 +246,20 @@ one figure, the input the last reply was billed for, and nothing on disk splits
 them; the row is named for what is inside it rather than guessing. And **`tools`
 counts names, not schemas** — the transcript carries the names of deferred tools,
 never their definitions, so the schemas are inside `rest in use` too. The rows
-therefore add up to the whole window, unmeasurable parts included.
+therefore add up to everything in use, unmeasurable parts included — free space
+is not among them, because it is the other end of the bar above.
 
-The week track on the Now tab draws the same answer instead of stating it:
+On the line that introduces the legend sits **`your setup`** — what the six
+measured rows come to together, as a share of the window, next to where
+auto-compact waits. That is the figure to act on: it is the bill for the skills,
+agents, MCP servers and instruction files that load before you type a word, and
+it is paid on every prompt of the session. The branch and the client version
+close the panel as a footer, with a chip when a newer client is already unpacked
+and waiting for the next launch.
 
-![The week as a track of seven days: the blue part is spent, a rule in the theme's text colour marks where an even burn would be by now, the red block is the overspend, and a red line labelled DRY 1D10H marks the day the window runs out — two days before it resets](media/screenshots/dry-dark.png)
-
-Every part of it is one fact. The **blue** length is the week as it has been
-spent, day by day. The **rule in the theme's own text colour** — white on a dark
-theme, black on a light one — is where an even burn would stand right now,
-labelled `plan 64%`; the **red block** past it is the overspend, `76% +12%`. The
-**red line** further along is the forecast: `DRY 1D10H → WED 19.08, ~06H`, the
-moment the window empties at this rate. The gap between that line and the end of
-the track is time without quota, and the captions spell the same thing in words —
-`runs out Wed 19.08, ~06h, in 1d10h` against `resets Thu 20.08 08:38 · in 2d12h`.
-
-Only that one rule changes colour between themes, because it is the only mark
-drawn in the editor's foreground rather than in a chart colour: blue for spent,
-red for both the overspend and the forecast, green for the slack when a week is
-running under its plan.
-
-The same week spent *under* its plan is the other half of the vocabulary, and it
-is drawn rather than left blank:
-
-![The same track for a week running under plan: a green block between what is spent and the plan rule, no red anywhere, a dry label with a trailing arrow, and the caption 'lasts to the reset'](media/screenshots/under-dark.png)
-
-Every red mark is gone, and two things take their place. The **green block**
-between the spent length and the plan rule is the slack — `57% −7%`, seven points
-of the week still in hand at this moment. The dry label keeps its date but gains
-a **trailing arrow**, `DRY 3D9H → FRI 21.08, ~05H ⟶`, which says the forecast
-lands past the right edge of the track: the window resets on Thursday and this
-rate would only empty it on Friday. That is exactly the case the caption states
-in words — `lasts to the reset` instead of `runs out …` — and the case in which
-`{dry}` stays empty in the status bar while `{dryAt}` still names the date.
-
-So the bar and the track agree on when to speak: red and a `{dry}` value mean the
-allowance ends before the window does, green and silence mean it does not.
+It answers a question the percentage alone cannot: when the window fills early in
+a session, this says whether that is the conversation or an instruction file, a
+skill listing and a dozen MCP servers loading before you type a word.
 
 <details>
 <summary><b>All 45 placeholders</b></summary>
@@ -296,15 +308,18 @@ every transcript on the machine, and one that reads the installation itself.
 
 Every tab is built the same way: a strip of headline figures, then one panel per
 answer. A figure that is a share of something is drawn as one rather than only
-written.
+written. Inside a panel the order never changes either — the heading with the
+state of the thing as pills beside it, the one figure the panel exists for, what
+that figure is made of, the facts, and a footer of what does not change while you
+work.
 
 **⏱️ Now** — the state of Claude as the page was opened: the four numbers that
 decide the next hour as headline tiles, the week as a track of time — how long
-the quota still lasts and how long the week runs on without it — the four
-status-bar tooltips at full width, and a row
-per agent of every workflow still running. Those panels are not a copy of the
-tooltips: both are rendered from the same sections in `status.js`, so the page
-cannot fall behind the hover.
+the quota still lasts and how long the week runs on without it — then the limits,
+the session and the spend as three panels at full width, the task list as one
+strip under them, and a row per agent of every workflow still running. Those
+panels are not a copy of the tooltips: both are rendered from the same sections
+in `status.js`, so the page cannot fall behind the hover.
 
 <details>
 <summary><b>💸 Spend</b> — where the money went</summary>
@@ -382,8 +397,9 @@ runs** tree in the Activity Bar (run → phase → agent), the runs table on the
 dashboard, and the placeholders above.
 
 That tree is the last of four sections in the **Claude Dashboard** container.
-Above it sit **Limits** — the 5-hour window above the weekly one, how far ahead
-or behind plan the spend is, and when the window would run out at this rate;
+Above it sit **Limits** — the week as the figure, the 5-hour and per-model
+windows as rows under it, whether the spend is over or under plan, and when the
+window would run out at this rate;
 **Session** — the model, the context window with a breakdown of what fills it,
 and what the session open in this window has cost, hidden entirely when there is
 no session here; and **Live sessions**, every session on the machine whose

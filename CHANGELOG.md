@@ -9,6 +9,104 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.38.0] — 2026-08-19
+
+### Changed
+
+- **The Now tab speaks one language across all three panels.** Limits, the
+  session and the spend each used to solve the same four problems their own way:
+  state was a bordered callout in one, a table in another and part of the
+  heading in the third. All three are now the same five moves in the same order —
+  the heading with its state as pills, one figure the panel exists for, what that
+  figure is made of, the facts, and a footer.
+
+  **Limits** leads with the week, because that is the window that stops the work:
+  one large percentage, the plan as a notch on its track, and the 5-hour and
+  per-model windows as compact rows under it. The verdict against plan moved into
+  a pill beside the heading and out of the sentence that measures it — written in
+  both places it read as two findings that happen to agree. Pace, forecast and
+  credits keep their words and lose their left borders: a coloured dot carries
+  the tone in a panel that already speaks in colour.
+
+  **Spend** is titled Spend rather than titled with its own answer, so the answer
+  has somewhere to be: the session's cost is the figure, burn rate and today's
+  spend are pills, and what it took stays a table.
+
+  **The session panel** shows effort, advisor, thinking and output style as pills
+  beside the model's name — four rows of monospace that made settings look like
+  measurements — and ends in a footer of branch and client version, with a chip
+  when a newer client is unpacked and waiting.
+
+- **The stylesheet moved out of the JavaScript, into `dashboard.css`.** 714 lines
+  of CSS lived inside a template literal, where a backtick in a comment breaks
+  the module at require time — it did, four times in one session — and where no
+  editor offers highlighting, bracket matching or a linter. `STYLE` is still a
+  string, read from the file at load, so both pages, both preview tools and every
+  test that holds a rule against a vocabulary are untouched. The move is
+  byte-for-byte: the file has the same checksum the extracted block had.
+
+- **The week track is a panel, and everything it used to say around the rail is
+  a pill.** It had four ways of stating a fact in one block: a verdict sentence
+  under the heading, the forecast floating above the rail, the spend printed
+  inside the fill, and `plan` captioned below. Now the heading carries
+  `57% spent · plan 64% · 7% under · dry in 1d10h → Thu 20.08` and the rail
+  carries nothing but its zones and its marks. The two pills that name a mark
+  wear a dot in that mark's colour, which is what lets the captions go — the
+  mark is found by colour instead of by a label pinned to its position. Three
+  floors of text became one line and the block lost 45px of height.
+
+  A forecast landing past the reset gets no dot: there is no mark on the rail to
+  point at, and a colour pointing at nothing is worse than no colour.
+
+- **Fixed: the same fact was drawn in opposite tones on one screen.** Spending
+  faster than the week elapses was `12% ahead of plan` in green on the Limits
+  panel and `12% over` in yellow on the track above it. Both now say `over` and
+  `under`, and both colour overspend as the warning it is.
+
+- **The task list is a strip across the page instead of a fourth panel.** Four
+  panels in a three-column flow always left one column carrying two and the
+  other two ending high, and no size of card fixed it — the browser balances the
+  columns and tasks were the odd panel out. As a strip under the row it also
+  reads truer: tasks are the state of the work, not a subject beside limits and
+  money. `Tasks 4/7`, the share as a track, what is in progress, and how many
+  other sessions are open — one line down to about 640px, two below that.
+
+- **The breakdown is a colour bar with a legend.** One bar for everything in use,
+  each part in its own colour, and the list under it is that bar's legend rather
+  than seven rows of fill. Colour is keyed by the part's name, so a part keeps
+  its hue when the sort order moves it. Where auto-compact waits now rides on the
+  legend's caption beside `your setup`, next to the bar it qualifies.
+
+- **The context block is laid out again, and it is now a gauge with a list under
+  it.** The window used to be a meter row indistinguishable from the seven parts
+  below it, free space an eighth row, and `from cache` and `auto-compact` a table
+  of two more underneath — nine numbers of three different kinds drawn as one
+  run. The window is now the headline: the figure, its bar, and the facts that
+  only qualify it as chips beneath.
+
+  Each part is one line instead of two. The old row put the label, a meter and
+  the share on the first line and the token count on a dim second one, which
+  spent the emphasis on the percentage — derivable from the count, and already
+  drawn by the bar — and buried the number worth acting on. Name and qualifier
+  now share an elastic column, the size and the share are two monospace columns
+  that read straight down, and the share is the fill behind the row: at 89%
+  against 0.2% a meter column is seven empty tracks, and the width is worth more
+  to the name than to a bar nobody can read.
+
+  The panel is about a fifth shorter for the same figures, and every row is the
+  same height at every width the sidebar can be dragged to — the qualifier drops
+  out under 300px rather than wrapping the row.
+
+- **The breakdown says what your setup costs.** The six measured parts — memory
+  files, skills, agents, MCP instructions, tool names, hooks — are summed beside
+  the heading as a share of the window. It is the one figure here anybody can act
+  on, and it was previously left to the reader to add up.
+
+- **Two new block kinds, `gauge` and `parts`**, so the tooltip and the page keep
+  saying the same thing in their own way. A total and the pieces of it are
+  different facts; drawn identically the total reads as one more component of
+  itself.
+
 ## [0.36.0] — 2026-08-18
 
 ### Added

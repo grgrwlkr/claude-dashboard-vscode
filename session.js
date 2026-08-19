@@ -311,6 +311,12 @@ function contextParts(file) {
         if (line.length < 40 || line[0] !== '{') continue;
         let record;
         try { record = JSON.parse(line); } catch { continue; }
+        // One file holds several contexts. A subagent's records sit in the same
+        // transcript and carry listings of their own: an `isInitial` one from an
+        // agent would wipe the state built for this window, and its tools would
+        // be counted into a window they were never in. The same three markers
+        // `readTail` has always skipped.
+        if (record.agentId || record.workflowId || record.isSidechain) continue;
         const a = record.attachment;
         if (!a || typeof a !== 'object') continue;
 
