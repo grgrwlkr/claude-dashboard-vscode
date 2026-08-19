@@ -172,8 +172,14 @@ const page = demo ? (() => {
     // screenshot — and a listing image would then go stale on each bump rather
     // than on each change to what it shows. Seven bumps in one day is what made
     // this worth a line. The marketplace prints the version on the card anyway.
+    //
+    // Matched on `data-version`, an attribute nothing else uses: this once keyed
+    // on `class="ver"`, the version moved into a pill during the header
+    // redesign, and the replacement quietly stopped matching — the number was
+    // photographed for the listing with nothing failing anywhere. A test in
+    // test/dashboard.test.js holds both ends of this to the attribute.
     return html
-        .replace(/ <span class="ver">v[^<]*<\/span>/, '')
+        .replace(/<span class="pill" data-version>v[^<]*<\/span>/, '')
         .replace(/(data-preset-preview="([^"]+)">)(?:<span class="chip-seg">[\s\S]*?<\/span>)*/g,
         (m, head, id) => head + (previews[id] || []).map((line) => `<span class="chip-seg">${esc(line)}</span>`).join(''));
 })() : html;

@@ -9,10 +9,32 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
-## [Unreleased]
+## [0.40.0] — 2026-08-19
+
+### Changed
+
+- **The page header is written in the same grammar as the panels below it.** The
+  name, the mark and the version sit on the left; the state of the index and the
+  two controls on the right. What used to be a sentence of facts joined by dots
+  is now pills, and the freshness and the countdown share one of them —
+  `19:09 · next in 55s` while the timer runs, `19:09` alone when it is paused,
+  with the full date on the hover, where it is wanted only when the answer is
+  "not fresh at all".
+- **The header's buttons are the page's own buttons.** They were pills with a
+  cursor — the same 10.5px, the same 999px radius, the same 9% fill — so the row
+  read as four facts, two of which happened to be clickable. `Pause` and
+  `Reindex` now wear `.btn`, the pair `Save` and `Add segment` wear, and a
+  hairline separates what is read from what is pressed. Pausing turns the
+  control yellow, the colour a warning pill uses, and empties the countdown.
 
 ### Fixed
 
+- **The listing's screenshots had started carrying the version number.** `--demo`
+  strips it so a picture goes stale on a change to what it shows rather than on
+  every bump — but it stripped by a class the version left when it moved into a
+  pill, and nothing failed: the header rendered, the tests passed, and the number
+  was photographed. The anchor is an attribute now, and a test holds both files
+  to it.
 - **The context panel could show a percentage over nothing.** The window gauge
   gives up its own track because the breakdown draws the same measurement in
   colour underneath — but the breakdown is absent when the transcript cannot be

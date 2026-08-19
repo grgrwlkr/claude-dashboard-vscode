@@ -70,6 +70,20 @@ function fmtDateTime(ms) {
     return `${WEEKDAYS[d.getDay()]} ${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/**
+ * The clock alone, for the header pill that says when the index was last built.
+ * The day is dropped rather than abbreviated: the pill sits beside a countdown
+ * to the next build, so the question it answers is "how fresh", and a date is
+ * only interesting when the answer is "not fresh at all" — which is what the
+ * full timestamp on its title attribute is for.
+ */
+function fmtClock(ms) {
+    if (!ms) return '—';
+    const d = new Date(ms);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 // Short model label: "claude-opus-5" → "opus 5". Full ids are noise in a table.
 // In place of a reply that never arrived — a spent limit, a dropped connection,
 // a 403 — Claude Code writes a record of its own and marks it with this id. Its
@@ -2625,14 +2639,18 @@ if (nextEl && pauseEl) {
   let due = Number(nextEl.dataset.next);
   const paint = () => {
     const on = pauseEl.dataset.on === '1';
+    // The button says what pressing it will do; that the timer is stopped is
+    // said by the button's own colour and by the countdown going away, so the
+    // two never state the same fact twice.
     pauseEl.textContent = on ? 'Pause' : 'Resume';
+    pauseEl.classList.toggle('held', !on);
     pauseEl.title = on
       ? 'Stop rebuilding the page on the timer. The same claudeStatusline.autoRefresh you can set on the Settings tab.'
       : 'Rebuild the page on the timer again.';
-    if (!on) { nextEl.textContent = 'paused'; return; }
+    if (!on) { nextEl.textContent = ''; return; }
     const state = countdown(due, Date.now(), every);
     due = state.due;
-    nextEl.textContent = state.text;
+    nextEl.textContent = ' · ' + state.text;
   };
   // One setting, two controls: the switch on the Settings tab and this button
   // are the same autoRefresh, so flipping either has to move the other. The
@@ -3145,11 +3163,17 @@ function render(index, total, meta) {
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>Claude Dashboard</title><style>${STYLE}</style></head><body>
-<div class="mark">${MARK}<h1>Claude Dashboard <span class="ver">v${esc(VERSION)}</span></h1></div>
-<p class="sub">${plural(meta.files, 'transcript')} indexed${meta.lastRun ? ` · updated ${esc(fmtDateTime(meta.lastRun))}` : ''}
- · <button id="refresh" class="link">Reindex</button>
- <span class="dim" id="next" data-next="${Number(meta.lastRun || 0) + (Number((meta.config || {}).refreshInterval) || 60) * 1000}" data-every="${Number((meta.config || {}).refreshInterval) || 60}">·</span>
- <button id="pause" class="link" data-on="${(meta.config || {}).autoRefresh === false ? '0' : '1'}">·</button></p>
+<header class="page-head">
+  <div class="mark">${MARK}<h1>Claude Dashboard</h1><span class="pill" data-version>v${esc(VERSION)}</span></div>
+  <div class="pills">
+    <span class="pill">${plural(meta.files, 'transcript')}</span>
+    <span class="pill" id="idx"${meta.lastRun ? ` title="Last built ${esc(fmtDateTime(meta.lastRun))}"` : ''}>${
+    meta.lastRun ? esc(fmtClock(meta.lastRun)) : 'not built yet'}<i id="next" data-next="${Number(meta.lastRun || 0) + (Number((meta.config || {}).refreshInterval) || 60) * 1000}" data-every="${Number((meta.config || {}).refreshInterval) || 60}"></i></span>
+    <span class="head-sep" aria-hidden="true"></span>
+    <button id="pause" class="btn head-btn" data-on="${(meta.config || {}).autoRefresh === false ? '0' : '1'}">·</button>
+    <button id="refresh" class="btn head-btn primary">Reindex</button>
+  </div>
+</header>
 ${navHtml()}
 ${nowTab(meta.now, meta.workflows, meta.metrics)}
 ${overviewTab(total, dayModels, modelOrder, meta.config || {})}

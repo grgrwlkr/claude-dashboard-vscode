@@ -1013,7 +1013,12 @@ test('the page names itself the same way the command that opens it does', () => 
     const manifest = JSON.parse(require('node:fs').readFileSync(`${__dirname}/../package.json`, 'utf8'));
     const html = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
     assert.match(html, /<title>Claude Dashboard<\/title>/);
-    assert.match(html, /<h1>Claude Dashboard <span class="ver">/);
+    assert.match(html, /<h1>Claude Dashboard<\/h1>/);
+    // The version rides beside the name as a pill, in the same shape the panels
+    // use for state — it was a bare span with its own type treatment. The
+    // attribute is what `--demo` strips it by; see the test that holds both
+    // files to it.
+    assert.match(html, /<h1>Claude Dashboard<\/h1><span class="pill" data-version>v\d+\.\d+\.\d+<\/span>/);
     const open = manifest.contributes.commands.find((c) => c.command === 'claudeStatusline.dashboard');
     assert.equal(open.title, 'Claude: Open dashboard');
 });
@@ -1479,21 +1484,82 @@ test('pausing the timer from the header is the same setting as the switch', () =
     });
 
     const on = page(true);
-    assert.match(on, /<button id="pause" class="link" data-on="1"/);
+    assert.match(on, /<button id="pause" class="btn head-btn" data-on="1"/);
     // The deadline and the interval both reach the script: after a pause the
     // countdown has to be restarted from now, and the markup's own deadline is
     // by then however long the pause lasted out of date.
     assert.match(on, /id="next" data-next="\d+" data-every="60"/);
+    // The countdown lives inside the freshness pill, so the two facts about the
+    // index — when it was built, when it will be — share one element rather
+    // than standing beside each other saying the same thing twice.
+    assert.match(on, /<span class="pill" id="idx" title="Last built [^"]+">\d\d:\d\d<i id="next"/);
+    // Pausing colours the control and empties the countdown; the script does
+    // both, and the page is never rebuilt on the way into a pause.
+    assert.match(on, /pauseEl\.classList\.toggle\('held', !on\)/);
+    assert.match(on, /if \(!on\) \{ nextEl\.textContent = ''; return; \}/);
 
     // Off is the same button in the other position, not a different control and
     // not a sentence where a control used to be.
-    assert.match(page(false), /<button id="pause" class="link" data-on="0"/);
+    assert.match(page(false), /<button id="pause" class="btn head-btn" data-on="0"/);
 
     // Both controls write claudeStatusline.autoRefresh, and the script keeps
     // them in step in both directions.
     assert.match(on, /key: 'autoRefresh'/);
     assert.match(on, /input\[data-set="autoRefresh"\]/);
     assert.match(on, /<input[^>]*data-set="autoRefresh"/);
+});
+
+// The version is on every screenshot, because it is in the header of every tab —
+// so `--demo` strips it, or a listing image goes stale on each bump rather than
+// on each change to what it shows. That strip is a string replacement in another
+// file, and it broke silently the day the version moved from its own `.ver`
+// span into a pill: the header kept rendering, the tests kept passing, and
+// v0.38.0 was photographed for the marketplace. The anchor is now an attribute
+// nothing else uses, and this test holds the two files to it.
+test('the version carries the anchor --demo strips it by', () => {
+    const page = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
+    const head = (page.match(/<header class="page-head">[\s\S]*?<\/header>/) || [''])[0];
+    assert.match(head, /<span class="pill" data-version>v[^<]+<\/span>/);
+
+    const preview = require('node:fs').readFileSync(`${__dirname}/../tools/preview.js`, 'utf8');
+    assert.ok(preview.includes('data-version'), 'tools/preview.js no longer strips by data-version');
+});
+
+// The header row carries both kinds of thing the page has: facts, which are
+// pills, and controls, which are buttons. The first version of it drew the
+// controls as pills with a cursor — same font size, same 999px radius, same 9%
+// fill — so the row said "state, state, state, state" and the two things you
+// could actually press were found by reading them. A button here is the page's
+// own `.btn`, the one `Save` and `Add segment` use, and a hairline says where
+// the reading stops and the pressing starts.
+test('the header presses with the same buttons as the rest of the page', () => {
+    const page = db.render(demoIndex(), ix.summarize(demoIndex()), {
+        files: 1, lastRun: Date.parse('2026-08-11T04:00:00Z'), history: [],
+        config: { autoRefresh: true, refreshInterval: 60, segments: [], defaults: [], presets: [], palette: [] },
+    });
+    const head = (page.match(/<header class="page-head">[\s\S]*?<\/header>/) || [''])[0];
+    assert.ok(head, 'the page has a header');
+
+    // Both controls are `.btn`, and the one that does the work is `primary` —
+    // the same pair of classes Save carries at the bottom of Setup.
+    assert.match(head, /<button id="pause" class="btn head-btn"/);
+    assert.match(head, /<button id="refresh" class="btn head-btn primary"/);
+    assert.match(page, /<button class="btn primary" id="save"/);
+
+    // The hairline sits between the last fact and the first control, not at
+    // either end of the group: that is the whole of what it says.
+    // The class has to end where the name does, or the `.pills` container that
+    // holds them counts as a fourth pill.
+    const order = [...head.matchAll(/class="(pill|head-sep|btn)(?: [^"]*)?"/g)].map((m) => m[1]);
+    assert.deepEqual(order, ['pill', 'pill', 'pill', 'head-sep', 'btn', 'btn']);
+
+    // And every class the header invents has rules behind it. The version this
+    // replaced shipped `class="link"` on a live button with no rule anywhere in
+    // the stylesheet, which is a thing only a test can notice: an unstyled
+    // button still renders, just as the browser's own.
+    for (const cls of ['.head-btn', '.head-sep']) {
+        assert.ok(db.STYLE.includes(cls), `${cls} has no rule in dashboard.css`);
+    }
 });
 
 // The 50/80 thresholds are a port of `color_for` in statusline.sh, and CLAUDE.md

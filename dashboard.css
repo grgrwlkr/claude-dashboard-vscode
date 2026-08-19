@@ -12,8 +12,48 @@ h1 { font-size: 18px; margin: 0 0 2px; font-weight: 600; }
 /* The extension's own mark, inline rather than an <img>: a webview image would
    need asWebviewUri plumbed through and img-src opened in the CSP, for one
    26-pixel glyph that is four shapes. */
+/* The page header in the grammar the panels use: the name on the left, the
+   state of the index and the two controls on the right. The row it replaced put
+   facts and buttons in one sentence joined by dots, and the buttons carried a
+   class with no rules at all — so the only unstyled controls on the page were
+   the two at the very top of it. */
+.page-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+/* Centred, not stretched. A pill is 16px of line-height and a button is 22px,
+   and the default `stretch` grew the pills to match while their text stayed on
+   its own line-height — three pixels of the label riding above the middle of
+   its own pill, which is exactly how it looked. */
+.page-head .pills { align-items: center; }
 .mark { display: flex; align-items: center; gap: 9px; }
 .mark svg { display: block; flex: none; border-radius: 6px; }
+/* Freshness and the countdown to the next build are one fact from two ends, so
+   they share a pill: `17:26 · next in 55s` while the timer runs, `17:26` alone
+   when it is paused. The full date is on the title, where it is wanted only when
+   the answer is "not fresh at all". */
+#idx i { font-style: normal; }
+/* The row holds both kinds of thing the page has — facts, which are pills, and
+   controls, which are buttons — so the two may not share a shape. These are the
+   page's own `.btn`, the pair Save and Add segment wear, shrunk to the line the
+   facts sit on; `.head-btn` sets four properties and inherits the rest. The
+   version before it was a pill with a cursor: same 10.5px, same 999px radius,
+   same 9% fill, and therefore unreadable as something you could press. The
+   descendant selector is what gives these rules the specificity to land on top
+   of `.btn`, which is declared much further down. */
+.page-head .head-btn { font-size: 11px; line-height: 15px; padding: 2px 9px; border-radius: 4px; }
+.page-head .head-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* A stopped timer is a state of the page, and the control holding it says so in
+   the same yellow a warning pill uses. 45% rather than the pills' 25: this fill
+   sits behind a border and a label instead of behind a word, and at a quarter it
+   came out beige on the light theme rather than yellow. */
+.page-head .head-btn.held { color: inherit;
+  background: color-mix(in srgb, var(--vscode-charts-yellow) 45%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-charts-yellow) 70%, transparent); }
+.page-head .head-btn.held:hover { background: color-mix(in srgb, var(--vscode-charts-yellow) 60%, transparent); }
+/* Where the reading stops and the pressing starts. It says nothing on its own,
+   which is why it is a hairline and not a gap: a gap at this size reads as the
+   row having wrapped. */
+.head-sep { width: 1px; height: 15px; margin: 0 3px; flex: 0 0 auto;
+  background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
 .ver { font-size: 11.5px; font-weight: 500; opacity: .45; letter-spacing: .02em;
   font-family: var(--vscode-editor-font-family); vertical-align: 2px; }
 h2 { font-size: 13px; margin: 22px 0 8px; font-weight: 600; opacity: .85; }
