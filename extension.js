@@ -680,7 +680,11 @@ function collectSlow(state) {
         const budget = sys.contextBudget(sys.ROOT, [state.workspace], [s.slugFor(state.workspace)]);
         d.memoryTokens = (budget.files || []).reduce((sum, f) => sum + f.tokens, 0);
         state.compactPct = s.autoCompactPct(state.workspace, state.context?.window || 0);
-        state.settings = s.settingsOf(state.workspace);
+        // The style comes off the session's own command line, because that is
+        // where this extension put it when it launched the session — see
+        // `styleFromArgs`. The settings chain answers for everything else, and
+        // for the style too when the session was started some other way.
+        state.settings = s.settingsOf(state.workspace, null, s.styleOfSession(state.session.pid));
         state.version = s.versionInfo(state.session.version);
         d.compactPct = state.compactPct;
         d.settings = state.settings;

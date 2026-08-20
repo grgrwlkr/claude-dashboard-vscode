@@ -103,7 +103,12 @@ const html = db.render(index, total, demo ? { ...demo.meta, system: snap } : {
         const stats = own ? sess.sessionStats(sess.transcriptPath(REPO, own.sessionId)) : null;
         return status.statusSections({
             now: nowS, limits: lim, weekly: lim.weekly, session: lim.session, scoped: lim.scoped, pace,
-            ctx, stats, settings: sess.settingsOf(REPO), version: sess.versionInfo(own && own.version),
+            // The session's own pid, so the style resolves here the way it does
+            // in the editor: it lives on the command line, not in a file. A
+            // preview that read the chain alone would draw a page this machine
+            // never shows, which is the one thing this tool may not do.
+            ctx, stats, version: sess.versionInfo(own && own.version),
+            settings: sess.settingsOf(REPO, null, sess.styleOfSession(own && own.pid)),
             compactPct: sess.autoCompactPct(REPO, ctx ? ctx.window : 0), todayUsd: sess.costToday().usd,
             peers: own ? sess.peersOf(REPO, own.sessionId) : null, todo: own ? sess.todoOf(own.sessionId) : null,
         }, {

@@ -257,6 +257,21 @@ test('the manifest offers exactly the models and efforts the page does', () => {
     }
 });
 
+// The list is a closed one, so it is a claim about the client rather than a
+// menu of our own — and a claim that goes stale on somebody else's release. It
+// did: `Concise` shipped in 2.1.237 and could not be picked here at all, while
+// the comment above the list still said there were four. Names come from the
+// client's own strings; the docs were still listing four when this was written.
+test('every output style the client ships can be picked here', () => {
+    const names = db.STYLES.map(([value]) => value);
+    assert.deepEqual(names, ['', 'default', 'Proactive', 'Explanatory', 'Learning', 'Concise']);
+    // Capitalised exactly as the client spells them, because the value travels
+    // verbatim into `--settings` and an unknown style is simply ignored there.
+    for (const name of names.filter(Boolean).filter((n) => n !== 'default')) {
+        assert.match(name, /^[A-Z]/, `${name} must match the client's own spelling`);
+    }
+});
+
 test('a workspace cannot supply the free-text launch arguments', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const props = manifest.contributes.configuration.properties;

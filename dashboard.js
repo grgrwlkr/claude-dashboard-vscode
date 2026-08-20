@@ -2355,13 +2355,21 @@ const ADVISORS = [
     ['', 'off'],
     ['opus', 'opus'], ['sonnet', 'sonnet'], ['fable', 'fable'], ['haiku', 'haiku'],
 ];
-// The client's four built-in output styles. A style of your own is a file under
+// The client's built-in output styles, spelled as the client spells them: the
+// value travels verbatim into `--settings`, and one it does not recognise is
+// ignored rather than reported. A style of your own is a file under
 // `~/.claude/output-styles`, and its name goes in the extra arguments — there is
 // no flag for any of this, so it travels as `--settings` JSON.
+//
+// A closed list is a claim about somebody else's release, and it goes stale
+// silently: `Concise` shipped in 2.1.237 and this list, which had said "four
+// built-in" since the beginning, quietly stopped offering everything the client
+// had. The names are in the client binary before they are in its documentation.
 const STYLES = [
     ['', 'client decides'],
     ['default', 'default'], ['Proactive', 'proactive'],
     ['Explanatory', 'explanatory'], ['Learning', 'learning'],
+    ['Concise', 'concise'],
 ];
 
 /**

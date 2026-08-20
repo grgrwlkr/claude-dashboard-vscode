@@ -593,15 +593,69 @@ function compareVersions(a, b) {
     return 0;
 }
 
-// Settings the transcript does not carry — output style and advisor model —
-// read from the same chain the client reads.
-function settingsOf(workspace, chain) {
+/**
+ * The output style a running session was started with, out of its own command
+ * line. The client has no `--output-style` flag, so this extension launches a
+ * session by putting the style in `--settings` JSON — and that is the one place
+ * it exists: the transcript does not carry it, and neither does the session
+ * registry. Reading it back out of the settings chain alone left the pill blank
+ * for every session the extension itself had started.
+ *
+ * Parsed by walking the braces rather than by a regular expression, so a value
+ * containing `}` cannot end the object early.
+ */
+function styleFromArgs(args) {
+    const line = String(args || '');
+    const flag = line.indexOf('--settings');
+    if (flag < 0) return '';
+    const open = line.indexOf('{', flag);
+    if (open < 0) return '';
+    let depth = 0, inString = false, escaped = false, end = -1;
+    for (let i = open; i < line.length; i++) {
+        const c = line[i];
+        if (escaped) { escaped = false; continue; }
+        if (c === '\\') { escaped = true; continue; }
+        if (c === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (c === '{') depth++;
+        else if (c === '}' && --depth === 0) { end = i + 1; break; }
+    }
+    if (end < 0) return '';
+    try {
+        const parsed = JSON.parse(line.slice(open, end));
+        return typeof parsed.outputStyle === 'string' ? parsed.outputStyle : '';
+    } catch { return ''; }
+}
+
+// One `ps` for one session, on the pattern `parentsOf` above already sets: the
+// same POSIX flags, the same early return on Windows, the same timeout, and a
+// failure that costs a blank rather than an exception.
+function styleOfSession(pid) {
+    if (!pid || process.platform === 'win32') return '';
+    try {
+        return styleFromArgs(execFileSync('ps', ['-o', 'args=', '-p', String(pid)],
+            { encoding: 'utf8', timeout: 3000 }));
+    } catch { return ''; }
+}
+
+/**
+ * Settings the transcript does not carry, read from the same chain the client
+ * reads. The advisor is here for the session panel's convenience rather than
+ * from necessity — the transcript states `advisorModel` too, and `contextOf`
+ * takes it from there.
+ *
+ * `argStyle` is what the session was actually started with, and it beats the
+ * file. Not a tie-break: the client compiles the style into the system prompt
+ * at session start and does not reload it, so a file edited since then states
+ * what the next session will get, not what this one is running.
+ */
+function settingsOf(workspace, chain, argStyle) {
     const files = chain || settingsChain(workspace);
     const at = (key) => resolveSetting(files, key);
     const thinking = at('alwaysThinkingEnabled');
     const summaries = at('showThinkingSummaries');
     return {
-        outputStyle: at('outputStyle')?.value || '',
+        outputStyle: argStyle || at('outputStyle')?.value || '',
         advisor: at('advisorModel')?.value || '',
         model: at('model')?.value || '',
         thinking: thinking ? thinking.value !== false : true,
@@ -624,5 +678,5 @@ module.exports = {
     transcriptPath, readTail, contextOf,
     windowFor, sessionStats, contextParts, costToday, costSince, peersOf, todoOf,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
-    settingsFiles, settingsChain, resolveSetting, MANAGED,
+    settingsFiles, settingsChain, resolveSetting, styleFromArgs, styleOfSession, MANAGED,
 };

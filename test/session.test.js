@@ -321,6 +321,45 @@ test('resolveSetting names the file that won and the ones it shadowed', () => {
     assert.equal(s.resolveSetting(chainOf(['user', { x: null }]), 'x'), null);
 });
 
+// The one setting that does not travel in a file. The client has no
+// `--output-style` flag, so this extension launches a session by putting the
+// style in `--settings` JSON — and then read it back out of the settings chain,
+// where it had never been written. The pill was blank for every session the
+// extension itself had started, which is all of them on this machine, and the
+// terminal statusline showed the style all along because the client hands it
+// one directly.
+test('the style of a session is read from how the session was started', () => {
+    const style = (args) => s.styleFromArgs(args);
+
+    // The shape this extension actually produces, as `ps -o args=` prints it.
+    assert.equal(style('claude --model opus[1m] --effort max --settings {"outputStyle":"Explanatory"}'), 'Explanatory');
+    // Order is not promised, and neither is being last on the line.
+    assert.equal(style('claude --settings {"outputStyle":"Concise"} --effort high'), 'Concise');
+    // A settings object stating more than the style, and one stating none.
+    assert.equal(style('claude --settings {"outputStyle":"Learning","model":"opus"}'), 'Learning');
+    assert.equal(style('claude --settings {"model":"opus"}'), '');
+
+    // Nothing to find, and nothing that should throw.
+    assert.equal(style('claude --model opus'), '');
+    assert.equal(style(''), '');
+    assert.equal(style('claude --settings'), '');
+    assert.equal(style('claude --settings not-json'), '');
+    assert.equal(style('claude --settings {"outputStyle":'), '');
+    assert.equal(style(undefined), '');
+
+    // A style named by an argument beats one named by a file, and this is the
+    // whole point rather than a tie-break: the client compiles the style into
+    // the system prompt at session start, so a file edited since then states
+    // what the NEXT session will get, not what this one is running.
+    const chain = chainOf(['user', { outputStyle: 'Learning', advisorModel: 'fable' }]);
+    assert.equal(s.settingsOf('/work', chain).outputStyle, 'Learning');
+    assert.equal(s.settingsOf('/work', chain, 'Explanatory').outputStyle, 'Explanatory');
+    // The file still answers when the session was started without one.
+    assert.equal(s.settingsOf('/work', chain, '').outputStyle, 'Learning');
+    // And nothing else in the answer moves.
+    assert.equal(s.settingsOf('/work', chain, 'Explanatory').advisor, 'fable');
+});
+
 test('both readers answer from the chain they are given', () => {
     const chain = chainOf(['local', { alwaysThinkingEnabled: false }], ['user', {
         alwaysThinkingEnabled: true, advisorModel: 'fable', showThinkingSummaries: false,

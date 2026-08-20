@@ -9,6 +9,29 @@ Everything below 0.20.0 was built and installed on one machine — the extension
 had not been published yet. The history is kept anyway: it is what the dashboard
 grew out of, and a version that shipped nothing is worth saying so.
 
+## [0.40.1] — 2026-08-20
+
+### Added
+
+- **`Concise`, the output style the client added in 2.1.237**, can be picked
+  when starting a session. The list of styles is a closed one — a claim about
+  someone else's release — and it had gone stale silently: the comment above it
+  still said there were four.
+
+### Fixed
+
+- **The session panel never showed the output style of a session this extension
+  had started** — which, on a machine that launches its sessions from the
+  dashboard, is all of them. The client has no `--output-style` flag, so
+  "Open Claude Code with…" puts the style in `--settings` JSON; the panel then
+  read it back out of the settings files, where it had never been written, and
+  drew nothing. It now comes off the session's own command line, and that beats
+  the file on purpose: the client compiles the style into the system prompt at
+  session start, so a file edited since then says what the *next* session will
+  get, not what this one is running. The terminal statusline had shown the style
+  all along, because the client hands it one directly — which is exactly why
+  nobody noticed the panel was silent.
+
 ## [0.40.0] — 2026-08-19
 
 ### Changed
