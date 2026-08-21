@@ -720,11 +720,13 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .chip-btn:hover { background: var(--vscode-list-hoverBackground); }
 .pal-val { margin-left: auto; opacity: .5; font-size: 11px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 14ch; }
-/* Keyed on .field, the container the settings tab actually uses. These rules
-   named .form for a long time, a class nothing on the page carries, so every
-   input here fell through to the browser's own control — which under
-   color-scheme: light dark is painted dark on a light page. */
-.field select, .field input { font: inherit; padding: 3px 6px; border-radius: 4px;
+/* Both containers an input appears in: inside a `field()` on Settings, and bare
+   in a panel body on Launch. These rules named .form for a long time, a class
+   nothing on the page carries, and then .field alone, which the Launch tab's
+   Extra arguments field is not inside — either way the input fell through to
+   the browser's own control, which under color-scheme: light dark is painted
+   dark on a light page. The bare case shipped that way in 0.42.0. */
+.field select, .field input, .panel-body > input { font: inherit; padding: 3px 6px; border-radius: 4px;
   color: var(--vscode-input-foreground, inherit);
   background: var(--vscode-input-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
@@ -763,6 +765,10 @@ ul.log li { margin: 2px 0; opacity: .85; }
    name and the description share a line rather than stacking, because ten models
    stacked two-high is a page of scrolling for a list you read across. */
 .cards { display: grid; gap: 4px; }
+/* Separates the client's styles from your own inside one radio group: a
+   heading rather than a second panel, because the choice is still one choice. */
+.cards-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    opacity: .55; margin: 12px 0 5px; }
 .card-opt { position: relative; display: flex; align-items: baseline; gap: 12px;
   padding: 7px 11px; border-radius: 6px;
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }

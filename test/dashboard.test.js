@@ -1838,3 +1838,95 @@ test('the marketplace description counts the tabs the page actually has', () => 
     assert.ok(claimed, `the description no longer says "<n>-tab": ${manifest.description}`);
     assert.equal(Number(claimed[1]), tabs);
 });
+
+// A style of your own used to be reachable only by typing its name into the
+// extra arguments, which meant reading a directory listing to find out what it
+// was called. The panel offers what is on disk, in its own block under the
+// client's five, and both blocks are one radio group so the choice stays
+// exclusive.
+const STYLE_FIXTURE = [
+    { name: 'Proactive & concise', description: 'Result first, no preamble', keepCoding: true },
+    { name: 'data-analyst', description: '', keepCoding: false },
+];
+
+test('output styles of your own are offered beside the built-in ones', () => {
+    const launch = db.launchTab({}, {}, STYLE_FIXTURE);
+    // The client's own are still there.
+    assert.match(launch, /value="Explanatory"/);
+    // And so is what is on disk, named the way the client names it.
+    assert.match(launch, /value="Proactive &amp; concise"/);
+    assert.match(launch, /Result first, no preamble/);
+    assert.match(launch, /value="data-analyst"/);
+    // One group, so picking a custom style clears the built-in one.
+    const groups = (launch.match(/name="outputStyle"/g) || []).length;
+    assert.equal(groups, 8, 'five built-in plus the blank plus two of your own, all one group');
+});
+
+// The directory is the whole of the feature's discoverability: somebody with no
+// styles yet has no way to learn where they go, so the sentence is there
+// whether or not the list is empty.
+test('the panel says where your own styles live, with or without any', () => {
+    for (const styles of [[], STYLE_FIXTURE]) {
+        const launch = db.launchTab({}, {}, styles);
+        assert.match(launch, /~\/\.claude\/output-styles/,
+            `the path belongs on the panel with ${styles.length} styles`);
+        // And it no longer sends you to the extra arguments to name one: that
+        // was the only route before this panel offered them, and it is wrong now.
+        assert.ok(!/through the extra arguments/i.test(launch),
+            'the note still routes custom styles through launchArgs');
+    }
+});
+
+// The heading pill reads the chosen value back. It looked only at the built-in
+// list, so a custom style — the one case where the name is not obvious — showed
+// as nothing at all.
+test('the heading pill names a custom style, not only a built-in one', () => {
+    const launch = db.launchTab({ outputStyle: 'Proactive & concise' }, {}, STYLE_FIXTURE);
+    const head = launch.slice(launch.indexOf('>Output style</h2>'));
+    assert.match(head.slice(0, 400), /Proactive &amp; concise/);
+});
+
+// `keep-coding-instructions` defaults to false, and a style without it drops
+// Claude Code's engineering instructions entirely. That is worth knowing before
+// the session starts rather than after it answers.
+test('a custom style that drops the coding instructions says so', () => {
+    const launch = db.launchTab({}, {}, STYLE_FIXTURE);
+    const analyst = launch.slice(launch.indexOf('value="data-analyst"'));
+    assert.match(analyst.slice(0, 500), /coding instructions/i);
+    const proactive = launch.slice(launch.indexOf('value="Proactive &amp; concise"'));
+    assert.ok(!/coding instructions/i.test(proactive.slice(0, 260)),
+        'a style that keeps them needs no warning');
+});
+
+// The Launch tab's Extra arguments field sits directly in a panel body, not
+// inside a `field()`, so the rule that paints inputs from the theme missed it
+// and the browser drew its own control — black on a light page. It shipped that
+// way in 0.42.0 and stood in the listing screenshot. The width rule beside it
+// already named both containers; the colour rule named one.
+test('an input painted from the theme covers both containers it appears in', () => {
+    // Every rule that hands an input the theme's input background.
+    const rules = [...db.STYLE.matchAll(/([^{}]+)\{([^}]*--vscode-input-background[^}]*)\}/g)]
+        .map(([, selector]) => selector.trim().replace(/\s+/g, ' '));
+    assert.ok(rules.length, 'no rule paints an input from the theme at all');
+    assert.ok(rules.some((sel) => sel.includes('.panel-body > input')),
+        `the theme colours reach only: ${rules.join(' | ')}`);
+});
+
+// The manifest sent people to launchArgs to name a style of their own, which
+// was the only route before the panel offered them. It reads as the documented
+// way to do it, so it has to stop saying that the moment the panel exists.
+test('the manifest no longer routes custom styles through the extra arguments', () => {
+    const manifest = JSON.parse(require('node:fs').readFileSync(`${__dirname}/../package.json`, 'utf8'));
+    const doc = manifest.contributes.configuration.properties['claudeStatusline.outputStyle'].markdownDescription;
+    assert.ok(!/launchArgs/.test(doc), `the setting still points at launchArgs:\n${doc}`);
+    assert.match(doc, /output-styles/, 'it should say where a style of your own lives');
+});
+
+// A style can be chosen and its file deleted afterwards. The name still travels
+// to the client, which ignores what it cannot find, so the panel has to keep
+// showing what is set rather than falling back to a bare `style`.
+test('the heading pill shows a chosen style whose file has gone', () => {
+    const launch = db.launchTab({ outputStyle: 'Deleted style' }, {}, []);
+    const head = launch.slice(launch.indexOf('>Output style</h2>'));
+    assert.match(head.slice(0, 400), /Deleted style/);
+});

@@ -8,12 +8,39 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
-## [Unreleased]
+## [0.44.0] — 2026-08-21
+
+### Added
+
+- The output styles you wrote yourself are offered on the Launch tab, read from
+  `~/.claude/output-styles`, under the client's own five.
+- A style is named by its frontmatter `name` and by its file name when it has
+  none, which is how the client names it.
+- Each one carries its `description`, and a style that does not set
+  `keep-coding-instructions` says so, because it replaces Claude Code's
+  engineering instructions rather than adding to them.
+- The panel says where styles live whether or not you have any.
+- A quoted frontmatter value loses its quotes, the way YAML reads it, so a
+  name written `"like this"` still matches what the client is matching against.
+- The heading pill keeps showing a chosen style after its file is deleted,
+  because the name still travels to the client.
 
 ### Fixed
 
+- The Launch tab's Extra arguments field was drawn by the browser rather than
+  from the theme — a black box on a light background, which shipped in 0.42.0
+  and stood in the listing screenshot.
+- The setting's own description sent you to `launchArgs` to name a style of your
+  own, which is no longer the way to do it.
 - The marketplace description called this a 23-tab dashboard; it has 24, and a
   test now holds the sentence to what `SECTIONS` actually carries.
+
+### Documentation
+
+- The Launch screenshots are re-shot: the previous pair predates the custom-style
+  block and carries the black input this release fixes.
+- The demo data invents two output styles, one of each kind, because the real
+  list is read from disk and demo mode has no disk to read.
 
 ## [0.42.0] — 2026-08-21
 

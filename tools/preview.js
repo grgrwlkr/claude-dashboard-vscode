@@ -78,7 +78,11 @@ const workflowRuns = demo ? demo.meta.workflows : (() => {
     try { return wfm.withCost(wfm.scanRuns({ now }), { index }); } catch { return []; }
 })();
 
-const html = db.render(index, total, demo ? { ...demo.meta, system: snap } : {
+// In demo mode `snap` is null by construction, so this key used to write null
+// over whatever demo.meta carried — which is why a demo `system` could not
+// reach the page at all. Demo owns its own now; the real snapshot still wins
+// outside demo mode.
+const html = db.render(index, total, demo ? demo.meta : {
     files: stats.total,
     lastRun: now,
     history: rows,

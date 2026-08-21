@@ -219,3 +219,74 @@ test('a missing tree yields empty answers rather than throwing', () => {
     assert.equal(sys.live(nowhere).daemon.supervisorPid, 0);
     assert.equal(sys.disk(nowhere).total, 0);
 });
+
+// Custom output styles. The client names a style by its frontmatter `name` and
+// falls back to the file name, so the two have to be told apart: the file here
+// is `terse.md` and the style is "Proactive & concise", and it is the second
+// that goes into `--settings`.
+test('an output style is named by its frontmatter, not by its file', () => tree(({ root, write }) => {
+    write('output-styles/terse.md', [
+        '---',
+        'name: Proactive & concise',
+        'description: Result first, no preamble',
+        'keep-coding-instructions: true',
+        '---',
+        '',
+        'Lead with the result.',
+    ].join('\n'));
+    const [style] = sys.outputStyles(root);
+    assert.equal(style.name, 'Proactive & concise');
+    assert.equal(style.description, 'Result first, no preamble');
+    assert.equal(style.keepCoding, true);
+}));
+
+// The frontmatter is optional in practice — a file that is only instructions is
+// still a style, and the client calls it by its file name.
+test('a style with no frontmatter is named by its file and keeps no coding instructions', () => tree(({ root, write }) => {
+    write('output-styles/data-analyst.md', 'You are a data analyst.\n');
+    const [style] = sys.outputStyles(root);
+    assert.equal(style.name, 'data-analyst');
+    assert.equal(style.description, '');
+    assert.equal(style.keepCoding, false);
+}));
+
+// Degrade, never guess: no directory is not an error, and neither is a file
+// that is not a style. Only `.md` counts, and the order is stable so the panel
+// does not reshuffle between renders.
+test('output styles skip what is not a style and survive a missing directory', () => tree(({ root, write, mkdir }) => {
+    assert.deepEqual(sys.outputStyles(root), []);
+    mkdir('output-styles');
+    assert.deepEqual(sys.outputStyles(root), []);
+    write('output-styles/README.txt', 'not a style');
+    write('output-styles/zebra.md', '---\nname: Zebra\n---\nz');
+    write('output-styles/alpha.md', '---\nname: Alpha\n---\na');
+    assert.deepEqual(sys.outputStyles(root).map((s) => s.name), ['Alpha', 'Zebra']);
+}));
+
+// A `---` inside the body is not a second frontmatter block: the parser reads
+// the opening block only, or a horizontal rule would swallow the instructions.
+test('only the leading frontmatter block is parsed', () => tree(({ root, write }) => {
+    write('output-styles/x.md', [
+        '---', 'name: Real', '---', '', 'Body text.', '', '---', '', 'name: Not this', '',
+    ].join('\n'));
+    const [style] = sys.outputStyles(root);
+    assert.equal(style.name, 'Real');
+}));
+
+// The page reads one snapshot rather than calling each reader itself, so a
+// reader that is not in it is a reader the dashboard cannot see.
+test('the snapshot carries the output styles', () => tree(({ root, write }) => {
+    write('output-styles/mine.md', '---\nname: Mine\n---\nbody');
+    const snap = sys.snapshot({ root, withDisk: false });
+    assert.deepEqual(snap.outputStyles.map((s) => s.name), ['Mine']);
+}));
+
+// Frontmatter is YAML, and YAML quotes are delimiters rather than characters of
+// the value. The client parses it properly, so a name kept with its quotes here
+// would never match the name the client is matching against.
+test('a quoted frontmatter value loses its quotes, as YAML does', () => tree(({ root, write }) => {
+    write('output-styles/q.md', '---\nname: "My style"\ndescription: \'Terse, and quoted\'\n---\nbody');
+    const [style] = sys.outputStyles(root);
+    assert.equal(style.name, 'My style');
+    assert.equal(style.description, 'Terse, and quoted');
+}));

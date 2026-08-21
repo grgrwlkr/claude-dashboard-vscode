@@ -357,7 +357,7 @@ panels and the status-bar tooltips are rendered from the same sections in
 | Tab | What it answers |
 | --- | --- |
 | Settings | the extension's own settings — the bar, the reads it makes, where its items sit — edited here rather than in `settings.json` |
-| Launch | what **Open Claude Code** starts a session with: the model, the effort, the advisor and the output style, each option carrying what it is for and what it costs |
+| Launch | what **Open Claude Code** starts a session with: the model, the effort, the advisor and the output style, each option carrying what it is for and what it costs — including the styles you wrote yourself, read from `~/.claude/output-styles` |
 | Claude Code | what you have set, what you could set, and what you moved away from the default — settings files in the order the client resolves them, with the file that won each key named and the ones it shadowed counted |
 | Memory & context | the files loaded into every prompt — `CLAUDE.md`, `rules/`, project memory — sized in tokens and priced across every request made |
 | Health | settings as they resolve, MCP servers, plugins and what each ships — each marked used or idle by whether anything of it appears in the transcripts — hooks, permission rules |
@@ -463,7 +463,7 @@ All of these apply the moment they change; none needs a window reload.
 | `claudeStatusline.model` | `""` | Start the session on this model, as `claude --model <alias>`, from the aliases the client accepts: `opus`, `opus[1m]`, `sonnet`, `sonnet[1m]`, `fable`, `fable[1m]`, `haiku`, `best`, `opusplan`. A `[1m]` entry is the million-token variant of that model, not a duplicate of it. Empty passes no flag and leaves the choice to the client |
 | `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>`: `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
 | `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>`: `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |
-| `claudeStatusline.outputStyle` | `""` | Ask for an output style for the session: `default`, `Proactive`, `Explanatory`, `Learning`, `Concise`. There is no flag for it, so it travels as `--settings '{"outputStyle":"…"}'`, which merges with your settings files rather than replacing them. A style of your own goes through `launchArgs` by name |
+| `claudeStatusline.outputStyle` | `""` | Ask for an output style for the session: `default`, `Proactive`, `Explanatory`, `Learning`, `Concise`. There is no flag for it, so it travels as `--settings '{"outputStyle":"…"}'`, which merges with your settings files rather than replacing them. A style of your own is a markdown file in `~/.claude/output-styles`; the **Setup → Launch** tab lists what is there and writes the name here for you |
 | `claudeStatusline.launchArgs` | `""` | Anything else for the command line, after those: `--permission-mode acceptEdits`, an exact model id. Written as typed, so quoting is yours. User settings only, so a project cannot set it through `.vscode/settings.json` |
 | `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal, because VS Code's rename acts on the active terminal |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
@@ -500,7 +500,7 @@ thinks, whether a second model advises it, and how it answers you. That is the
 **Setup → Launch** tab, one panel per choice, each option carrying what it is for
 and what it costs:
 
-![Starting a session: six panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the output style, and any extra arguments](media/screenshots/launch-dark.png)
+![Starting a session: six panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the output style with the client's five above the ones you wrote yourself, and any extra arguments](media/screenshots/launch-dark.png)
 
 Each choice becomes one flag on the command line the button runs, and each one
 left alone passes no flag, so the client decides exactly as it did before. A

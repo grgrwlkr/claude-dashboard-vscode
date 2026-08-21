@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashboard & Statusline for Claude Code",
   "description": "Unofficial. A 24-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.42.0",
+  "version": "0.44.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -316,7 +316,7 @@
             "Leads with the result and skips preamble and narration, doing the work just as thoroughly."
           ],
           "default": "",
-          "markdownDescription": "Ask for an output style for the session — how Claude answers, not what it can do.\n\nThere is no command-line flag for this: `outputStyle` is an ordinary setting, so it travels as `claude --settings '{\"outputStyle\":\"…\"}'`, which **merges** with your settings files rather than replacing them — every other key keeps whatever value it already had.\n\nThe list is the client's built-in styles. A style of your own lives in `~/.claude/output-styles`; pass its name through `claudeStatusline.launchArgs` instead."
+          "markdownDescription": "Ask for an output style for the session — how Claude answers, not what it can do.\n\nThere is no command-line flag for this: `outputStyle` is an ordinary setting, so it travels as `claude --settings '{\"outputStyle\":\"…\"}'`, which **merges** with your settings files rather than replacing them — every other key keeps whatever value it already had.\n\nThe list here is the client's built-in styles. A style of your own is a markdown file in `~/.claude/output-styles`, named by its `name` field or by the file name — pick one on the dashboard's **Setup \u2192 Launch** tab, which lists what is on disk. Its name goes in this setting verbatim; the list above is not exhaustive, so a name outside it is expected here."
         },
         "claudeStatusline.launchArgs": {
           "type": "string",

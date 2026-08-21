@@ -363,6 +363,17 @@ function demo(now = Date.now(), { weeklyPct = 57 } = {}) {
                 fmtDuration: (ms) => `${Math.floor(ms / 3600000)}h${Math.round((ms % 3600000) / 60000)}m`,
                 tok: wfm.tokenLabel, shortModel: db.shortModel,
             }, { stale: false, updatedAt: nowS - 40 }),
+            // The Launch tab is photographed for the listing, and the styles it
+            // offers are read from disk — which demo mode has none of. Two
+            // invented ones, one of each kind: a style that keeps the coding
+            // instructions and one that does not, so the warning meta appears
+            // in the frame rather than only in the code.
+            system: {
+                outputStyles: [
+                    { name: 'Diagrams first', description: 'Leads every explanation with a Mermaid diagram', keepCoding: true },
+                    { name: 'Data analyst', description: 'Reads data and answers about it, with no software engineering', keepCoding: false },
+                ],
+            },
             config: {
                 segments: seg.DEFAULT_SEGMENTS,
                 defaults: seg.DEFAULT_SEGMENTS,

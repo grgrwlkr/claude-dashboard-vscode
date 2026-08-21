@@ -158,6 +158,63 @@ function hostOf(url) {
 }
 
 /**
+ * The output styles you have written yourself, read from `~/.claude/output-styles`.
+ *
+ * A style is a markdown file whose leading `---` block is metadata. The client
+ * names it by that block's `name` and falls back to the file name, and it is the
+ * name — not the file — that goes into `outputStyle`, so the two are kept apart
+ * here. Only the leading block is read: a `---` further down is a horizontal
+ * rule in somebody's instructions, not a second header.
+ *
+ * The parse is deliberately shallow. This is somebody else's format, so a line
+ * that does not look like `key: value` is skipped rather than reported, and an
+ * unreadable file costs one style rather than the list.
+ *
+ * Project and managed styles exist too, and are left out on purpose: the setting
+ * this list feeds is one string that travels to every window, so a style found in
+ * one repository would name nothing in the next.
+ */
+function outputStyles(root = ROOT) {
+    const dir = path.join(root, 'output-styles');
+    const out = [];
+    for (const entry of listDir(dir)) {
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        const file = path.join(dir, entry.name);
+        let text;
+        try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+        const meta = frontmatter(text);
+        out.push({
+            name: meta.name || entry.name.replace(/\.md$/, ''),
+            description: meta.description || '',
+            // Absent means absent: a custom style drops Claude Code's own
+            // engineering instructions unless the file asks to keep them.
+            keepCoding: meta['keep-coding-instructions'] === 'true',
+            file,
+        });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The leading `---` block as a flat map of strings, empty when there is none. */
+function frontmatter(text) {
+    const lines = String(text).split(/\r?\n/);
+    if (lines[0] !== '---') return {};
+    const end = lines.indexOf('---', 1);
+    if (end < 0) return {};
+    const out = {};
+    for (const line of lines.slice(1, end)) {
+        const at = line.indexOf(':');
+        if (at < 1) continue;
+        // YAML quotes delimit a value rather than belong to it, and the
+        // client parses this properly — a name kept with its quotes here would
+        // never match the name the client matches against.
+        out[line.slice(0, at).trim()] = line.slice(at + 1).trim()
+            .replace(/^(['"])([\s\S]*)\1$/, '$2');
+    }
+    return out;
+}
+
+/**
  * Installed plugins and what each one brings. The components are counted from
  * the plugin's own directory rather than from a manifest: a marketplace entry
  * says what the plugin claims, the directory says what it actually ships.
@@ -750,6 +807,7 @@ function snapshot({ root = ROOT, workspace = '', projects = [], sessionProjects 
         at: Date.now(),
         versions: versions(current),
         settings: settingsOf(workspace, root),
+        outputStyles: outputStyles(root),
         hooks: hooksOf(workspace, root),
         permissions: permissionsOf(workspace, root),
         mcp: mcpServers(config),
@@ -770,5 +828,6 @@ module.exports = {
     ROOT, CONFIG, CHARS_PER_TOKEN,
     settingsChain, settingsOf, hooksOf, permissionsOf, mcpServers, plugins, componentsOf,
     jobs, live, tasks, disk, dirSize, contextBudget, changelog, compareVersions, pluginUpdates,
+    outputStyles,
     projectMetrics, promptLog, versions, runningVersion, snapshot, shortPath,
 };

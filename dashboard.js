@@ -2610,13 +2610,26 @@ function settingsTab(config) {
 const statePills = (...items) => `<div class="pills">${items.filter(Boolean).map(([text, value, muted]) =>
     `<span class="pill${muted ? ' pill-muted' : ''}">${esc(text)} <b>${esc(value)}</b></span>`).join('')}</div>`;
 
-function launchTab(config, total) {
+function launchTab(config, total, styles) {
     const cfg = config || {};
     const session = tierOf(cfg.model);
     const named = (value, list) => {
         const hit = list.find(([v]) => v === value);
         return hit ? hit[1] : '';
     };
+
+    // The styles on disk, as `cards` takes them. A custom style is named by
+    // itself: there is no shorter label to give it, because the name is what
+    // travels into `--settings` and what the client will match against.
+    //
+    // `keep-coding-instructions` is the one thing here worth a warning. It
+    // defaults to false, so a style that does not ask for them replaces Claude
+    // Code's engineering instructions rather than adding to them — a fact that
+    // otherwise announces itself only after the session has started answering.
+    const ownStyles = (styles || []).map((s) => [
+        s.name, s.name, s.description || 'A style of your own',
+        s.keepCoding ? '' : 'without the coding instructions',
+    ]);
 
     // Each model carries the tier it resolves to, so the advisor list below can
     // be re-ranked in the page when this choice changes rather than only when
@@ -2680,9 +2693,20 @@ function launchTab(config, total) {
         aside: statePills(['advisor', named(cfg.advisor || '', ADVISORS), !cfg.advisor],
             cfg.advisor ? ['', ADVISOR_ABOUT[cfg.advisor][1]] : null),
     })}
-        ${panel('Output style', cards('outputStyle', STYLES.map(([v, l]) => [v, l, STYLE_ABOUT[v]]), cfg.outputStyle || ''), {
-        note: 'How Claude answers. There is no flag for it — it travels as <code>--settings</code> JSON, which <b>merges</b> with your settings files rather than replacing them. A style of your own lives in <code>~/.claude/output-styles</code>; pass its name through the extra arguments.',
-        aside: statePills(['style', named(cfg.outputStyle || '', STYLES), !cfg.outputStyle]),
+        ${panel('Output style',
+        cards('outputStyle', STYLES.map(([v, l]) => [v, l, STYLE_ABOUT[v]]), cfg.outputStyle || '')
+        + (ownStyles.length
+            ? `<div class="cards-head">Your own</div>${cards('outputStyle', ownStyles, cfg.outputStyle || '')}`
+            : ''), {
+        note: 'How Claude answers. There is no flag for it — it travels as <code>--settings</code> JSON, which <b>merges</b> with your settings files rather than replacing them. A style of your own is a markdown file in <code>~/.claude/output-styles</code>, named by its <code>name</code> field or by the file; put one there and it appears here.',
+        // A custom style is its own label, so the pill reads the same list the
+        // cards were built from rather than the client's five.
+        // Falling through to the raw value matters when a style is chosen and
+        // its file deleted afterwards: the name still travels to the client, so
+        // the panel says what is set rather than an empty `style`.
+        aside: statePills(['style',
+            named(cfg.outputStyle || '', STYLES.concat(ownStyles.map(([v, l]) => [v, l]))) || cfg.outputStyle,
+            !cfg.outputStyle]),
     })}
         ${panel('Extra arguments',
         `<input id="launchArgs" class="wide" type="text" spellcheck="false"
@@ -3481,7 +3505,7 @@ ${cacheTab(total)}
 ${frictionTab(total)}
 ${limitsTab(meta.history)}
 ${settingsTab(meta.config)}
-${launchTab(meta.config, total)}
+${launchTab(meta.config, total, (meta.system || {}).outputStyles)}
 ${healthTab(total, meta.system, meta.config || {})}
 ${jobsTab(meta.system)}
 ${liveTab(meta.system)}
