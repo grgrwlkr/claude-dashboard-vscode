@@ -8,6 +8,13 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
+## [Unreleased]
+
+### Fixed
+
+- The marketplace description called this a 23-tab dashboard; it has 24, and a
+  test now holds the sentence to what `SECTIONS` actually carries.
+
 ## [0.42.0] — 2026-08-21
 
 ### Changed

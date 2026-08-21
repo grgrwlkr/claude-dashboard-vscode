@@ -1826,3 +1826,15 @@ test('the zone always reaches the mark, whatever the printed plan rounds to', ()
         assert.ok(Math.abs(edge - mark) < 0.02, `${pct}%: the ${zone} edge sits ${edge} against a mark at ${mark}`);
     }
 });
+
+// The listing's own sentence about itself. It said "23-tab" for the whole of
+// 0.42.0's development, because the count lives in prose and the tabs live in
+// SECTIONS, and nothing joined them — the number was noticed in an Open VSX API
+// response after the release had already gone out.
+test('the marketplace description counts the tabs the page actually has', () => {
+    const manifest = JSON.parse(require('node:fs').readFileSync(`${__dirname}/../package.json`, 'utf8'));
+    const tabs = db.SECTIONS.reduce((n, [, , list]) => n + list.length, 0);
+    const claimed = manifest.description.match(/(\d+)-tab/);
+    assert.ok(claimed, `the description no longer says "<n>-tab": ${manifest.description}`);
+    assert.equal(Number(claimed[1]), tabs);
+});
