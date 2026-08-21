@@ -2343,10 +2343,77 @@ const MODELS = [
     ['haiku', 'haiku'],
     ['best', 'best'], ['opusplan', 'opus in plan mode'],
 ];
+/**
+ * What each alias is for, in the client's own words — these sentences are the
+ * strings the `/model` picker shows, not a paraphrase of them — plus the rate
+ * and the window, which is what the choice actually costs.
+ *
+ * `best` is not "whichever suits the task", which is what this extension's
+ * manifest said for months: the docs are specific, and it is a question of what
+ * the organization has access to.
+ */
+const MODEL_ABOUT = {
+    '': ['', 'No --model flag — whatever the client starts on by itself', ''],
+    opus: ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 200k'],
+    'opus[1m]': ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 1M'],
+    sonnet: ['Sonnet 5', 'Efficient for routine tasks', '$3/$15 · 200k'],
+    'sonnet[1m]': ['Sonnet 5', 'Efficient for routine tasks', '$3/$15 · 1M'],
+    fable: ['Fable 5', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 200k'],
+    'fable[1m]': ['Fable 5', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 1M'],
+    haiku: ['Haiku 4.5', 'Fastest for quick answers', '$1/$5 · 200k'],
+    best: ['Fable 5 or Opus 5', 'Fable where your organization has access to it, latest Opus otherwise', ''],
+    opusplan: ['Opus 5 → Sonnet 5', 'Opus while planning, Sonnet for execution — the switch also drops the prompt cache', '$5/$25 → $3/$15'],
+};
 const EFFORTS = [
     ['', 'client decides'],
     ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max'],
 ];
+// Anthropic publishes no multiplier for effort — the docs say only that low is
+// cheaper and that max "may show diminishing returns and is prone to
+// overthinking". What each level costs here is measured instead, from the
+// index's own (model, effort) aggregate.
+const EFFORT_ABOUT = {
+    '': 'No --effort flag is passed',
+    low: 'Shallowest reasoning, fastest answers',
+    medium: 'Reduces token usage where some intelligence can be traded off',
+    high: 'Balances tokens and intelligence — the default on every model but Opus 4.7',
+    xhigh: 'Deeper reasoning at higher token spend',
+    max: 'Can improve demanding tasks, but shows diminishing returns and overthinks',
+};
+const STYLE_ABOUT = {
+    '': 'No style is asked for — whatever your settings files say',
+    default: "Claude Code's ordinary system prompt for software engineering",
+    Proactive: 'Executes immediately, assumes rather than pausing for routine decisions',
+    Explanatory: 'Adds educational insights between the steps of a task',
+    Learning: 'Insights plus TODO(human) markers for you to fill in',
+    Concise: 'Leads with the result and skips preamble and narration',
+};
+/**
+ * The tiers an advisor is ranked against. The client refuses a pairing whose
+ * advisor sits below the model it advises, so the page can say which options are
+ * dead before the client does — and `fable` is the only tier above an Opus
+ * session, which is the whole reason that pairing exists.
+ */
+const TIERS = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
+const ADVISOR_ABOUT = {
+    opus: ['Opus 5', '$5/$25'], sonnet: ['Sonnet 5', '$3/$15'],
+    fable: ['Fable 5', '$10/$50'], haiku: ['Haiku 4.5', '$1/$5'],
+};
+/**
+ * The tier a `--model` value resolves to, or '' when it does not name one.
+ *
+ * `opusplan` is two models, and this ranks it by the stronger half. That is an
+ * assumption, not a documented rule: the docs describe what opusplan switches
+ * between but say nothing about which half an advisor is checked against. It
+ * errs towards refusing a pairing that might have been allowed during the Sonnet
+ * phase, which is the safe direction — the client would reject it at the wrong
+ * moment otherwise, mid-session and with no explanation.
+ */
+const tierOf = (alias) => {
+    const base = String(alias || '').replace(/\[1m\]$/, '');
+    if (base === 'opusplan') return 'opus';
+    return TIERS[base] ? base : '';
+};
 // `--advisor` is a real flag the client keeps out of its own `--help`, and it
 // takes an alias or a full id like `--model` does. The variants with a context
 // suffix are left out: an advisor reads the transcript it is handed rather than
@@ -2387,10 +2454,20 @@ const field = (label, hint, control, forId) => `<div class="field"${forId ? '' :
 
 // A choice whose options need a sentence each: the option is the card, the
 // sentence is under its name, and the whole card is the click target.
-const cards = (name, options, chosen) => `<div class="cards">${options.map(([value, label, about]) => `
-        <label class="card-opt">
-          <input type="radio" name="${name}" value="${esc(value)}"${value === chosen ? ' checked' : ''}>
-          <span class="card-body"><span class="card-name">${esc(label)}</span><span class="card-about">${esc(about)}</span></span>
+/**
+ * A choice where each option earns a sentence. Two optional columns past the
+ * description: `meta` is a figure the options can be compared by — a price, a
+ * measured cost — and `why` is the reason an option cannot be picked, which
+ * dims the row rather than hiding it. A vanished option is a puzzle; a struck
+ * one explains itself.
+ */
+const cards = (name, options, chosen) => `<div class="cards">${options.map(([value, label, about, meta, why, data]) => `
+        <label class="card-opt${why ? ' card-off' : ''}"${Object.entries(data || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('')}>
+          <input type="radio" name="${name}" value="${esc(value)}"${value === chosen ? ' checked' : ''}${why ? ' disabled' : ''}>
+          <span class="card-body"><span class="card-name">${esc(label)}</span><span class="card-about"${
+    (data || {}).base ? ` data-base="${esc(data.base)}"` : ''}>${esc(about)}</span></span>
+          <span class="card-why">${esc(why || '')}</span>
+          ${meta ? `<span class="card-meta">${esc(meta)}</span>` : ''}
         </label>`).join('')}</div>`;
 
 // A switch with nothing written beside it: on this tab the name and the sentence
@@ -2464,6 +2541,7 @@ function settingsTab(config) {
     })}
         ${panel('Status bar', editor, {
         note: 'One line per status-bar item, left to right. Text outside <code>{…}</code> is yours; <code>[square brackets]</code> mark a group that disappears whole when a placeholder inside it has nothing to say. A segment with nothing to show hides itself.',
+        aside: statePills(['', `${segments.length} segment${segments.length === 1 ? '' : 's'}`]),
     })}
         ${panel('Placeholders', paletteHtml, {
         note: 'Click one to insert it into the segment you last edited. The value beside each name is what it says on this machine right now.',
@@ -2484,24 +2562,12 @@ function settingsTab(config) {
             'monthlyBudget'),
     ].join(''), {
         note: 'The same switches that sit beside the things they govern — changing one here changes it there, and both write your own settings straight away.',
-    })}
-        ${panel('Starting a session', [
-        field('Open Claude Code', 'where the button and the command put a session',
-            cards('openLocation', PLACES, cfg.openLocation || 'activeGroup')),
-        field('Model', 'the session starts on it, as <code>claude --model</code>',
-            chips('model', MODELS, cfg.model || '')),
-        field('Effort', 'and at this level, as <code>claude --effort</code>',
-            chips('effort', EFFORTS, cfg.effort || '')),
-        field('Advisor', 'a second, stronger model reviews the work, as <code>claude --advisor</code>',
-            chips('advisor', ADVISORS, cfg.advisor || '')),
-        field('Output style', 'how Claude answers, as the <code>outputStyle</code> setting for this session',
-            chips('outputStyle', STYLES, cfg.outputStyle || '')),
-        field('Extra arguments', 'anything else for that command line, written as typed — user settings only',
-            `<input id="launchArgs" class="wide" type="text" spellcheck="false"
-                    placeholder="--permission-mode acceptEdits --fallback-model sonnet"
-                    value="${esc(cfg.launchArgs || '')}">`, 'launchArgs'),
-    ].join(''), {
-        note: 'What <b>Open Claude Code</b> runs, in the terminal it opens: the three choices below the place become <code>--model</code>, <code>--effort</code> and <code>--advisor</code> on one command line, and each of them left alone passes no flag at all. <b>Claude: Open Claude Code with…</b> asks for a model and an effort instead, for a single run.',
+        aside: statePills(
+            ['timer', cfg.autoRefresh !== false ? 'on' : 'off', cfg.autoRefresh === false],
+            ['limits', cfg.fetchLimits !== false ? 'on' : 'off', cfg.fetchLimits === false],
+            ['marketplaces', cfg.checkPluginUpdates ? 'on' : 'off', !cfg.checkPluginUpdates],
+            Number(cfg.monthlyBudget) > 0
+                ? ['budget', `$${Number(cfg.monthlyBudget)}`] : ['budget', 'none', true]),
     })}
         ${panel('Behaviour', [
         field('Side of the bar', 'where the items sit',
@@ -2510,15 +2576,161 @@ function settingsTab(config) {
             `<input id="priority" type="number" value="${Number(cfg.priority) || 100}">`, 'priority'),
         field('Refresh interval', 'seconds between the expensive reads',
             `<input id="refreshInterval" type="number" min="15" value="${Number(cfg.refreshInterval) || 60}">`, 'refreshInterval'),
-    ].join(''))}
+    ].join(''), {
+        aside: statePills(['side', cfg.alignment || 'right'],
+            ['priority', String(Number(cfg.priority) || 100)],
+            ['every', `${Number(cfg.refreshInterval) || 60}s`]),
+    })}
         <div class="save-bar">
           <span class="save-where">Save to</span>
           ${chips('scope', SCOPES, 'global')}
-          <span class="dirty" id="dirty" hidden>unsaved changes</span>
-          <button class="btn primary" id="save" disabled>Save</button>
-          <span class="saved" id="saved" hidden>Saved</span>
+          <span class="dirty" hidden>unsaved changes</span>
+          <button class="btn primary save-go" disabled>Save</button>
+          <span class="saved" hidden>Saved</span>
         </div>
     </section>`;
+}
+
+/**
+ * What the extension starts the client with — the half of the old Settings tab
+ * that was never about the extension at all.
+ *
+ * Every choice here carries what it is for, because the names alone do not say:
+ * `opus 1M` against `opus`, `xhigh` against `max`, `best` against `opusplan`.
+ * Two of them carry more than a sentence — the model, where a rate and a window
+ * make the options comparable, and the advisor, where the client's own ranking
+ * rule decides which options are live at all.
+ */
+/**
+ * The state pills a panel wears in its heading, the way every panel on Now does:
+ * what the thing is set to, before you read a single control. A choice left at
+ * "client decides" says so in the muted tone rather than going silent, because a
+ * heading with no pill reads as a panel that has nothing to report.
+ */
+const statePills = (...items) => `<div class="pills">${items.filter(Boolean).map(([text, value, muted]) =>
+    `<span class="pill${muted ? ' pill-muted' : ''}">${esc(text)} <b>${esc(value)}</b></span>`).join('')}</div>`;
+
+function launchTab(config, total) {
+    const cfg = config || {};
+    const session = tierOf(cfg.model);
+    const named = (value, list) => {
+        const hit = list.find(([v]) => v === value);
+        return hit ? hit[1] : '';
+    };
+
+    // Each model carries the tier it resolves to, so the advisor list below can
+    // be re-ranked in the page when this choice changes rather than only when
+    // the page is next drawn.
+    const modelOpts = MODELS.map(([value, label]) => {
+        const [real, about, meta] = MODEL_ABOUT[value] || ['', '', ''];
+        return [value, label, real ? `${real} — ${about}` : about, meta, '',
+            { tier: tierOf(value), real: real || label }];
+    });
+
+    // An advisor below the session's own tier is refused by the client, so it is
+    // dimmed and disabled here with the reason, rather than offered and then
+    // rejected by the client.
+    const advisorOpts = ADVISORS.map(([value, label]) => {
+        if (!value) return [value, label, "No advisor — the client's own setting stands"];
+        const [real, rate] = ADVISOR_ABOUT[value];
+        const above = session ? Object.keys(TIERS).filter((t) => TIERS[t] > TIERS[session]) : [];
+        const ok = !session || TIERS[value] >= TIERS[session];
+        const sole = ok && above.length === 1 && above[0] === value;
+        const same = ok && session && TIERS[value] === TIERS[session];
+        // The sentence without its ranking clause, kept so the page can rewrite
+        // the clause when the model changes without losing the sentence.
+        const base = `${real} reads the whole conversation and advises`;
+        const about = base
+            + (sole ? ` — the only tier above ${MODEL_ABOUT[session][0]}` : '')
+            + (same ? ' — the same tier: a second opinion rather than a stronger one' : '');
+        return [value, label, about, rate,
+            ok ? '' : `below ${MODEL_ABOUT[session][0]} — the client refuses this pair`,
+            // The page re-ranks this list when the model changes; these are the
+            // pieces it needs to rebuild a row's sentence without a round trip.
+            { tier: value, rank: String(TIERS[value]), real, base }];
+    });
+
+    // Effort is billed as output tokens and its scale is calibrated per model, so
+    // the only honest figure is one measured from this machine's own replies at
+    // the model the session will start on.
+    const seen = effortSpend(total, cfg.model);
+    const effortOpts = EFFORTS.map(([value, label]) =>
+        [value, label, EFFORT_ABOUT[value], seen[value] || '']);
+
+    const modelMeta = (MODEL_ABOUT[cfg.model || ''] || ['', '', ''])[2];
+    const args = (cfg.launchArgs || '').trim();
+    const flags = args ? args.split(/\s+/).filter((a) => a.startsWith('-')).length : 0;
+
+    return `<section class="tab" data-tab="launch" hidden>
+        ${panel('Where it opens', cards('openLocation', PLACES, cfg.openLocation || 'activeGroup'), {
+        note: 'What <b>Open Claude Code</b> runs, and where the session lands. <b>Claude: Open Claude Code with…</b> asks for a model and an effort instead, for a single run.',
+        aside: statePills(['opens', named(cfg.openLocation || 'activeGroup', PLACES)]),
+    })}
+        ${panel('Model', cards('model', modelOpts, cfg.model || ''), {
+        note: 'The session starts on it, as <code>claude --model</code>. Rates are per million tokens, in and out; the window is what the model is given to remember. Left alone, no flag is passed at all.',
+        aside: statePills(['model', named(cfg.model || '', MODELS), !cfg.model],
+            modelMeta ? ['', modelMeta] : null),
+    })}
+        ${panel('Effort', cards('effort', effortOpts, cfg.effort || ''), {
+        note: 'How hard the model thinks, as <code>claude --effort</code>. Effort is billed as output tokens, and its scale is calibrated per model — so the figures beside each level are measured from your own replies, not quoted from a table.',
+        aside: statePills(['effort', named(cfg.effort || '', EFFORTS), !cfg.effort]),
+    })}
+        ${panel('Advisor', cards('advisor', advisorOpts, cfg.advisor || ''), {
+        note: 'A second model reads the whole conversation and advises the one doing the work, as <code>claude --advisor</code>. It must rank at or above the model it advises — pairings the client would refuse are dimmed here, with the reason, rather than rejected later. The advisor is billed for re-reading the conversation on every call.',
+        aside: statePills(['advisor', named(cfg.advisor || '', ADVISORS), !cfg.advisor],
+            cfg.advisor ? ['', ADVISOR_ABOUT[cfg.advisor][1]] : null),
+    })}
+        ${panel('Output style', cards('outputStyle', STYLES.map(([v, l]) => [v, l, STYLE_ABOUT[v]]), cfg.outputStyle || ''), {
+        note: 'How Claude answers. There is no flag for it — it travels as <code>--settings</code> JSON, which <b>merges</b> with your settings files rather than replacing them. A style of your own lives in <code>~/.claude/output-styles</code>; pass its name through the extra arguments.',
+        aside: statePills(['style', named(cfg.outputStyle || '', STYLES), !cfg.outputStyle]),
+    })}
+        ${panel('Extra arguments',
+        `<input id="launchArgs" class="wide" type="text" spellcheck="false"
+                placeholder="--permission-mode acceptEdits --fallback-model sonnet"
+                value="${esc(cfg.launchArgs || '')}">`, {
+        note: 'Anything else for that command line, written as typed — user settings only.',
+        aside: statePills(flags ? ['', `${flags} extra flag${flags === 1 ? '' : 's'}`] : ['', 'none', true]),
+    })}
+        <div class="save-bar">
+          <span class="save-where">Save to</span>
+          ${chips('scope', SCOPES, 'global')}
+          <span class="dirty" hidden>unsaved changes</span>
+          <button class="btn primary save-go" disabled>Save</button>
+          <span class="saved" hidden>Saved</span>
+        </div>
+    </section>`;
+}
+
+/**
+ * Output per reply at each effort level, for the model a session would start on.
+ * A level with too few replies behind it gets no ratio at all: a figure computed
+ * from a handful of them reads as a measurement and is a coincidence.
+ */
+function effortSpend(total, modelAlias) {
+    const out = {};
+    const efforts = (total && total.efforts) || {};
+    const tier = tierOf(modelAlias);
+    const rows = [];
+    for (const [key, bucket] of Object.entries(efforts)) {
+        const [model, effort] = key.split('|');
+        if (!effort || !bucket.msgs) continue;
+        // Matched on the tier's name inside the model id. For `opusplan` that
+        // means the Opus half only, so its figures are the Opus phase rather
+        // than the mixture the session would actually run — approximate, and
+        // approximate in the expensive direction.
+        if (tier && !String(model).includes(tier)) continue;
+        rows.push([effort, bucket.msgs, bucket.out / bucket.msgs]);
+    }
+    if (rows.length < 2) return out;
+    // The level with the most replies behind it is the baseline: it is the one
+    // whose average is least likely to be a handful of unusual tasks.
+    const base = rows.reduce((a, b) => (b[1] > a[1] ? b : a));
+    for (const [effort, msgs, per] of rows) {
+        out[effort] = msgs < 300
+            ? `only ${msgs} replies — too few to compare`
+            : `${Math.round(per)} out/reply · ×${(per / base[2]).toFixed(2).replace(/0$/, '')} vs ${base[0]}`;
+    }
+    return out;
 }
 
 // --- page -------------------------------------------------------------------
@@ -2842,6 +3054,53 @@ if (list && api) {
     });
   });
 
+  // The client refuses an advisor ranked below the model it advises, and the
+  // page draws that rule when it is built. It has to hold while you are still
+  // choosing: picking Opus and watching sonnet stay live until the next redraw
+  // is worse than no ranking at all, because the page looked as though it had
+  // checked. Everything needed sits in data attributes the markup already
+  // carries — no round trip to the extension.
+  const rankAdvisors = () => {
+    const model = document.querySelector('input[name="model"]:checked');
+    const row = model && model.closest('.card-opt');
+    const tier = row ? row.dataset.tier : '';
+    const real = row ? row.dataset.real : '';
+    const rows = [...document.querySelectorAll('.card-opt[data-rank]')];
+    if (!rows.length) return;
+    // The session's own rank, read off the advisor row that names the same tier.
+    const self = rows.find((r) => r.dataset.tier === tier);
+    const mine = tier && self ? Number(self.dataset.rank) : 0;
+    const above = rows.map((r) => Number(r.dataset.rank)).filter((n) => n > mine);
+    for (const r of rows) {
+      const rank = Number(r.dataset.rank);
+      const ok = !tier || rank >= mine;
+      const input = r.querySelector('input');
+      // Put it back as well as take it away: a one-way pass would leave an
+      // option dead after a single visit to a stronger model.
+      input.disabled = !ok;
+      r.classList.toggle('card-off', !ok);
+      const why = r.querySelector('.card-why');
+      if (why) why.textContent = ok ? '' : 'below ' + real + ' — the client refuses this pair';
+      // A refused option cannot stay the chosen one.
+      if (!ok && input.checked) {
+        input.checked = false;
+        const off = document.querySelector('input[name="advisor"][value=""]');
+        if (off) off.checked = true;
+      }
+      const about = r.querySelector('.card-about');
+      if (about && about.dataset.base) {
+        const sole = ok && above.length === 1 && above[0] === rank;
+        const same = ok && tier && rank === mine;
+        about.textContent = about.dataset.base
+          + (sole ? ' — the only tier above ' + real : '')
+          + (same ? ' — the same tier: a second opinion rather than a stronger one' : '');
+      }
+    }
+  };
+  for (const input of document.querySelectorAll('input[name="model"]')) {
+    input.addEventListener('change', rankAdvisors);
+  }
+
   // Every choice on the tab is a radio group now, so the value is whichever of
   // them is checked. The fallback is for a group that somehow has none — a
   // saved settings file naming a value the page does not offer.
@@ -2855,28 +3114,41 @@ if (list && api) {
   // rest rather than leaving it lit for the rest of the visit.
   const formState = () => JSON.stringify(settingsToSave());
   let atRest = formState();
-  const saveBtn = document.getElementById('save');
-  const dirtyMark = document.getElementById('dirty');
+  // One form, two tabs, two bars. The values were never the problem — picked()
+  // already reads the whole document — but the listener was bound to the
+  // settings tab alone, so a model chosen on Launch left Save disabled with
+  // nowhere to write it. Bound by class rather than by id: a third tab of
+  // settings would be wired by this code as it stands.
+  // (No backticks in here: this script is itself a template literal.)
+  const saveBtns = [...document.querySelectorAll('.save-go')];
+  const dirtyMarks = [...document.querySelectorAll('.dirty')];
   const settleSave = () => {
     const changed = formState() !== atRest;
-    saveBtn.disabled = !changed;
-    dirtyMark.hidden = !changed;
+    for (const b of saveBtns) b.disabled = !changed;
+    for (const d of dirtyMarks) d.hidden = !changed;
   };
   // A radio, a checkbox and a typed character all reach this: the input event
-  // covers typing, change covers the rest, and the section is the whole form.
-  const form = document.querySelector('section.tab[data-tab="settings"]');
-  form.addEventListener('input', settleSave);
-  form.addEventListener('change', settleSave);
+  // covers typing, change covers the rest, and every tab holding a field is part
+  // of the same form.
+  for (const form of document.querySelectorAll('section.tab[data-tab="settings"], section.tab[data-tab="launch"]')) {
+    form.addEventListener('input', settleSave);
+    form.addEventListener('change', settleSave);
+  }
 
-  document.getElementById('save').addEventListener('click', () => {
-    atRest = formState();
-    settleSave();
-    api.postMessage({
-      type: 'save',
-      scope: picked('scope', 'global'),
-      settings: settingsToSave(),
+  for (const btn of saveBtns) {
+    btn.addEventListener('click', () => {
+      atRest = formState();
+      settleSave();
+      api.postMessage({
+        type: 'save',
+        // Both bars carry scope chips under one radio name, so they are a single
+        // group the browser keeps in step — reading it per bar would find the
+        // unchecked copy and silently fall back to global.
+        scope: picked('scope', 'global'),
+        settings: settingsToSave(),
+      });
     });
-  });
+  }
 
   function settingsToSave() {
     return {
@@ -2920,9 +3192,12 @@ if (list && api) {
       }
     }
     if (msg.type === 'saved') {
-      const badge = document.getElementById('saved');
-      badge.hidden = false;
-      setTimeout(() => { badge.hidden = true; }, 2000);
+      // Both bars acknowledge: the tab that was not being looked at is the one
+      // you switch to next, and a bar that never says "Saved" reads as one that
+      // did not.
+      const badges = [...document.querySelectorAll('.saved')];
+      for (const b of badges) b.hidden = false;
+      setTimeout(() => { for (const b of badges) b.hidden = true; }, 2000);
     }
   });
 
@@ -3127,16 +3402,24 @@ const SECTIONS = [
         ['friction', 'Friction'],
         ['limits', 'Limits'],
     ]],
+    // Setup is what is set up: this extension, the session it starts, and how
+    // the client is configured. Machine is what is merely happening on the
+    // machine right now — observation rather than settings. They were one
+    // section of ten tabs, twice the size of any other, and the half that was
+    // not settings is what made it unreadable.
     ['setup', 'Setup', [
         ['settings', 'Settings'],
+        ['launch', 'Launch'],
+        ['client', 'Claude Code'],
+        ['context', 'Memory & context'],
         ['health', 'Health'],
-        ['jobs', 'Background jobs'],
+        ['changelog', 'Changelog'],
+    ]],
+    ['machine', 'Machine', [
         ['live', 'Live now'],
+        ['jobs', 'Background jobs'],
         ['tasks', 'Task lists'],
         ['disk', 'Disk'],
-        ['context', 'Memory & context'],
-        ['client', 'Claude Code'],
-        ['changelog', 'Changelog'],
     ]],
 ];
 
@@ -3198,6 +3481,7 @@ ${cacheTab(total)}
 ${frictionTab(total)}
 ${limitsTab(meta.history)}
 ${settingsTab(meta.config)}
+${launchTab(meta.config, total)}
 ${healthTab(total, meta.system, meta.config || {})}
 ${jobsTab(meta.system)}
 ${liveTab(meta.system)}
@@ -3214,7 +3498,7 @@ module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
-    overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab,
+    overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab, launchTab,
     limitsTab, weekLabel, nowTab, sidebarNow, sidebarPage, sidebarSections, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     // The places a session can be opened in — the cards on the Settings tab and,

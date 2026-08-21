@@ -305,6 +305,37 @@ function demoIndex(over = {}) {
     };
 }
 
+// Setup used to carry ten tabs while the other sections carried one, four, five
+// and four — and half of those ten were not settings at all but observation:
+// which sessions are alive, what the background jobs are doing, what is on disk.
+// Splitting on that line puts both halves back in the range the rest live in,
+// and gives the extension's own settings room to separate from what it launches
+// the client with.
+test('Setup holds what is set up and Machine holds what is merely happening', () => {
+    const ids = Object.fromEntries(db.SECTIONS.map(([id, , items]) => [id, items.map(([t]) => t)]));
+
+    assert.deepEqual(ids.setup, ['settings', 'launch', 'client', 'context', 'health', 'changelog']);
+    assert.deepEqual(ids.machine, ['live', 'jobs', 'tasks', 'disk']);
+
+    // Machine comes last, after Setup: it is where you look when something is
+    // wrong, not where you go to set something up.
+    const order = db.SECTIONS.map(([id]) => id);
+    assert.deepEqual(order, ['now', 'spend', 'work', 'efficiency', 'setup', 'machine']);
+
+    // No tab was lost or duplicated by the move.
+    const all = db.SECTIONS.flatMap(([, , items]) => items.map(([t]) => t));
+    assert.equal(new Set(all).size, all.length, 'a tab id appears in two sections');
+    for (const id of ['settings', 'health', 'jobs', 'live', 'tasks', 'disk', 'context', 'client', 'changelog']) {
+        assert.ok(all.includes(id), `${id} went missing in the split`);
+    }
+    assert.ok(all.includes('launch'), 'launch is the one tab this adds');
+
+    // And every section is now within one of the others in size — the imbalance
+    // that made Setup unreadable is what this test is really about.
+    const sizes = db.SECTIONS.map(([, , items]) => items.length);
+    assert.ok(Math.max(...sizes) <= 6, `a section carries ${Math.max(...sizes)} tabs`);
+});
+
 test('render produces one pane per tab and escapes hostile project names', () => {
     const index = demoIndex();
     const total = ix.summarize(index);
@@ -1347,15 +1378,131 @@ test('the hover panel has an opaque base under whatever the theme provides', () 
 // What a session starts with is not what the status bar does, and four fields
 // about one command line read as a list of unrelated switches when they sit
 // among them. They get a panel, and the panel comes before the bar's own.
-test('what a session starts with has a panel of its own', () => {
-    const html = db.settingsTab({ segments: ['{today}'], palette: [], presets: [] });
-    const launch = html.indexOf('Starting a session');
-    const behaviour = html.indexOf('Behaviour');
-    assert.ok(launch > 0, 'the panel must exist');
-    assert.ok(behaviour > launch, 'and sit before the bar’s own settings');
+// What a session starts with is not a setting of this extension — it is what the
+// extension hands the client — so it has a tab rather than a panel at the foot
+// of one. Settings keeps the bar, the network and the behaviour; Launch keeps
+// the command line.
+test('what a session starts with is a tab of its own, not a panel in Settings', () => {
+    const settings = db.settingsTab({ segments: ['{today}'], palette: [], presets: [] });
+    const launch = db.launchTab({ model: 'opus[1m]', effort: 'max', advisor: 'fable' }, {});
+
     for (const mark of ['name="model"', 'name="effort"', 'name="advisor"', 'id="launchArgs"', 'name="openLocation"']) {
-        const at = html.indexOf(mark);
-        assert.ok(at > launch && at < behaviour, `${mark} belongs in the launch panel`);
+        assert.ok(launch.includes(mark), `${mark} belongs on the launch tab`);
+        assert.ok(!settings.includes(mark), `${mark} should have left the settings tab`);
+    }
+    // Settings keeps what is genuinely the extension's own.
+    for (const mark of ['Status bar', 'Reading and the network', 'Behaviour']) {
+        assert.ok(settings.includes(mark), `${mark} stays in Settings`);
+    }
+    // Each choice on the launch tab is a panel, so each carries its own sentence
+    // rather than sharing one paragraph with five others.
+    for (const title of ['Where it opens', 'Model', 'Effort', 'Advisor', 'Output style', 'Extra arguments']) {
+        assert.ok(launch.includes(`>${title}</h2>`), `${title} needs a panel of its own`);
+    }
+    assert.match(launch, /<section class="tab" data-tab="launch"/);
+});
+
+// Every option here is a name that does not explain itself — `opus 1M` against
+// `opus`, `xhigh` against `max`, `best` against `opusplan`. The descriptions are
+// the client's own words; the rates and windows are what the choice costs.
+test('every launch option says what it is for', () => {
+    const launch = db.launchTab({ model: 'opus[1m]' }, {});
+    assert.match(launch, /Best for everyday, complex tasks/);
+    assert.match(launch, /Most capable for your hardest and longest-running tasks/);
+    assert.match(launch, /Fastest for quick answers/);
+    // `best` is about who has access, not about the task — the manifest said
+    // otherwise for months.
+    assert.match(launch, /Fable where your organization has access to it/);
+    assert.ok(!/whichever the client considers best for the task/i.test(launch));
+    // opusplan costs two rates and drops the cache when it switches.
+    assert.match(launch, /\$5\/\$25 → \$3\/\$15/);
+    assert.match(launch, /drops the prompt cache/);
+    // Concise shipped in 2.1.237 and has to be offered like the rest.
+    assert.match(launch, /Leads with the result and skips preamble/);
+
+    // No option is left without a sentence. The description carries an optional
+    // `data-base` attribute now, so the match has to allow one.
+    const names = (launch.match(/class="card-name">([^<]*)</g) || []).length;
+    const abouts = (launch.match(/class="card-about"[^>]*>([^<]*)</g) || []).length;
+    assert.equal(names, abouts, 'an option was drawn without its description');
+});
+
+// The client refuses an advisor that ranks below the model it advises. The page
+// knows the rule, so it can say which pairings are dead before the client does —
+// and it strikes them through rather than hiding them, because a vanished option
+// is a puzzle.
+test('the advisor list is ranked against the model the session starts on', () => {
+    const onOpus = db.launchTab({ model: 'opus[1m]', advisor: 'fable' }, {});
+    assert.match(onOpus, /below Opus 5 — the client refuses this pair/);
+    assert.match(onOpus, /the only tier above Opus 5/);
+    assert.match(onOpus, /the same tier: a second opinion rather than a stronger one/);
+    // Struck through, not removed: all five options are still drawn.
+    assert.equal((onOpus.match(/name="advisor"/g) || []).length, 5);
+    assert.equal((onOpus.match(/card-off/g) || []).length, 2, 'sonnet and haiku rank below opus');
+
+    // On a fable session only fable survives; on haiku nothing is refused.
+    const onFable = db.launchTab({ model: 'fable' }, {});
+    assert.equal((onFable.match(/card-off/g) || []).length, 3);
+    const onHaiku = db.launchTab({ model: 'haiku' }, {});
+    assert.equal((onHaiku.match(/card-off/g) || []).length, 0);
+
+    // With no model chosen there is nothing to rank against, so nothing is struck.
+    const noModel = db.launchTab({}, {});
+    assert.equal((noModel.match(/card-off/g) || []).length, 0);
+});
+
+// Ranking the advisor list against the model is only useful while you are
+// choosing: picking Opus and watching sonnet stay live until the page is next
+// drawn is worse than not ranking at all, because the page looked as though it
+// had checked. The rule runs in the page, on the same event that changes the
+// model.
+test('choosing a model re-ranks the advisor list in the page', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()), {
+        files: 1, lastRun: Date.now(), history: [],
+        config: { segments: [], defaults: [], presets: [], palette: [] },
+    });
+    const script = html.slice(html.lastIndexOf('<script>'));
+
+    // The pieces the page needs to do it without asking the extension.
+    assert.match(html, /data-tier="opus"/);
+    assert.match(html, /data-rank="4"[^>]*>|data-rank="4"/);
+    assert.match(html, /data-real="Opus 5"/);
+
+    // And a handler that fires on the model choice.
+    assert.match(script, /name="model"/);
+    assert.match(script, /rankAdvisors|reRank/);
+    // It must be able to both strike an option out and put it back — a one-way
+    // pass would leave sonnet dead after a single visit to Opus.
+    assert.match(script, /disabled = /);
+});
+
+// Save is one form spread over two tabs. The values were always collected from
+// the whole page — `picked()` queries the document — but the listener that lit
+// the button was bound to the settings tab alone, so a model chosen on Launch
+// left Save disabled and there was no way to write it. A test on the markup
+// cannot see that: both bars render, and only the subscription is missing.
+test('both save bars are wired, and the form covers both tabs', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()), {
+        files: 1, lastRun: Date.now(), history: [],
+        config: { segments: [], defaults: [], presets: [], palette: [] },
+    });
+    const script = html.slice(html.lastIndexOf('<script>'));
+
+    // Two bars on the page, one per tab that edits settings.
+    assert.equal((html.match(/class="save-bar"/g) || []).length, 2);
+    // Bound by class, so a third bar would be wired by existing code rather than
+    // needing a third id nobody remembers to add.
+    assert.ok(!/getElementById\('save'\)/.test(script), 'a single id cannot reach two bars');
+    assert.match(script, /querySelectorAll\('\.save-go'\)/);
+    assert.match(script, /querySelectorAll\('\.dirty'\)/);
+
+    // Every tab that carries an input is listened to, not just the first.
+    for (const tab of ['settings', 'launch']) {
+        assert.ok(script.includes(`data-tab="${tab}"`), `${tab} must be part of the form`);
+    }
+    // And the elements the script looks for actually exist in the markup.
+    for (const cls of ['save-go', 'dirty', 'saved']) {
+        assert.ok(new RegExp(`class="[^"]*\\b${cls}\\b`).test(html), `nothing carries .${cls}`);
     }
 });
 
@@ -1373,11 +1520,13 @@ test('save sits outside the panels and says when there is something to save', ()
     const before = html.slice(0, bar);
     assert.ok(before.lastIndexOf('</section>') > before.lastIndexOf('<section class="panel"'),
         'the bar sits between the panels and the end of the tab, not inside a panel');
-    for (const mark of ['id="save"', 'name="scope"', 'id="dirty"']) {
+    for (const mark of ['class="btn primary save-go"', 'name="scope"', 'class="dirty"']) {
         assert.ok(html.indexOf(mark) > bar, `${mark} belongs to the bar`);
     }
     // Nothing has been touched yet, so there is nothing to save.
-    assert.match(html.slice(bar), /<button class="btn primary" id="save" disabled>/);
+    // Bound by class, not id: the same bar is rendered on two tabs now, and an
+    // id can only ever reach one of them.
+    assert.match(html.slice(bar), /<button class="btn primary save-go" disabled>/);
 });
 
 // Groups of meters that follow one another are different kinds of fact — a
@@ -1420,19 +1569,20 @@ test('the settings inputs are painted from the theme, not left to the browser', 
 // several. The number fields beside it are narrow on purpose and this one must
 // not inherit that.
 test('the extra-arguments field is given room to type in', () => {
-    const html = db.settingsTab({ segments: ['{today}'], palette: [], presets: [] });
+    const html = db.launchTab({ segments: ['{today}'] }, {});
     const input = html.match(/<input[^>]*id="launchArgs"[^>]*>/);
     assert.ok(input, 'the field must be on the page at all');
     assert.match(input[0], /class="[^"]*\bwide\b/);
     // Keyed on the container the field actually sits in. The first attempt wrote
     // `.form input.wide`, which is a rule this page never matches — a test on the
     // text of the stylesheet passes just the same, and only the rendered page
-    // says the field is still 147 pixels wide.
-    const rule = db.STYLE.split('.field input.wide')[1].split('}')[0];
+    // says the field is still 147 pixels wide. On the launch tab it sits
+    // directly in the panel body, so the rule has to name that container too.
+    const rule = db.STYLE.split('.panel-body > input.wide')[1].split('}')[0];
     assert.match(rule, /width:\s*100%/);
     const before = html.slice(0, html.indexOf('id="launchArgs"'));
-    assert.ok(before.lastIndexOf('class="field"') > before.lastIndexOf('class="panel"'),
-        'the field must sit inside the container the rule is keyed on');
+    assert.ok(before.lastIndexOf('class="panel-body"') > before.lastIndexOf('<section class="panel'),
+        'the field must sit directly in the panel body the rule is keyed on');
 });
 
 // Most plugins live inside the marketplace repository, so their update is the
@@ -1544,7 +1694,7 @@ test('the header presses with the same buttons as the rest of the page', () => {
     // the same pair of classes Save carries at the bottom of Setup.
     assert.match(head, /<button id="pause" class="btn head-btn"/);
     assert.match(head, /<button id="refresh" class="btn head-btn primary"/);
-    assert.match(page, /<button class="btn primary" id="save"/);
+    assert.match(page, /<button class="btn primary save-go"/);
 
     // The hairline sits between the last fact and the first control, not at
     // either end of the group: that is the whole of what it says.

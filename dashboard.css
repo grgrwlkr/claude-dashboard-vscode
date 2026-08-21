@@ -396,13 +396,24 @@ ul.log { margin: 4px 0 14px; padding-left: 20px; line-height: 1.6; max-width: 90
 ul.log li { margin: 2px 0; opacity: .85; }
 .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 8px; margin-bottom: 6px; max-width: 130ch; }
-.preset { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
-  font: inherit; color: inherit; cursor: pointer; padding: 8px 10px; border-radius: 5px;
+/* A preset is a card to pick from, not a document to read. The name, one line
+   about it, and one line of what the bar would look like — the whole bar used to
+   be spelled out inside every card, which made nine of them a page of scrolling
+   for a choice you make once. The full preview is still there on hover, where
+   somebody deciding between two of them wants it. */
+.preset { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; text-align: left;
+  font: inherit; color: inherit; cursor: pointer; padding: 7px 10px; border-radius: 5px;
   background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); }
 .preset:hover { border-color: var(--vscode-focusBorder); }
-.preset-name { font-weight: 600; }
-.preset-about { opacity: .6; font-size: 11.5px; line-height: 1.4; }
-.preset-preview { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.preset-name { font-weight: 600; font-size: 12.5px; }
+.preset-about { opacity: .6; font-size: 11.5px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* The preview is the whole bar, and the whole bar does not fit a card — squeezed
+   into one line it came out as `✳ 7d …` `▤ {…`, which is noise rather than a
+   preview. It waits for a hover instead, which is when somebody is deciding
+   between two presets and actually wants it. */
+.preset-preview { display: none; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.preset:hover .preset-preview, .preset:focus-visible .preset-preview { display: flex; }
 .chip-seg { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8;
   background: var(--vscode-list-hoverBackground); border-radius: 3px; padding: 1px 5px; }
 /* Spend, plan and forecast are three different jobs, so they get three roles
@@ -723,7 +734,9 @@ ul.log li { margin: 2px 0; opacity: .85; }
    so a long value does not run to the edge of a wide window. Keyed on .field
    rather than on .form, which the Settings tab is not inside — the same reason
    the number rule above reaches nothing there. */
-.field input.wide { width: 100%; max-width: 72ch; box-sizing: border-box; }
+/* Both containers the field appears in: inside a `field()` on Settings, and on
+   its own inside a panel on Launch, where the panel's note is the label. */
+.field input.wide, .panel-body > input.wide { width: 100%; max-width: 72ch; box-sizing: border-box; }
 .form td:first-of-type { width: 1%; }
 /* A switch with no text of its own sits on the field's own line. */
 .switch.bare { display: inline-flex; padding: 0; }
@@ -745,13 +758,28 @@ ul.log li { margin: 2px 0; opacity: .85; }
   color: var(--vscode-button-foreground); }
 .chip-opt input:focus-visible + span, .card-opt input:focus-visible + .card-body {
   outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.cards { display: grid; gap: 6px; }
-.card-opt { position: relative; display: block; }
-.card-body { display: block; padding: 7px 10px; border-radius: 6px;
+/* A choice whose options need explaining. One row per option: the name, what it
+   is for, the reason it cannot be picked, and a figure to compare it by. The
+   name and the description share a line rather than stacking, because ten models
+   stacked two-high is a page of scrolling for a list you read across. */
+.cards { display: grid; gap: 4px; }
+.card-opt { position: relative; display: flex; align-items: baseline; gap: 12px;
+  padding: 7px 11px; border-radius: 6px;
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
-.card-opt input:hover + .card-body { background: var(--vscode-list-hoverBackground); }
-.card-opt input:checked + .card-body { border-color: var(--vscode-button-background);
-  background: var(--vscode-list-hoverBackground); }
-.card-name { display: block; font-weight: 600; font-size: 12px; }
-.card-about { display: block; font-size: 11px; opacity: .6; }
+.card-body { display: flex; align-items: baseline; gap: 12px; flex: 1; min-width: 0; }
+.card-opt:hover { background: var(--vscode-list-hoverBackground); }
+.card-opt:has(input:checked) { border-color: var(--vscode-charts-blue);
+  background: color-mix(in srgb, var(--vscode-charts-blue) 10%, transparent); }
+.card-opt:has(input:focus-visible) { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.card-name { font-weight: 600; font-size: 12.5px; min-width: 13ch; white-space: nowrap; }
+.card-about { font-size: 11.5px; opacity: .72; }
+/* A figure the options can be ranked by — a rate, a measured spend. Monospace so
+   the column lines up down the list. */
+.card-meta { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .55;
+  white-space: nowrap; margin-left: auto; padding-left: 10px; }
+/* An option the client would refuse. Dimmed and dashed rather than removed: a
+   vanished option is a puzzle, a struck one explains itself. */
+.card-opt:has(input:disabled) { opacity: .4; border-style: dashed; }
+.card-opt:has(input:disabled):hover { background: none; }
+.card-why { font-size: 11px; color: var(--vscode-charts-yellow); white-space: nowrap; }
 footer { margin-top: 28px; opacity: .5; font-size: 11px; }

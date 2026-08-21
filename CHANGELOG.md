@@ -5,627 +5,449 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
-Everything below 0.20.0 was built and installed on one machine — the extension
-had not been published yet. The history is kept anyway: it is what the dashboard
-grew out of, and a version that shipped nothing is worth saying so.
+Everything below 0.20.0 was built and installed on one machine; the extension was
+not published yet.
+
+## [0.42.0] — 2026-08-21
+
+### Changed
+
+- Setup splits in two: `Live now`, `Background jobs`, `Task lists` and `Disk`
+  move to a new **Machine** section.
+- The tabs themselves are unchanged, only where they are found.
+- A new **Launch** tab holds what a session is started with: where it opens, the
+  model, the effort, the advisor, the output style and the extra arguments.
+- Every launch option carries a description in the client's own wording.
+- Every model carries its rate and its context window.
+- Each panel heading shows what it is set to, the way the Now tab's panels do.
+- Preset cards are a third of their old height, with the full bar preview moved
+  to hover.
+
+### Added
+
+- The advisor list is ranked against the chosen model and re-ranks as you change
+  it.
+- An advisor the client would refuse is dimmed behind a dashed border and
+  disabled, with the reason beside it.
+- Picking a model that refuses the advisor already chosen clears that choice back
+  to none rather than leaving an impossible pair selected.
+- Each effort level shows what it costs on this machine: output per reply, and a
+  ratio against the level with the most replies behind it.
+- A level with fewer than 300 replies behind it says so instead of printing a
+  ratio.
+
+### Fixed
+
+- `best` was documented as picking whichever model suits the task; it picks
+  Fable 5 where your organization has access to it and the latest Opus otherwise.
+- The advisor panel said refused pairings are struck through; they are dimmed
+  behind a dashed border.
+
+### Documentation
+
+- Six listing screenshots re-shot in both themes: every one of them carried the
+  five-section nav that this release replaces with six.
+- The demo data makes every launch choice, so the Launch tab photographs as a
+  configured screen rather than six panels reading "not set".
 
 ## [0.40.1] — 2026-08-20
 
 ### Added
 
-- **`Concise`, the output style the client added in 2.1.237**, can be picked
-  when starting a session. The list of styles is a closed one — a claim about
-  someone else's release — and it had gone stale silently: the comment above it
-  still said there were four.
+- `Concise`, the output style the client added in 2.1.237, can be picked when
+  starting a session.
 
 ### Fixed
 
-- **The session panel never showed the output style of a session this extension
-  had started** — which, on a machine that launches its sessions from the
-  dashboard, is all of them. The client has no `--output-style` flag, so
-  "Open Claude Code with…" puts the style in `--settings` JSON; the panel then
-  read it back out of the settings files, where it had never been written, and
-  drew nothing. It now comes off the session's own command line, and that beats
-  the file on purpose: the client compiles the style into the system prompt at
-  session start, so a file edited since then says what the *next* session will
-  get, not what this one is running. The terminal statusline had shown the style
-  all along, because the client hands it one directly — which is exactly why
-  nobody noticed the panel was silent.
+- The session panel showed no output style for sessions this extension started,
+  which on a machine that launches them from the dashboard is all of them.
+- The client has no `--output-style` flag, so the style travels in `--settings`
+  JSON, and the panel was reading the settings files, where it was never written.
+- The style now comes off the session's own command line, which beats the file on
+  purpose: the client compiles it into the system prompt at session start, so a
+  file edited since then says what the *next* session will get.
 
 ## [0.40.0] — 2026-08-19
 
 ### Changed
 
-- **The page header is written in the same grammar as the panels below it.** The
-  name, the mark and the version sit on the left; the state of the index and the
-  two controls on the right. What used to be a sentence of facts joined by dots
-  is now pills, and the freshness and the countdown share one of them —
-  `19:09 · next in 55s` while the timer runs, `19:09` alone when it is paused,
-  with the full date on the hover, where it is wanted only when the answer is
-  "not fresh at all".
-- **The header's buttons are the page's own buttons.** They were pills with a
-  cursor — the same 10.5px, the same 999px radius, the same 9% fill — so the row
-  read as four facts, two of which happened to be clickable. `Pause` and
-  `Reindex` now wear `.btn`, the pair `Save` and `Add segment` wear, and a
-  hairline separates what is read from what is pressed. Pausing turns the
-  control yellow, the colour a warning pill uses, and empties the countdown.
+- The page header uses the same grammar as the panels below it: name, mark and
+  version on the left, the state of the index and the two controls on the right.
+- Freshness and the countdown share one pill, `19:09 · next in 55s` while the
+  timer runs and `19:09` when it is paused, with the full date on hover.
+- `Pause` and `Reindex` wear the page's own `.btn`, as `Save` and `Add segment`
+  already did, instead of being pills with a cursor.
+- A hairline separates what is read from what is pressed.
+- Pausing turns the control yellow and empties the countdown.
 
 ### Fixed
 
-- **The listing's screenshots had started carrying the version number.** `--demo`
-  strips it so a picture goes stale on a change to what it shows rather than on
-  every bump — but it stripped by a class the version left when it moved into a
-  pill, and nothing failed: the header rendered, the tests passed, and the number
-  was photographed. The anchor is an attribute now, and a test holds both files
-  to it.
-- **The context panel could show a percentage over nothing.** The window gauge
-  gives up its own track because the breakdown draws the same measurement in
-  colour underneath — but the breakdown is absent when the transcript cannot be
-  read at all, and then the panel had no bar anywhere. The gauge now keeps its
-  track exactly when there is no breakdown to replace it.
-- **A missing stylesheet took the whole extension down, not just the styles.**
-  `dashboard.css` is read at require time, so an unreadable file threw before
-  `activate` was even defined — no status bar, no tree, no sidebar, over CSS.
-  It now falls back to a legible minimum, and a test checks that `.vscodeignore`
-  cannot drop a file the runtime reads.
-- **The tooltip drew every pill in the same voice.** `tone` is meaning, and the
-  hover was ignoring it: `credits off` looked like `max`. Pills that warn or
-  reassure now carry the same codicon a toned note gets.
-- **`credits off` was said twice** — as a pill and again inside the note beside
-  it, which is the duplication the pills were introduced to remove. The pill
-  states the switch, the note states the money.
-- **The output style pill had no subject.** In the hover's single line it read as
-  a bare `default`; it is `style default` now, the same shape as `advisor`.
-- **Two CSS rules reached further than they were written for.** The body spacing
-  used a general sibling selector, so it applied to every block of a sidebar
-  section and beat any rule declared above it — `.now-sub` lost its spacing there
-  depending on where in the file its rule happened to sit. And the week footer's
-  centring rule still pointed at a middle element that no longer exists.
+- Listing screenshots had started carrying the version number: `--demo` stripped
+  it by a class the version left when it moved into a pill.
+- The anchor is an attribute now, and a test holds both files to it.
+- The context panel drew no bar at all when the transcript could not be read, so
+  the window gauge now keeps its own track when there is no breakdown to replace
+  it.
+- An unreadable `dashboard.css` now falls back to a legible minimum, where it
+  threw at require time and took the status bar, the tree and the sidebar down
+  with it.
+- A test checks that `.vscodeignore` cannot drop a file the runtime reads.
+- The tooltip drew every pill the same way, ignoring `tone`, so `credits off`
+  looked like `max`.
+- Pills that warn or reassure now carry the codicon a toned note gets.
+- `credits off` was stated twice, as a pill and again in the note beside it; the
+  pill states the switch and the note states the money.
+- The output style pill read as a bare `default` and now reads `style default`,
+  the same shape as `advisor`.
+- The body spacing used a general sibling selector, so it applied to every block
+  of a sidebar section and beat any rule declared above it.
+- The week footer's centring rule still pointed at a middle element that no
+  longer exists.
 
 ## [0.38.0] — 2026-08-19
 
 ### Changed
 
-- **The Now tab speaks one language across all three panels.** Limits, the
-  session and the spend each used to solve the same four problems their own way:
-  state was a bordered callout in one, a table in another and part of the
-  heading in the third. All three are now the same five moves in the same order —
-  the heading with its state as pills, one figure the panel exists for, what that
-  figure is made of, the facts, and a footer.
+- The three panels of the Now tab follow one shape: heading with state as pills,
+  the figure the panel exists for, what it is made of, the facts, a footer.
+- Limits leads with the week, drawn as one large percentage with the plan as a
+  notch on its track.
+- The 5-hour and per-model windows sit under it as compact rows.
+- The verdict against plan moved into a pill beside the heading, out of the
+  sentence that measures it.
+- Pace, forecast and credits keep their words and lose their left borders, with a
+  coloured dot carrying the tone.
+- Spend is titled Spend rather than titled with its own answer, so the session's
+  cost can be the figure.
+- Burn rate and today's spend are pills, and what it took stays a table.
+- The session panel shows effort, advisor, thinking and output style as pills
+  beside the model instead of four rows of monospace.
+- That panel ends in a footer of branch and client version, with a chip when a
+  newer client is unpacked and waiting.
+- The stylesheet moved out of a template literal into `dashboard.css`, 708 lines
+  where a backtick in a comment breaks the module at require time.
+- `STYLE` is still a string read from that file at load, so both pages, both
+  preview tools and every test are untouched.
+- The week track became a panel: everything that used to float around the rail is
+  a pill in the heading, and the block lost 45px.
+- Two pills wear a dot in the colour of the mark they name, which is what let the
+  rail's captions go.
+- A forecast landing past the reset gets no dot, because there is no mark on the
+  rail to point at.
+- The task list is a strip across the page instead of a fourth panel that left
+  one column of three carrying two.
+- The strip carries `Tasks 4/7`, the share as a track, what is in progress, and
+  how many other sessions are open.
+- The strip is one line down to about 640px and two below that.
+- The context breakdown is one colour bar with a legend under it, keyed by part
+  name so a part keeps its hue when the sort moves it.
+- Where auto-compact waits rides on that legend's caption, beside `your setup`.
+- The context block is a gauge with a list under it: the window is the headline,
+  and cache and auto-compact are chips beneath rather than rows of their own.
+- Each part of the breakdown is one line rather than two, and the share is drawn
+  as the fill behind the row.
+- The breakdown sums what your own setup costs — memory files, skills, agents,
+  MCP instructions, tool names, hooks — as a share of the window.
+- Two new block kinds, `gauge` and `parts`, so the tooltip and the page keep
+  saying the same thing in their own way.
 
-  **Limits** leads with the week, because that is the window that stops the work:
-  one large percentage, the plan as a notch on its track, and the 5-hour and
-  per-model windows as compact rows under it. The verdict against plan moved into
-  a pill beside the heading and out of the sentence that measures it — written in
-  both places it read as two findings that happen to agree. Pace, forecast and
-  credits keep their words and lose their left borders: a coloured dot carries
-  the tone in a panel that already speaks in colour.
+### Fixed
 
-  **Spend** is titled Spend rather than titled with its own answer, so the answer
-  has somewhere to be: the session's cost is the figure, burn rate and today's
-  spend are pills, and what it took stays a table.
-
-  **The session panel** shows effort, advisor, thinking and output style as pills
-  beside the model's name — four rows of monospace that made settings look like
-  measurements — and ends in a footer of branch and client version, with a chip
-  when a newer client is unpacked and waiting.
-
-- **The stylesheet moved out of the JavaScript, into `dashboard.css`.** The CSS
-  lived inside a template literal — 570 lines at the last release, 708 by the
-  time it was lifted out — where a backtick in a comment breaks the module at
-  require time, as it did four times in one session, and where no editor offers
-  highlighting, bracket matching or a linter. `STYLE` is still a string, read
-  from the file at load, so both pages, both preview tools and every test that
-  holds a rule against a vocabulary are untouched. The lift itself changed
-  nothing: the file matched the extracted block byte for byte, checksum included.
-
-- **The week track is a panel, and everything it used to say around the rail is
-  a pill.** It had four ways of stating a fact in one block: a verdict sentence
-  under the heading, the forecast floating above the rail, the spend printed
-  inside the fill, and `plan` captioned below. Now the heading carries
-  `57% spent · plan 64% · 7% under · dry in 1d10h → Thu 20.08` and the rail
-  carries nothing but its zones and its marks. The two pills that name a mark
-  wear a dot in that mark's colour, which is what lets the captions go — the
-  mark is found by colour instead of by a label pinned to its position. Three
-  floors of text became one line and the block lost 45px of height.
-
-  A forecast landing past the reset gets no dot: there is no mark on the rail to
-  point at, and a colour pointing at nothing is worse than no colour.
-
-- **Fixed: the same fact was drawn in opposite tones on one screen.** Spending
-  faster than the week elapses was `12% ahead of plan` in green on the Limits
-  panel and `12% over` in yellow on the track above it. Both now say `over` and
-  `under`, and both colour overspend as the warning it is.
-
-- **The task list is a strip across the page instead of a fourth panel.** Four
-  panels in a three-column flow always left one column carrying two and the
-  other two ending high, and no size of card fixed it — the browser balances the
-  columns and tasks were the odd panel out. As a strip under the row it also
-  reads truer: tasks are the state of the work, not a subject beside limits and
-  money. `Tasks 4/7`, the share as a track, what is in progress, and how many
-  other sessions are open — one line down to about 640px, two below that.
-
-- **The breakdown is a colour bar with a legend.** One bar for everything in use,
-  each part in its own colour, and the list under it is that bar's legend rather
-  than seven rows of fill. Colour is keyed by the part's name, so a part keeps
-  its hue when the sort order moves it. Where auto-compact waits now rides on the
-  legend's caption beside `your setup`, next to the bar it qualifies.
-
-- **The context block is laid out again, and it is now a gauge with a list under
-  it.** The window used to be a meter row indistinguishable from the seven parts
-  below it, free space an eighth row, and `from cache` and `auto-compact` a table
-  of two more underneath — nine numbers of three different kinds drawn as one
-  run. The window is now the headline: the figure, its bar, and the facts that
-  only qualify it as chips beneath.
-
-  Each part is one line instead of two. The old row put the label, a meter and
-  the share on the first line and the token count on a dim second one, which
-  spent the emphasis on the percentage — derivable from the count, and already
-  drawn by the bar — and buried the number worth acting on. Name and qualifier
-  now share an elastic column, the size and the share are two monospace columns
-  that read straight down, and the share is the fill behind the row: at 89%
-  against 0.2% a meter column is seven empty tracks, and the width is worth more
-  to the name than to a bar nobody can read.
-
-  The panel is about a fifth shorter for the same figures, and every row is the
-  same height at every width the sidebar can be dragged to — the qualifier drops
-  out under 300px rather than wrapping the row.
-
-- **The breakdown says what your setup costs.** The six measured parts — memory
-  files, skills, agents, MCP instructions, tool names, hooks — are summed beside
-  the heading as a share of the window. It is the one figure here anybody can act
-  on, and it was previously left to the reader to add up.
-
-- **Two new block kinds, `gauge` and `parts`**, so the tooltip and the page keep
-  saying the same thing in their own way. A total and the pieces of it are
-  different facts; drawn identically the total reads as one more component of
-  itself.
+- The same fact was drawn in opposite tones on one screen: `12% ahead of plan` in
+  green on Limits, `12% over` in yellow on the track above it.
+- Both now say `over` and `under`, and both colour overspend as a warning.
 
 ## [0.36.0] — 2026-08-18
 
 ### Added
 
-- **The context window is broken down into what fills it**, in the session
-  section — which puts it on the Now tab and in the sidebar at once. Rows are
-  ordered by share, largest first, with free space pinned to the bottom: it is
-  what the others are measured against rather than one of them.
-
-  `/context` in the client draws this from figures it holds in memory and writes
-  none of them down — not to the transcript, not to the session registry, not to
-  the payload a status line gets, which carries only totals. What the transcript
-  *does* record is the blocks the client adds to the prompt: the skill listing,
-  the deferred tool names, the agent listing and each MCP server's instructions.
-  Those are weighed here, together with the instruction files on disk, at four
-  characters to a token — the same rate the memory files have always been counted
-  at — and each is marked with a tilde as the estimate it is.
-
-  They arrive as deltas, and that is the whole difficulty: a listing repeats and
-  grows over a long session, so adding up every record counts the same skill many
-  times over. Summed naively, this machine's transcript reads ~93k tokens of
-  skills where the client reports ~10k. Only the state at the end of the file is
-  in the window, so a listing marked `isInitial` replaces what came before it and
-  everything else adds and removes by name.
-
-  The largest row is called **rest in use** and not "messages", deliberately. The
+- The context window is broken down into what fills it, which puts it on the Now
+  tab and in the sidebar at once.
+- Rows are ordered by share, largest first, with free space pinned to the bottom.
+- `/context` in the client draws this from figures it holds in memory and writes
+  none of them down, so none of it can be read back.
+- What the transcript does record is the blocks the client adds to the prompt —
+  the skill listing, the deferred tool names, the agent listing and each MCP
+  server's instructions — weighed at four characters to a token and each marked
+  with a tilde.
+- Listings arrive as deltas, so a record marked `isInitial` replaces what came
+  before it and everything else adds and removes by name.
+- Summed naively this machine reads ~93k tokens of skills where the client
+  reports ~10k.
+- The largest row is called **rest in use** rather than "messages": the
   conversation, the system prompt and the tool schemas reach this side as one
-  number — the input the last reply was billed for — and nothing on disk
-  separates them. Naming that row after the conversation alone would be a guess
-  wearing the clothes of a measurement; the row names what is inside it instead,
-  and the rows add up to the whole window rather than to a window that pretends
-  to be emptier than it is.
+  number, and nothing on disk separates them.
 
 ## [0.34.0] — 2026-08-17
 
 ### Added
 
-- **An output style can be asked for at launch**, beside the model, the effort
-  and the advisor: `default`, `Proactive`, `Explanatory` or `Learning`. There is
-  no `--output-style` flag — the client has none — but `outputStyle` is an
-  ordinary setting and `--settings` takes JSON that **merges** with the settings
-  files, so one key is sent and everything else you have configured keeps its
-  value. A style of your own lives in `~/.claude/output-styles` and goes through
-  the extra arguments by name.
-
-### Documentation
-
-- **The README shows what a session is started with, and what the forecast looks
-  like when it has something to say.** Two new pairs of screenshots: the
-  **Starting a session** panel with a model, an effort, an advisor and a style
-  chosen, and the week track of a window spent ahead of its plan — the overspend
-  block past the plan rule, and the red line where the week runs dry, two days
-  before it resets. The second needed a dial in the demo data: below plan the
-  forecast lands past the reset and `{dry}` is silent by design, so
-  `tools/preview.js --demo --over` spends the demo week ahead of plan. The main
-  screenshot is untouched — it shows a workflow running, which is worth its own
-  frame.
-
-  Both halves of the week track are shown, not just the alarming one: the week
-  under its plan gets its own frame and its own paragraph — the green slack
-  between spent and plan, the dry label with a trailing arrow meaning "past the
-  end of the track", and the caption `lasts to the reset`, which is the state
-  where `{dry}` stays empty while `{dryAt}` still names a date.
-
-  Colours are now named for both themes wherever a mark actually changes with
-  the theme. The plan rule was called black, which is only true on a light
-  theme — it is drawn in `--vscode-foreground`, so it is white on a dark one, and
-  it is the *only* mark on the week track that flips: everything else is a chart
-  colour. The status bar's thresholds were described as yellow and red where they
-  are really the editor's own warning and error backgrounds.
-
-### Fixed
-
-- **The settings inputs are painted from the theme again.** Their rules were
-  keyed on `.form`, a class the page puts on nothing, so every field on the tab
-  fell through to the browser's own control — which under `color-scheme: light
-  dark` is drawn dark whatever the page's theme is. On a light theme that was a
-  black box among white fields. The number fields were the same story from the
-  other side: `width: 8ch` never applied either, which is why they were as wide
-  as a sentence. Found while taking the screenshot for the listing, which is the
-  only place a light theme gets looked at here.
+- An output style can be asked for at launch: `default`, `Proactive`,
+  `Explanatory` or `Learning`.
+- There is no `--output-style` flag, so the style travels as `--settings` JSON,
+  which merges with your settings files and leaves everything else alone.
+- A style of your own lives in `~/.claude/output-styles` and goes through the
+  extra arguments by name.
 
 ### Changed
 
-- **The sidebar opens on the two panes worth reading.** Limits and Session split
-  the container evenly, and the two lists below them — Live sessions and Workflow
-  runs — start collapsed, a click from open. They were pushing the numbers above
-  them off the top of a narrow sidebar to show rows that are a glance, not a
-  read. None of it binds afterwards: VS Code remembers whatever you drag or open
-  yourself, and these are only the starting positions.
+- The sidebar opens on Limits and Session split evenly, with Live sessions and
+  Workflow runs collapsed.
+- None of that binds afterwards: VS Code remembers whatever you drag or open
+  yourself.
+- `initialSize` is applied the first time a pane is shown, and the session pane
+  sits behind a `when` clause that only turned true on the first tick, so it
+  arrived into a finished sidebar and took what was left.
+- The previous window's answer is now remembered and given before anything is
+  read, with the first tick correcting it.
+- The four panes have new ids, which is the only way an extension can ask VS Code
+  for a fresh layout, because a pane that has ever been opened ignores
+  `initialSize` and `visibility` forever, so this resets it once.
 
-  Splitting evenly needed one more thing. `initialSize` is applied to a pane the
-  first time it is *shown*, and the session pane sits behind a `when` clause that
-  only turned true on the first tick — by which point VS Code had laid the
-  container out without it, so it arrived into a finished sidebar and took what
-  was left. The answer from the previous window is now remembered and given
-  before anything is read or registered, and the first tick corrects it.
+### Fixed
 
-  **The four panes have new ids**, and that is what makes the above take effect
-  at all. VS Code keeps a container's layout — each pane's height and whether it
-  is collapsed — under the id of the pane, in the workspace's own storage, and
-  what it remembers outranks anything a manifest declares. A pane that has ever
-  been opened therefore ignores `initialSize` and `visibility` forever. Renaming
-  is the only way an extension can ask for a fresh start, so this release resets
-  the sidebar's layout once; drag it back to taste and it will be remembered
-  again.
+- The settings inputs are painted from the theme again: their rules were keyed on
+  `.form`, a class the page puts on nothing.
+- Every field fell through to the browser's own control, which under
+  `color-scheme: light dark` is drawn dark whatever the page's theme is.
+- The number fields were the same story: `width: 8ch` never applied either, which
+  is why they were as wide as a sentence.
+
+### Documentation
+
+- Two new screenshot pairs: the launch panel with everything chosen, and the week
+  track of a window spent ahead of its plan.
+- Below plan the forecast lands past the reset and `{dry}` is silent by design,
+  so `tools/preview.js --demo --over` spends the demo week ahead of plan.
+- The week under its plan gets its own frame and paragraph, including the caption
+  `lasts to the reset`, where `{dry}` stays empty while `{dryAt}` still names a
+  date.
+- Colours are named for both themes wherever a mark actually changes with the
+  theme.
+- The plan rule was called black, which is only true on a light theme: it is
+  drawn in `--vscode-foreground`.
+- The status bar's thresholds were described as yellow and red where they are the
+  editor's own warning and error backgrounds.
 
 ## [0.32.0] — 2026-08-16
 
 ### Added
 
-- **The session can be started on a model, an effort and an advisor of your own.**
-  `claudeStatusline.model`, `claudeStatusline.effort` and
-  `claudeStatusline.advisor` become `--model`, `--effort` and `--advisor`;
-  `claudeStatusline.launchArgs` carries whatever else you want after them. The
-  third of those is a flag the client keeps out of its own `--help` — the option
-  is declared with `.hideHelp()` — so a setting is the only way most people will
-  ever find it. Empty is the default for all three and passes no flag at all, so the
-  client keeps deciding exactly as it did before. The model list is the aliases
-  the client itself accepts, read out of 2.1.233 rather than remembered.
-
-  **Claude: Open Claude Code with…** asks for both instead of reading the
-  settings — two picks, for the run that is not like the others — and the
-  button's hover now names what it would start on.
-
-  The list is the client's own: `opus`, `sonnet`, `fable`, `haiku`, each with its
-  `[1m]` variant where one exists, plus `best` and `opusplan`. A `[1m]` entry is
-  the million-token variant of that model rather than a second name for it — the
-  client offers it as its own choice and has a `prefer1m` setting for picking it
-  by default.
-
-  Values are quoted on the way into the shell, and `opus[1m]` is the case that
-  decides it: unquoted, zsh reads the brackets as a pattern and answers
-  `no matches found` without running anything. That quoting is also what keeps a
-  model name with shell syntax in it a single argument rather than a second
-  command, which is now a test.
-
-  `launchArgs` is the exception and goes in as typed, because quoting a line of
-  several arguments would break it — so it is `machine`-scoped: user settings
-  only. A repository ships its own `.vscode/settings.json`, and free text written
-  into a shell is not something a project you opened gets to choose.
-- **The Settings tab has a panel for what a session starts with** — the place it
-  opens in, the model, the effort, the advisor and the extra arguments, together
-  rather than scattered among the settings of the status bar. Four fields about
-  one command line read as a list of unrelated switches when they sit next to
-  "Side of the bar".
-- **Save left the panels and became a bar of its own**, stuck to the bottom of
-  the tab, and it now says whether there is anything to save: at rest the button
-  is inert, an edit lights it and marks the form **unsaved changes**, and undoing
-  that edit by hand puts it back to rest — the comparison is against the state
-  the page was drawn with, not a flag that stays raised once tripped. The free
-  text field also got room to type in: at the browser's default width it showed
-  about twenty characters, which is less than one flag.
-- **The dashboard tab wears the extension's own mark** instead of the generic
-  editor glyph every webview gets by default. `iconPath` is a property of the
-  panel rather than an option of `createWebviewPanel`, which is how it stayed
-  unset since the tab existed; `media/icon.svg` also had to be added to the
-  package, where only the marketplace's `icon.png` was allowed through.
+- A session can be started on a model, an effort and an advisor of your own,
+  through `claudeStatusline.model`, `.effort` and `.advisor`.
+- Empty is the default for all three and passes no flag at all, so the client
+  keeps deciding exactly as it did before.
+- `--advisor` is a real flag the client keeps out of its own `--help` with
+  `.hideHelp()`, so a setting is the only way most people will find it.
+- The model list is the aliases the client itself accepts, read out of 2.1.233
+  rather than remembered: `opus`, `sonnet`, `fable`, `haiku`, each with its
+  `[1m]` variant, plus `best` and `opusplan`.
+- A `[1m]` entry is the million-token variant of that model rather than a second
+  name for it, and the client has a `prefer1m` setting for picking it by default.
+- Values are quoted on the way into the shell, because unquoted, zsh reads
+  `opus[1m]` as a pattern and answers `no matches found`.
+- Quoting also keeps a model name with shell syntax in it a single argument
+  rather than a second command, which is now a test.
+- `claudeStatusline.launchArgs` goes in as typed, because quoting a line of
+  several arguments would break it.
+- `launchArgs` is therefore `machine`-scoped: free text written into a shell is
+  not something an opened repository gets to choose.
+- **Claude: Open Claude Code with…** asks for a model and an effort instead of
+  reading the settings, for the run that is not like the others.
+- The button's hover names what it would start on.
+- The Settings tab has a panel for what a session starts with, so four fields
+  about one command line stop sitting next to "Side of the bar".
+- Save left the panels and became a bar of its own, stuck to the bottom of the
+  tab.
+- That bar says whether there is anything to save, comparing against the state
+  the page was drawn with rather than raising a flag that stays up once tripped.
+- The free text field got room to type in, where the browser's default width
+  showed about twenty characters.
+- The dashboard tab wears the extension's own mark instead of the generic webview
+  glyph.
 
 ### Fixed
 
-- **A tab restored after a reload keeps following its session's name again.**
-  0.30.0 recognised such a tab by its icon or by the name it was opened under,
-  and neither is available: the extension host rebuilds `creationOptions` for a
-  terminal it did not create from six fields — `name`, `shellPath`, `shellArgs`,
-  `cwd`, `env`, `hideFromUser` — the icon is not among them, and the name is
-  whatever the tab was last renamed to, which after one session is no longer the
-  name it started with. The tab therefore came back with a stale title and no way
-  to update it.
-
-  Two witnesses replace them, either of which is enough: a mark this extension
-  puts in the tab's environment, which is one of those six fields, and its own
-  note of the shell's pid, which depends on nothing VS Code chooses to keep.
-
-  Matching by name was not merely useless — Claude Code's own button opens
-  terminals under exactly the same one, so it could have renamed and closed a tab
-  belonging to another extension. That is now a test.
-
-  The tab's **icon** is a separate matter and cannot be fixed from here: it does
-  not reach the extension at all, and every field of `Terminal` is read-only, so
-  there is nothing to set it on.
-- **`.claude/` is no longer packaged.** `.vscodeignore` excluded the working
-  notes, the docs and the CI directory but not this one, so 0.30.0 shipped the
-  repository's publishing skill — instructions addressed to Claude, not to anyone
-  installing the extension — to both storefronts. It is 5.9 KB of nothing useful
-  and cannot be taken out of a published version; this only keeps it out of the
-  next one.
+- A tab restored after a reload follows its session's name again.
+- 0.30.0 recognised such a tab by its icon or by the name it was opened under,
+  and the extension host rebuilds neither: `creationOptions` for a terminal it
+  did not create holds six fields, and the icon is not among them.
+- Two witnesses replace them, either of which is enough: a mark this extension
+  puts in the tab's environment, and its own note of the shell's pid.
+- Matching by name could have renamed and closed a tab belonging to Claude Code's
+  own button, which opens terminals under the same name; that is now a test.
+- The tab's icon cannot be fixed from here: it does not reach the extension, and
+  every field of `Terminal` is read-only.
+- `.claude/` is no longer packaged: `.vscodeignore` excluded the notes, the docs
+  and CI but not this one, so 0.30.0 shipped the repository's publishing skill to
+  both storefronts.
 
 ## [0.30.0] — 2026-08-16
 
 ### Added
 
-- **The Activity Bar container is now a panel rather than one tree**, and it is
-  called **Claude Dashboard** rather than "Claude", which read as the client
-  itself. Four sections: **Limits** — the 5-hour window above the weekly one, how
-  far ahead or behind plan the spend is, and when the window would run out at this
-  rate; **Session** — the model with its effort and advisor, the context window
-  and its distance to auto-compact, and what the session open in this window has
-  cost; **Live sessions** — every session on the machine whose process is alive,
-  named by its project with its client and state beside it; and the **Workflow
-  runs** tree that was there before. The first two are the status bar's own
-  tooltip sections, so the panel cannot drift from the hover.
-
-  **Session** hides itself when no Claude session is open in this window, rather
-  than standing empty: an empty pane still claims its share of the sidebar's
-  height, and that share comes out of the limits above it.
-
-  Limits have a pane to themselves rather than a place in a longer one: the one
-  section worth reading without scrolling should not be pushed under the fold by
-  what sits below it. `initialSize` sets the starting heights, but only until the
-  first time the divider is dragged — after that VS Code remembers the drag, and
-  the split is what keeps the guarantee.
-- **The container's icon is the extension's own mark**, one colour at 24×24 as
-  VS Code renders it, instead of the stock gear it had been wearing: the logo's
-  arc over the three bars.
-
-  Two things about that file are worth knowing before touching it again. It has
-  no faint backing ring, though the marketplace icon does — the editor draws this
-  as a single-colour glyph, so a shape at two opacities that reads as two tones in
-  colour comes out as one solid circle here, which is what the first attempt did.
-  And the editor caches the glyph **by path**: replacing the bytes changes nothing
-  a reload will show, so a redrawn icon needs a new file name. This one is
-  `media/bar-icon.svg` for exactly that reason.
-- **A badge on that icon counts live sessions**, and shows nothing when there are
-  none — a badge reading nought is a dot that never leaves. It counts sessions
-  rather than a percentage because a badge is a number: it cannot spell `%`.
+- The Activity Bar container is a panel of four sections rather than one tree:
+  Limits, Session, Live sessions and Workflow runs.
+- The container is called **Claude Dashboard** rather than "Claude", which read
+  as the client itself.
+- Limits and Session are the status bar's own tooltip sections, so the panel
+  cannot drift from the hover.
+- Session hides itself when no Claude session is open in this window, rather than
+  standing empty and claiming height.
+- Limits have a pane to themselves, so the one section worth reading without
+  scrolling is not pushed under the fold.
+- The container's icon is the extension's own mark, drawn as a single-colour
+  glyph, where a shape at two opacities comes out as one solid circle.
+- The editor caches that glyph by path, so a redrawn icon needs a new file name;
+  this one is `media/bar-icon.svg`.
+- A badge on that icon counts live sessions and shows nothing when there are
+  none.
 
 ### Fixed
 
-- **A session opened by the button survives a window reload.** The tab was
-  created with `isTransient: true`, which is VS Code's opt-out of terminal
-  persistence "on restart and reload" — so every reload took the session with it,
-  and installing a new build of this extension *is* a reload. Without the flag VS
-  Code reconnects the tab to a shell that never stopped, and the session inside
-  it goes on running. Claude Code's own extension sets the same flag (2.1.233,
-  both of its `createTerminal` calls) and this had copied it.
-
-  A tab that comes back is taken over again, so it keeps following its session's
-  name. Closing itself when the session ends is wired the same way but is not
-  promised across a reload: that depends on VS Code reporting the end of a
-  command which started before the extension host did. What identifies a tab
-  after a reload is what it was created with — the icon, which is a file of this extension, or
-  the name a tab is opened under — because the entry that tied it to its session
-  died with the previous extension host. Neither is guaranteed to survive, and
-  when neither does the tab is left alone: still running, just no longer renamed.
-
-  A full quit is the other half and is left alone deliberately. There is no
-  process to reconnect to, so VS Code relaunches the shell and the tab comes back
-  with its scrollback and no `claude` in it. Sending the command again would
-  start a *new* session wearing an old session's history.
+- A session opened by the button survives a window reload: the tab was created
+  with `isTransient: true`, VS Code's opt-out of terminal persistence.
+- The flag had been copied from Claude Code's own extension, which sets it on
+  both of its `createTerminal` calls in 2.1.233.
+- A tab that comes back is taken over again and keeps following its session's
+  name.
+- Closing itself when the session ends is not promised across a reload, because
+  that depends on VS Code reporting the end of a command which started before the
+  extension host did.
+- A full quit is left alone deliberately: there is no process to reconnect to, so
+  sending the command again would start a new session wearing an old one's
+  scrollback.
 
 ## [0.28.0] — 2026-08-16
 
 ### Fixed
 
-- **A reply is charged once, at its final figures.** One API response is written
-  as several records — one per content block, thinking, text and each tool call —
-  and the index added every one of them, billing the same reply as many times as
-  it had blocks. Across this machine's 2 475 transcripts that is 112 799 records
-  for ~51 000 responses: output read 100.1M where it is **47.1M**, cache writes
-  1 043M where they are 382M, input 6.8M where it is 2.0M, cache reads 25.2B
-  where they are 12.6B. Every figure the dashboard draws from the index — spend,
-  projects, models, the month's forecast, the budget warnings — was high by
-  roughly a factor of two.
-
-  The records of a response do not agree with each other, which is what makes
-  this more than a dedupe. Two shapes occur: every record repeating the final
-  `usage`, and a running counter where the early records hold a partial output
-  and only the last is the answer — `3, 3, 3, 1185` on a real reply here, on
-  25.5% of responses. Charging the first record instead would read 31.5M, a
-  third of the output thrown away.
-
-  A response is therefore held until the file is read and charged once, from its
-  **fullest** record — the one whose usage totals the most — with the fields
-  around it merged across all of them, because `usage.speed` rides on the closing
-  record while the skill and the effort are on the opening one. Deliberately not
-  the *last* record (below the maximum on 2 responses of 51 075 — right almost
-  always, and strictly worse), not per-field maxima (`cache_creation` is nested
-  and carries the TTL split, so a best-of-each-field usage would be one no reply
-  ever had), and not `output_tokens` alone (it agrees with the total on all
-  51 078 responses here, but only because those fields move together, which
-  nothing documents). Tool calls are still counted from every record, since a
-  call lives in exactly one of them.
-
-  `INDEX_VERSION` is bumped: a stored aggregate holds the inflated numbers and
-  its file has not moved, so without the bump it would be reused forever. The
-  first run after this lands re-reads every transcript — about six seconds for
-  2 475 files here.
-
-- **"2843 replys"** on the Agents tab and in the Cache note. `plural` defaults
-  the plural to the word plus an `s`, which is right for every other noun this
-  page counts and wrong for the one it counts most. It had already reached a
-  listing screenshot.
-- **A dated model id now finds its rate.** `ratesFor` stripped `[1m]` and
-  `-fast` but not the date, so `claude-haiku-4-5-20251001` — which is what the
-  transcripts of that model actually carry — missed `RATES` and was billed at
-  the Opus fallback: five times Haiku's own rate, under a row still reading
-  "haiku 4.5", because `shortModel` stripped what `ratesFor` did not. On this
-  machine that model reads $0.40 rather than $2.01. Found by the tilde below,
-  which marked a model that was never actually unknown.
+- A reply is charged once, at its final figures, where the index added every
+  record of a response and billed the same reply as many times as it had content
+  blocks.
+- Output read 100.1M where it is 47.1M, cache writes 1 043M where they are 382M,
+  input 6.8M where it is 2.0M, and cache reads 25.2B where they are 12.6B.
+- The records of one response disagree: on 25.5% of them the early records hold a
+  partial output and only the last is the answer.
+- A response is therefore charged from its fullest record, the one whose usage
+  totals the most, with the fields around it merged across all of them, because
+  `usage.speed` rides on the closing record while the skill and the effort are on
+  the opening one.
+- Tool calls are still counted from every record, since a call lives in exactly
+  one of them.
+- `INDEX_VERSION` is bumped, because a stored aggregate holds the inflated
+  numbers and its file has not moved.
+- The first run after this re-reads every transcript.
+- "2843 replys" on the Agents tab and in the Cache note: `plural` appends an `s`,
+  which is right for every other noun this page counts.
+- A dated model id finds its rate again, where `ratesFor` stripped `[1m]` and
+  `-fast` but not the date.
+- `claude-haiku-4-5-20251001` therefore missed `RATES` and was billed at the Opus
+  fallback, five times its own rate, under a row still reading "haiku 4.5".
+- On this machine that model reads $0.40 rather than $2.01.
 
 ### Added
 
-- **A model with no published rate is marked as a guess.** Its row in Models
-  carries the tilde every other estimate on this page carries, and says why on
-  hover: an id missing from `RATES` is billed at the `FALLBACK` rate, which *is*
-  the Opus rate. Until now the session tooltip said so and the dashboard did
-  not, so an unpriced model appeared there at Opus prices with nothing marking
-  it. The breakdowns are the only place this is drawn — a total that merely
-  includes such a model is left alone.
-- **`<synthetic>` is no longer a model.** It is what the client writes in place
-  of a reply that never arrived — a spent limit, a dropped connection, a 403 —
-  with an all-zero usage, and it was drawn as a row of its own among the models,
-  in the legend, and in the effort matrix. 137 such records here. Its count
-  still reaches the Requests tile, which counts messages rather than models.
-
-- **Spend by agent type**, on the Agents tab. The type a dispatch asked for is
-  recorded in the `.meta.json` the client writes beside each subagent
-  transcript — never inside the transcript, which is why this page could say
-  what subagents cost in total and nothing about which of them. The same file
-  carries the model the dispatch asked for, its depth in the spawn tree and its
-  parent, all now indexed.
-- **Plugin agents are matched by that type** on the Health tab. An agent used to
-  be unmatchable — its type is named in the arguments of the call that spawned
-  it, and the index reads results — so it was reported as "not visible" whether
-  or not it had ever run. It now answers the same question a skill does.
-- **Replies the cache could not answer**, on the Cache tab: calls that sent more
-  than 100k of input at the full rate, with the largest listed by session and
-  project. The first reply of a session is always one; a large one partway
-  through a run is a cache rebuilt rather than reused.
-- **Peak parallel sessions** and **time actually working**, on the Sessions tab,
-  plus a *working* column beside *open* in the table. Gaps longer than five
-  minutes are a session left sitting rather than one thinking, and are not
-  counted as work. The peak counts main transcripts only: a fan-out of a hundred
-  agents is the Agents tab's subject, not one person running a hundred windows.
+- A model with no published rate carries the tilde every other estimate carries,
+  and says why on hover: an id missing from `RATES` is billed at the `FALLBACK`
+  rate, which is the Opus rate.
+- Only the row of the model itself is marked; a total that merely includes such a
+  model is left alone.
+- `<synthetic>` is no longer drawn as a model: it is what the client writes in
+  place of a reply that never arrived, with an all-zero usage.
+- Those records still reach the Requests tile, which counts messages rather than
+  models.
+- Spend by agent type, on the Agents tab, read from the `.meta.json` the client
+  writes beside each subagent transcript.
+- The same file carries the model the dispatch asked for, its depth in the spawn
+  tree and its parent, all now indexed.
+- Plugin agents are matched by that type on the Health tab, where an agent was
+  reported as "not visible" whether or not it had ever run.
+- Replies the cache could not answer, on the Cache tab: calls that sent more than
+  100k of input at the full rate, with the largest listed by session and project.
+- The first reply of a session is always one; a large one partway through a run
+  is a cache rebuilt rather than reused.
+- Peak parallel sessions and time actually working, on the Sessions tab, plus a
+  *working* column beside *open*.
+- Gaps longer than five minutes are a session left sitting rather than one
+  thinking, and are not counted as work.
+- The peak counts main transcripts only, because a fan-out of a hundred agents is
+  the Agents tab's subject.
 
 ## [0.26.0] — 2026-08-14
 
-Everything below, in the stable channel. It went out an hour earlier as
-`0.25.0`, whose odd minor put it in pre-release by mistake — same code, same
-package, one number apart.
+Everything below, in the stable channel. It went out an hour earlier as `0.25.0`,
+whose odd minor put it in pre-release by mistake.
 
 ### Added
 
 - **Open Claude Code** — a button in the editor's title bar, and a command, that
-  starts a Claude Code session as a tab in the group you are looking at, next to
-  the files already open there. Claude Code's own button splits a new editor
-  group off to the right instead. The session runs `claude` from the shell's
-  `PATH`; the tab closes with it when it ends cleanly and stays when it fails, so
-  the reason is still on screen. The tab carries this extension's own icon — the
-  same one as the button.
+  starts a session as a tab in the group you are looking at.
+- Claude Code's own button splits a new editor group off to the right instead.
+- The session runs `claude` from the shell's `PATH`.
+- The tab closes with the session when it ends cleanly and stays when it fails,
+  so the reason is still on screen.
 - `claudeStatusline.openLocation` chooses where that session lands: a tab in the
-  group you are looking at (the default), a tab beside it, the terminal panel at
-  the bottom, or a window of its own. It governs all three ways in — both buttons
-  and the command — is read at the moment you press one, and the status-bar
-  button's hover names the place it will use. Also on the dashboard's Settings
-  tab, under Behaviour.
+  group you are looking at, a tab beside it, the terminal panel, or a window of
+  its own.
+- That setting governs both buttons and the command, and is read at the moment
+  you press one.
 - The tab is named after the session running in it, following `/rename` and the
-  generated title as they change — `claudeStatusline.renameTabs`, on by default.
-  Only tabs this extension opened are renamed, and only while one of them is the
-  active terminal: VS Code's rename acts on the active terminal, so a background
-  tab could only be renamed by switching to it first.
-- The same button in the status bar, left of every segment: `$(terminal)$(sparkle)`,
-  one click for a session in the group you are looking at. The status bar takes
-  codicons only, so it wears the extension's icon as the two glyphs that exist —
-  the prompt and the spark. It is drawn whether or not anything has been read, so
-  it is there on a machine that has never run Claude Code, and the bar's own
-  right-click menu hides it like any other item.
-
-- Every row of the Disk tab now says where it is and offers to open it: the
-  full path on hover, and a **show** button that reveals the directory in
-  Finder. The extension still deletes nothing — the numbers say what is worth
-  removing, the file manager is where removing happens, and the decision stays
-  yours. A wildcard row like `plugins/cache/temp_subdir_*` has no single
-  directory of its own and opens the one holding them all.
+  generated title as they change, under `claudeStatusline.renameTabs`.
+- Only tabs this extension opened are renamed, and only while one of them is the
+  active terminal, because VS Code's rename acts on the active terminal.
+- The same button sits in the status bar as `$(terminal)$(sparkle)`, the two
+  codicons closest to the extension's icon.
+- That button is drawn whether or not anything has been read, so it is there on
+  a machine that has never run Claude Code.
+- Every row of the Disk tab says where it is on hover and offers a **show**
+  button that reveals the directory in Finder.
+- The extension still deletes nothing.
 
 ### Changed
 
-- **The week bar on the Now tab draws spend on the week's own axis.** An even
-  burn puts x% of the limit at x% of the week, so the fill is the spend, the mark
-  is where the week stands, and the gap between them is the over- or underspend
-  itself — red past the mark, green short of it — with the figure and its
-  distance from the plan written on the fill: `72% +17%`. The cells are calendar
-  days with their dates, today in bold, so the rail reads as a week rather than
-  as a bar that happens to be full. Both ends of the window carry their date and
-  hour, and the forecast is stated in every state the way the terminal states it
-  — `dry 1d12h → Sat 15.08, ~13h` — pinned quietly to the right edge when it
-  lands past the reset. This replaces a rail that measured time alone.
-- The moment a week runs out is now recorded, because it is the one fact here
-  that cannot be recomputed: the forecast divides by what is left, so at 100% it
-  collapses onto the present and answers "now" for the rest of the window. It is
-  written once, on the first reading that sees the quota gone, together with the
-  plan of that moment — 100% reached with 54% of the week elapsed is a different
-  week from 100% reached on the last evening. Kept in `week-marks.json` beside
-  the reading log, which is trimmed by design; a window that ran out before this
-  shipped has its moment recovered from the readings, and one whose readings do
-  not reach back that far says the moment is unknown rather than inventing a
-  date. After that the mark stays where it happened while `now` keeps moving, so
-  the distance between them is how long you have been without quota — and the
-  delta on the fill melts towards zero as the plan catches up.
-- **The status-bar bar is seven cells — one per day of the window**, the same
-  axis the page draws: spending exactly to plan fills as many cells as the week
-  has days behind it. At six they were 28-hour blocks standing for nothing, and
-  a whole percent of the limit could not fit in one.
+- The week bar draws spend on the week's own axis, so the gap between the fill
+  and the mark is the over- or underspend itself, red past it and green short of
+  it.
+- The figure and its distance from the plan are written on the fill, as
+  `72% +17%`.
+- The cells are calendar days with their dates, today in bold.
+- Both ends of the window carry their date and hour, and the forecast is stated
+  the way the terminal states it, as `dry 1d12h → Sat 15.08, ~13h`.
+- The moment a week runs out is recorded, because the forecast divides by what is
+  left and collapses onto the present at 100%.
+- The mark is written once, on the first reading that sees the quota gone,
+  together with the plan of that moment, and kept in `week-marks.json` beside the
+  reading log.
+- A window that ran out before this shipped has its moment recovered from the
+  readings, or says it is unknown rather than inventing a date.
+- The status-bar bar is seven cells, one per day of the window, where six were
+  28-hour blocks standing for nothing.
 - Nothing is said about pace in the first half hour of a window or below 2%
-  spent — not by the bar, not by `{drift}`, not by the hover, not by the page.
-  With a plan of 0% every fraction of a percent is "ahead of schedule", so a
-  fresh week opened red over one percent. One flag decided in `pace()` rather
-  than the same arithmetic in four places.
-- At 100% no forecast is offered at all. The formula divides what is left by the
-  rate, so it returned the present moment and the bar printed the current hour
-  as a prediction — `dry ~03h`. When the quota is gone the fact worth having is
-  when it ended, and that one is recorded rather than computed.
-- The zone between the fill and the plan mark is measured to the mark itself
-  rather than to the whole percent printed under it. The plan arrives floored —
-  6.43% of the week elapsed is reported as 6% — so the zone stopped just short of
-  the line it exists to reach, and the gap was visible on screen.
-- The Settings tab's Behaviour panel shows every choice at once instead of
-  hiding all but one behind a dropdown: the side of the bar and where Claude
-  Code opens are a card per option, each with a line saying what picking it
-  does, and the save target is a pair of buttons. A setting whose alternatives
-  are invisible is a setting nobody changes.
-- Reading and the network is built from the same rows: the name and the sentence
-  above the control rather than beside it, so the two panels of that tab read as
-  one form. The switches themselves are unchanged, and still write immediately.
-- The environment panels of the Claude Code tab say what each variable does on
-  the page instead of in a tooltip — the browser drew that whole sentence on one
-  line across the panel next to it — and show the documented default beside the
-  value, marked when what is set differs from it. Defaults come from the
-  reference's own prose, which states one for 32 of the 315 documented
-  variables; the rest keep a dash rather than a guess.
-- Dates on this page are written day first — `11.08`, and `Tue 11.08` in Busiest
-  days. They were `08.11`, the only place on the page or in the bar that put the
-  month first.
-- The status bar's own context menu names this extension's items after it:
-  **Claude Statusline: Open** for the button and **Claude Statusline 1**, **2**,
-  … for the segments. They read as `Claude Code` and `Claude 4` before, sitting
-  in one list with Claude Code's own entry, where neither said whose they were.
-  VS Code remembers a hidden item by id, so nothing you had hidden comes back.
+  spent: against a plan of 0% every fraction of a percent reads as ahead.
+- At 100% no forecast is offered, because the formula returned the present moment
+  and the bar printed the current hour as a prediction.
+- The zone between the fill and the plan mark is measured to the mark rather than
+  to the floored percent printed under it.
+- The Behaviour panel shows every choice at once instead of hiding all but one
+  behind a dropdown, as a card per option with a line saying what picking it does.
+- Reading and the network are built from the same rows, with the name and the
+  sentence above the control rather than beside it.
+- The Claude Code tab says what each environment variable does on the page
+  instead of in a tooltip, which the browser drew as one line across the panel.
+- The same tab shows each variable's documented default beside its value, marked
+  when the two differ.
+- Defaults come from the reference's own prose, which states one for 32 of the
+  315 documented variables; the rest keep a dash rather than a guess.
+- Dates are written day first — `11.08` — everywhere on the page.
+- The status bar's context menu names this extension's items after it, where they
+  read as `Claude Code` and `Claude 4` before.
 
 ## [0.25.0] — 2026-08-14
 
 Published to the pre-release channel by mistake and superseded an hour later by
-0.26.0, which carries exactly the same code. Listed here because it exists on
-both storefronts: anyone running it is running 0.26.0 under an older number.
+0.26.0, which carries the same code. Anyone running it is running 0.26.0 under an
+older number.
 
 ## [0.24.0] — 2026-08-13
 
@@ -633,110 +455,88 @@ Carries everything prepared as 0.22.2, which was never released.
 
 ### Changed
 
-- The week track on the Now tab measures time end to end: grey is the part of
-  the week already gone and its right edge is now, then how long the quota lasts
-  and how long the week runs on without it, each block carrying its duration.
-- Out of quota is its own state on the track: one block from now to the reset
-  with the length of the wait in it.
-- Both marks on the track are always named — `now` under the rail, `dry` over
-  it. Neither is hidden when they sit close together.
-- Weekly spend moved off the track into the line above it, as a sentence.
+- The week track measures time end to end: the part already gone, how long the
+  quota lasts, and how long the week runs on without it.
+- Out of quota is its own state on the track, one block from now to the reset.
+- Both marks are always named, `now` under the rail and `dry` over it.
+- Neither mark is hidden when the two sit close together.
+- Weekly spend moved off the track into the line above it.
 - Status-bar bar glyphs: `█` spent, `▓` spent past the plan, `▒` plan not yet
   reached, `░` the rest.
-- The Pace tooltip says "behind plan" where it said "under plan", matching the
-  track.
-- The forecast tooltip carries how long the week runs on after the quota is
-  gone, and says "out of quota" instead of a time when there is none left.
+- The Pace tooltip says "behind plan" where it said "under plan".
+- The forecast tooltip carries how long the week runs on after the quota is gone,
+  and says "out of quota" instead of a time when there is none left.
 
 ### Fixed
 
-- The status-bar bar no longer shows an overspend cell for a week that is behind
-  plan. 216 of the 10 201 possible spend/plan pairs were wrong.
-- The countdown in the page header no longer sits at zero when a redraw is
-  skipped — with the Settings tab open, or the panel hidden.
-- Credits print in the currency the endpoint named, instead of assuming dollars.
+- The status-bar bar no longer shows an overspend cell for a week behind plan;
+  216 of the 10 201 possible spend/plan pairs were wrong.
+- The countdown no longer sits at zero when a redraw is skipped.
+- Credits print in the currency the endpoint named instead of assuming dollars.
 - A meter in a tooltip no longer draws every filled cell as spend past the plan.
-- The Changelog tab lists every release in the file, not the newest 80. 281 of
-  361 were hidden.
+- The Changelog tab lists every release in the file: 281 of 361 were hidden.
 - "Refresh on a timer", switched off, now stops the transcript pass, the spend
-  across every project and the limits request — not only the redraw. Focus on
-  the window no longer triggers them either.
-- A new refresh interval takes effect when set, without a window reload. Ticking
-  another checkbox no longer restarts the countdown.
-- "Releases ahead" counts only releases ahead of the running client, not every
-  release on the page.
+  across every project and the limits request, not only the redraw.
+- Focus on the window no longer triggers those reads either.
+- A new refresh interval takes effect without a window reload.
+- Ticking another checkbox no longer restarts the countdown.
+- "Releases ahead" counts only releases ahead of the running client.
 - The links in the README's table of contents work on both listing pages.
-- The "Across all requests" figure on the Context tab reads the Opus rate from
-  the file that holds rates, not a copy of it.
-- Settings values shaped like a credential are masked on the Client tab even
-  when the name gives nothing away — `GH_PAT` and a Sentry DSN were printed in
-  full.
+- The "Across all requests" figure reads the Opus rate from the file that holds
+  rates rather than a copy of it.
+- Settings values shaped like a credential are masked even when the name gives
+  nothing away — `GH_PAT` and a Sentry DSN were printed in full.
 
 ### Internal
 
 - Removed a function with no caller, a filter on a field that does not exist, a
   shadowed import, and a chart axis built twice per drawing.
-- The overflow probe rendered the Changelog tab empty and priced every agent at
-  zero, so it measured a page shorter and narrower than the real one. It now
-  opens what is folded before measuring.
-- The week-track probe read a stylesheet from a file that no longer exists and
-  could not run. Rewritten to measure label rectangles in the browser, and
-  verified against a known-bad input.
+- The overflow probe now opens what is folded before measuring; it had rendered
+  the Changelog tab empty and priced every agent at zero, so it measured a page
+  shorter than the real one.
+- The week-track probe was rewritten to measure label rectangles in the browser
+  and verified against a known-bad input; it had been reading a stylesheet from a
+  file that no longer exists and could not run at all.
 - Five tests for the week track, which had none.
 - The trim on the limits history has a test, and its comment carries a measured
   figure instead of one out by a factor of five.
 
 ## [0.22.1] — 2026-08-12
 
-**The first version on Open VSX** — the registry Cursor, Windsurf, VSCodium and
-Gitpod install from, where this extension had no listing at all. The code is
-0.22.0 unchanged; what is new is where you can get it.
+The first version on Open VSX — the registry Cursor, Windsurf, VSCodium and
+Gitpod install from. The code is 0.22.0 unchanged.
 
-The VS Code Marketplace stays on 0.22.0 for now. Its upload step ran before Open
-VSX, so a release that could not authenticate there reached neither registry;
-the step is off until the token is back, and the listing catches up with the
-next version after that.
+The VS Code Marketplace stays on 0.22.0: its upload step ran before Open VSX, so
+a release that could not authenticate there reached neither registry.
 
 ## [0.22.0] — 2026-08-11
 
-**The first version actually published.** Even minor, so it lands in the stable
-channel where the Install button works without picking anything from a dropdown.
-It carries everything 0.20.0 was, plus the fixes that came after it: a run is
-aged by its files rather than by its directory, and three tests stopped measuring
-the machine they run on.
+The first version actually published, in the stable channel. It carries
+everything 0.20.0 was, plus the fixes that came after it.
 
 ## [0.21.0] — 2026-08-11
 
 ### Fixed
 
-- **A run is as old as its files, not as its directory.** Liveness took the
-  newest of the run directory's own creation time and its contents, so a
-  directory stamped "just now" over hours-old files — a checkout, a copy, a
-  restore — read as a live workflow. Creation time now answers only for a run
-  that has not written its first line yet.
+- A run is as old as its files, not as its directory: a directory stamped "just
+  now" over hours-old files read as a live workflow.
 
 ## [0.20.0] — 2026-08-11
 
-**First public release.** Even minor, so this is the stable channel: the Install
-button on the page works for everyone, without picking a pre-release from a
-dropdown.
-
-What it is, in one line each — a status bar you write yourself out of 45
+First public release, stable channel: a status bar you write yourself out of 45
 placeholders, and a 23-tab dashboard over every Claude Code transcript on the
-machine: limits with a pace forecast, spend by day, model, project and branch,
+machine — limits with a pace forecast, spend by day, model, project and branch,
 subagents and workflow runs with what each agent cost, cache and friction, and a
-Setup section that reads the installation itself. Everything is read locally;
-one request leaves the machine and it has a switch.
+Setup section that reads the installation itself.
 
-The full feature history is below, from 0.5.0 onwards.
+Everything is read locally; one request leaves the machine and it has a switch.
 
 ## [0.19.24] — 2026-08-11
 
 ### Fixed
 
 - The Claude Code tab said "No settings files could be read" where it simply had
-  none to read — the wording turned an empty listing screenshot into a broken
-  one.
+  none to read.
 
 ## [0.19.23] — 2026-08-11
 
@@ -749,12 +549,11 @@ The full feature history is below, from 0.5.0 onwards.
 
 ### Added
 
-- **Pause the refresh from the page header**, beside Reindex and the countdown.
-  It is the same `claudeStatusline.autoRefresh` as the switch on the Settings
-  tab — one setting with two controls, and moving either moves the other. While
-  it is paused the page is not rebuilt at all, so an expanded list stays
-  expanded and the scroll position stays put; the countdown says `paused`
-  instead of counting.
+- Pause the refresh from the page header, beside Reindex and the countdown.
+- The control is the same `claudeStatusline.autoRefresh` as the switch on the
+  Settings tab, and moving either moves the other.
+- While it is paused the page is not rebuilt at all, so an expanded list stays
+  expanded and the scroll position stays put.
 
 ## [0.19.21] — 2026-08-11
 
@@ -762,68 +561,61 @@ The full feature history is below, from 0.5.0 onwards.
 
 - The listing counts the tabs again — twenty-three, not twenty-two — and says
   what the Claude Code tab answers.
-- Privacy names the credential masking as a promise rather than leaving it as an
-  implementation detail, and describes the optional refresh by what it fetches
-  (Anthropic's published documentation and changelog, public files, no
-  credentials) rather than by counting URLs that keep changing.
+- Privacy names the credential masking as a promise rather than an implementation
+  detail.
+- The optional refresh is described by what it fetches rather than by counting
+  URLs that keep changing.
 
 ## [0.19.20] — 2026-08-11
 
 ### Added
 
-- **A Claude Code tab**, under Setup. It answers three questions and keeps them
-  apart: what you have set, what you could set, and what you have moved away
-  from the default. The settings files are listed in the order the client
-  resolves them — managed first, then the project, then you — with the file that
-  won each key named, the files it shadowed counted, and a button to open any of
-  them. Environment variables are shown twice on purpose: the `env` block every
-  session gets, and what this editor window happens to have inherited, which are
-  not the same thing and disagree often enough to be worth saying.
-- **A settings reference**, parsed from Anthropic's published documentation and
+- A Claude Code tab, under Setup, answering three questions: what you have set,
+  what you could set, and what you have moved away from the default.
+- Settings files are listed in the order the client resolves them — managed
+  first, then the project, then you.
+- The file that won each key is named, the files it shadowed are counted, and
+  there is a button to open any of them.
+- Environment variables are shown twice on purpose: the `env` block every session
+  gets, and what this editor window happens to have inherited.
+- A settings reference parsed from Anthropic's published documentation and
   packaged with the extension, so defaults and descriptions are there offline.
-  It carries the date it was read. With the network switch on it refreshes
-  itself; with it off the tab says how old the packaged copy is rather than
-  presenting it as current.
+- That reference carries the date it was read, and with the network switch off
+  the tab says how old the packaged copy is.
 
 ### Fixed
 
-- **Values that read like credentials are hidden.** The Health tab printed the
-  `env` block of `~/.claude/settings.json` verbatim, so anyone keeping an
-  `ANTHROPIC_API_KEY` there had it drawn on the page. Anything whose name looks
-  like a key, token, secret or password now renders as `•••`, at any depth
-  inside an object — but not when the value is a plain number, because
-  `MAX_THINKING_TOKENS` is a budget and hiding it helps nobody.
-- **Managed settings are read.** `/Library/Application Support/ClaudeCode/managed-settings.json`
-  overrides everything else on a machine that has one, and the extension did not
-  look at it — so on a managed install every number it derived from settings
-  could be wrong.
+- Values that read like credentials are hidden: the Health tab printed the `env`
+  block of `~/.claude/settings.json` verbatim, so an `ANTHROPIC_API_KEY` kept
+  there was drawn on the page.
+- Anything whose name looks like a key, token, secret or password now renders as
+  `•••` at any depth, but not when the value is a plain number, because
+  `MAX_THINKING_TOKENS` is a budget.
+- Managed settings are read: `managed-settings.json` overrides everything else,
+  and on a managed install every number derived from settings could be wrong.
 
 ## [0.19.19] — 2026-08-11
 
 ### Changed
 
-- **Renamed.** The extension is *Dashboard & Statusline for Claude Code*, and its
-  id moved from `claude-statusline` to `claude-dashboard`. It outgrew the old
-  name: the bar is one surface of it, the dashboard is the product. Settings keys
-  stay `claudeStatusline.*` — renaming those would break configs for no visible
-  gain.
-- **A new icon**, chosen against the icons of the extensions people actually
-  install: a progress ring for the limit and three bars for the dashboard, on a
-  teal-to-indigo plate that survives 32 px. The old one is kept in the repository
-  as `media/icon-v1`.
-- The same mark now sits next to the title on the dashboard page.
-- The README is a listing page rather than a reference manual: badges, six
-  selling points, four dark/light screenshot pairs, a table of contents, and a
-  **Known issues** section that says what does not work (Windows, remote hosts,
-  vscode.dev) instead of leaving it to be discovered.
+- Renamed to *Dashboard & Statusline for Claude Code*, with the id moving from
+  `claude-statusline` to `claude-dashboard`.
+- Settings keys stay `claudeStatusline.*`, because renaming those would break
+  configs for no visible gain.
+- A new icon: a progress ring for the limit and three bars for the dashboard, on
+  a teal-to-indigo plate that survives 32 px.
+- The old one is kept in the repository as `media/icon-v1`, and the same mark now
+  sits next to the title on the dashboard page.
+- The README is a listing page rather than a reference manual, with a **Known
+  issues** section that says what does not work: Windows, remote hosts,
+  vscode.dev.
 
 ## [0.19.18] — 2026-08-11
 
 ### Fixed
 
-- The limits request is the extension's own: it reads the token and writes the
-  shared cache itself, so nothing here needs a configured `statusline.sh`. The
-  documentation said otherwise.
+- The limits request is the extension's own, so nothing here needs a configured
+  `statusline.sh`; the documentation said otherwise.
 
 ## [0.19.17] — 2026-08-11
 
@@ -868,61 +660,65 @@ The full feature history is below, from 0.5.0 onwards.
 
 ### Added
 
-- **Usage credits** — what the account has spent past its plan. The only figure
-  in the extension that is billed money rather than an estimate, and the only one
+- Usage credits — what the account has spent past its plan, the only figure in
+  the extension that is billed money rather than an estimate and the only one
   written without a `~`.
 
 ## [0.19.10] — 2026-08-11
 
 ### Added
 
-- **A monthly budget** (`claudeStatusline.monthlyBudget`): the month drawn against
-  a ceiling, with a word at 80 % and at 100 % — once each, not every tick.
-- **Export** of the index as CSV or JSON.
-- **Plugin and MCP health**: what each plugin ships, which of it ever ran, and
-  which MCP servers earn their place. Version checking against a plugin's
-  marketplace is opt-in (`claudeStatusline.checkPluginUpdates`).
-- **A memory tab**: the files loaded into every prompt — `CLAUDE.md`, `rules/`,
+- A monthly budget (`claudeStatusline.monthlyBudget`): the month drawn against a
+  ceiling, with a word at 80% and at 100% — once each, not every tick.
+- Export of the index as CSV or JSON.
+- Plugin and MCP health: what each plugin ships, which of it ever ran, and which
+  MCP servers earn their place.
+- Version checking against a plugin's marketplace is opt-in
+  (`claudeStatusline.checkPluginUpdates`).
+- A memory tab: the files loaded into every prompt — `CLAUDE.md`, `rules/`,
   project memory — sized in tokens and priced across every request made.
 
 ## [0.19.9] — [0.19.4] — 2026-08-11
 
 ### Added
 
-- The Now tab grew a live workflow panel: one table per running run, a row per
-  agent with the model and the effort it was given, agents named rather than
-  numbered, and in dispatch order.
+- A live workflow panel on the Now tab: one table per running run, a row per
+  agent with the model and the effort it was given, in dispatch order.
+- Agents are named rather than numbered.
 
 ### Fixed
 
 - Every agent of a run is listed, not the first page of them.
-- A run whose session is alive is given an hour of quiet before it counts as
-  abandoned, rather than ten minutes — slow runs were being written off.
+- A run whose session is alive gets an hour of quiet before it counts as
+  abandoned, rather than ten minutes, because slow runs were being written off.
 - Long names wrap at word boundaries and say the whole thing on hover.
 
 ## [0.19.3] — [0.19.2] — 2026-08-11
 
 ### Fixed
 
-- The charts have a y-axis with round ticks, the calendar has a scale that says
-  what the darkest cell costs a day, and a bar list no longer draws 1 % as a full
-  bar when a percentage series has a single row.
+- The charts have a y-axis with round ticks, and the calendar has a scale that
+  says what the darkest cell costs a day.
+- A bar list no longer draws 1% as a full bar when a percentage series has a
+  single row.
 - The overflow probe was replaced: the old one compared `scrollWidth` to
-  `clientWidth` on a page that hides overflow, which cannot ever report a
-  problem. The new one measures geometry, and was verified against a revision
-  known to be broken.
+  `clientWidth` on a page that hides overflow, so it could never report a
+  problem.
+- The new one measures geometry, and was verified against a revision known to be
+  broken.
 
 ## [0.19.1] — [0.19.0] — 2026-08-11
 
 ### Added
 
-- Everything needed to publish: a marketplace identity, an icon, a licence,
-  workspace-trust capabilities, and `claudeStatusline.fetchLimits` — the one
-  outbound request made opt-out, where off means the OAuth token is never read.
+- Everything needed to publish: a marketplace identity, an icon, a licence and
+  workspace-trust capabilities.
+- `claudeStatusline.fetchLimits`, the one outbound request, made opt-out — off
+  means the OAuth token is never read.
 
 ### Changed
 
-- The whole page rebuilt on one vocabulary: tiles, panels, share cells. No
+- The whole page rebuilt on one vocabulary: tiles, panels, share cells, with no
   heading outside a panel anywhere in the 22 tabs.
 - The first screen redesigned, and the hovers given meters that match the bar.
 
@@ -935,10 +731,10 @@ The full feature history is below, from 0.5.0 onwards.
 
 ### Added
 
-- **A settings editor** in the dashboard: ready-made bars, a field per segment
-  with a live preview, and a placeholder palette carrying current values.
-- **The Now tab**, cut from the same sections as the status-bar tooltips, so the
-  page and the hover cannot disagree.
+- A settings editor in the dashboard: ready-made bars, a field per segment with a
+  live preview, and a placeholder palette carrying current values.
+- The Now tab, cut from the same sections as the status-bar tooltips, so the page
+  and the hover cannot disagree.
 - The open page redraws on the same tick as the bar, keeping its section, tab and
   scroll position.
 
@@ -946,19 +742,20 @@ The full feature history is below, from 0.5.0 onwards.
 
 ### Added
 
-- **The workflow panel**: a tree of runs in the Activity Bar with three states
+- The workflow panel: a tree of runs in the Activity Bar with three states
   (running, finished, abandoned), phases and agents, priced from `usage` records
-  only — a live run assembled from its journal and its agents' transcripts,
-  because the snapshot is written once, at the end.
-- Status-bar placeholders for a running workflow, commands to open the run's
+  only.
+- A live run is assembled from its journal and its agents' transcripts, because
+  the snapshot is written once, at the end.
+- Status-bar placeholders for a running workflow, and commands to open the run's
   script and copy its id.
 
 ## [0.6.4] — [0.6.0] — 2026-08-09
 
 ### Added
 
-- **The usage dashboard** over an index of every transcript on the machine, open
-  from any status-bar item.
+- The usage dashboard over an index of every transcript on the machine, open from
+  any status-bar item.
 - Tooltips rewritten for a GUI rather than for one terminal line.
 
 ### Fixed
