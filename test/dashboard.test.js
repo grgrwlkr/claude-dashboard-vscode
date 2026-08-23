@@ -1402,6 +1402,59 @@ test('what a session starts with is a tab of its own, not a panel in Settings', 
     assert.match(launch, /<section class="tab" data-tab="launch"/);
 });
 
+// The tab opens on a verdict, not on a list of options: what the measured answer
+// is today, before the first choice. Without it every visit re-derives the same
+// three figures from memory, and memory is where the wrong one came from.
+test('the launch tab opens with the measured verdict', () => {
+    const launch = db.launchTab({}, {});
+    const banner = launch.indexOf('class="canon"');
+    assert.ok(banner > -1, 'the launch tab needs its verdict banner');
+    assert.ok(banner < launch.indexOf('>Where it opens</h2>'),
+        'the verdict belongs above the first choice');
+    // The three findings it exists to carry, each with the figure that decides it.
+    assert.match(launch, /85\.7%/);
+    assert.match(launch, /44\.4%/);
+    assert.match(launch, /91\.7%/);
+    // A verdict with no date rots silently.
+    assert.match(launch, /2026-08-23/);
+    // The gap is Fable alone *against the pairing* — the system card does measure
+    // Fable alone at max. A negative absolute here would be false, and the figures
+    // above are exactly what would make a reader believe it.
+    assert.match(launch, /against the pairing/);
+    assert.ok(!/Not measured anywhere/.test(launch), 'no unqualified negative absolute');
+});
+
+// A verdict the reader has to translate into three separate clicks is a verdict
+// half delivered. The banner names the settings it implies and carries a button
+// that puts them in the controls below — the same three values, so the sentence
+// and the button cannot drift apart.
+test('the verdict banner applies itself to the choices', () => {
+    const launch = db.launchTab({}, {});
+    // Named in the text, not only implied by a percentage.
+    assert.match(launch, /advisor/i);
+    assert.match(launch, /opus 1M/);
+    assert.match(launch, /xhigh/);
+    // The button carries the values it will set, so the page needs no second copy.
+    assert.match(launch, /class="canon-apply"[^>]*data-model="opus\[1m\]"/);
+    assert.match(launch, /data-effort="xhigh"/);
+    assert.match(launch, /data-advisor="fable"/);
+});
+
+// The button is inert without the handler, and the handler lives in the page
+// script rather than in the tab's markup — a test on the markup alone would pass
+// over a button that does nothing.
+test('the page script wires the verdict button', () => {
+    const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0 });
+    // The handler names the button's class and fires an event the form listens
+    // for; without the event the choice changes on screen and Save stays dark.
+    assert.match(html, /canon-apply/);
+    assert.match(html, /dispatchEvent/);
+    // Order is load-bearing, not cosmetic: rankAdvisors runs off the model's own
+    // change event and clears an advisor the new model would refuse, so setting
+    // the advisor first leaves it cleared a moment later.
+    assert.match(html, /\['model', 'effort', 'advisor'\]/);
+});
+
 // Every option here is a name that does not explain itself — `opus 1M` against
 // `opus`, `xhigh` against `max`, `best` against `opusplan`. The descriptions are
 // the client's own words; the rates and windows are what the choice costs.
@@ -1908,7 +1961,11 @@ test('an input painted from the theme covers both containers it appears in', () 
     const rules = [...db.STYLE.matchAll(/([^{}]+)\{([^}]*--vscode-input-background[^}]*)\}/g)]
         .map(([, selector]) => selector.trim().replace(/\s+/g, ' '));
     assert.ok(rules.length, 'no rule paints an input from the theme at all');
-    assert.ok(rules.some((sel) => sel.includes('.panel-body > input')),
+    // Any input inside a panel, not one nesting depth of them: the child
+    // combinator covered the field that sat directly in a panel body and missed
+    // the next one the moment it was wrapped in a row of its own. The rule that
+    // does not have to be revisited is the descendant one.
+    assert.ok(rules.some((sel) => /\.panel-body input/.test(sel)),
         `the theme colours reach only: ${rules.join(' | ')}`);
 });
 
@@ -1929,4 +1986,203 @@ test('the heading pill shows a chosen style whose file has gone', () => {
     const launch = db.launchTab({ outputStyle: 'Deleted style' }, {}, []);
     const head = launch.slice(launch.indexOf('>Output style</h2>'));
     assert.match(head.slice(0, 400), /Deleted style/);
+});
+
+// The command the button will run, written out. Reading six panels and working
+// out what they add up to is exactly the sum a person cannot do in their head,
+// and the answer is also the thing you want to paste into a terminal on another
+// machine. It is shown, never typed into: the panels above are the controls, and
+// a line you could edit would raise the question of which one wins.
+test('the launch tab writes out the command it would run', () => {
+    const launch = db.launchTab({
+        model: 'opus[1m]', effort: 'max', advisor: 'fable',
+        outputStyle: 'Explanatory', launchArgs: '--permission-mode acceptEdits',
+    }, {}, []);
+    // Exactly what the terminal receives, quoting included — `esc` leaves the
+    // shell's single quotes alone and only the JSON's double quotes are escaped.
+    assert.match(launch, /claude --model 'opus\[1m\]' --effort 'max' --advisor 'fable'/);
+    assert.match(launch, /--settings '\{&quot;outputStyle&quot;:&quot;Explanatory&quot;\}' --permission-mode acceptEdits/);
+});
+
+test('the command line is shown rather than edited, and can be copied', () => {
+    const launch = db.launchTab({ model: 'opus' }, {}, []);
+    const panel = launch.slice(launch.indexOf('data-panel="command"'));
+    // The panel itself, not what follows it: the save bar below carries the
+    // scope radios, and a window wide enough to reach them finds an input that
+    // is nothing to do with this line.
+    const block = panel.slice(0, panel.indexOf('</section>'));
+    assert.match(block, /<code[^>]*id="launchCommand"/, 'the command needs an element of its own');
+    // The claim is about the line, not the panel: the alias below it is named in
+    // a field, which is a control like any other. What must never become typable
+    // is the command itself, or which of the two wins becomes a question.
+    const line = block.slice(block.indexOf('id="launchCommand"'));
+    assert.ok(!/<input|<textarea/.test(line.slice(0, line.indexOf('</code>'))),
+        'the command must not be an editable field');
+    assert.match(block, /data-copy/, 'no way to copy it');
+});
+
+// Left alone, every choice passes no flag — so the line is the bare command
+// rather than a sentence about there being nothing to show.
+test('with nothing chosen the command is just claude', () => {
+    const launch = db.launchTab({}, {}, []);
+    const panel = launch.slice(launch.indexOf('data-panel="command"'));
+    assert.match(panel.slice(0, 400), />claude</);
+});
+
+// The page has to ask for a fresh line when a choice changes and copy it when
+// the button is pressed. Both are script, which a rendered page cannot prove —
+// what it can prove is that the wiring is present at all, which is what went
+// missing the day `acquireVsCodeApi` was called twice and the whole editor died
+// quietly.
+test('the page asks for a fresh command and hands it over on request', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: demoSystem(), config: { presets: [], palette: [] } });
+    assert.match(html, /type: 'launchPreview'/, 'nothing ever asks for the line');
+    assert.match(html, /msg\.type === 'launchPreview'/, 'nothing listens for the answer');
+    assert.match(html, /data-copy/, 'the copy button is not wired');
+    assert.match(html, /type: 'copy'/, 'copying never reaches the editor');
+});
+
+// The same command as a shell alias, for the times the session is started
+// outside the editor. The naive `alias name='<command>'` does not survive our
+// own quoting — the inner quotes close the outer ones and zsh answers
+// `no matches found: opus[1m]`, the very failure the quoting exists to prevent —
+// so the whole command is quoted again on the way in.
+test('the alias line survives the quoting the command already carries', () => {
+    const line = db.aliasLine('cvs', {
+        model: 'opus[1m]', effort: 'max', outputStyle: 'Explanatory',
+        args: '--permission-mode acceptEdits',
+    });
+    assert.equal(line,
+        `alias cvs='claude --model '\\''opus[1m]'\\'' --effort '\\''max'\\'' `
+        + `--settings '\\''{"outputStyle":"Explanatory"}'\\'' --permission-mode acceptEdits'`);
+});
+
+test('an alias with no name is no alias at all', () => {
+    assert.equal(db.aliasLine('', { model: 'opus' }), '');
+    assert.equal(db.aliasLine('   ', { model: 'opus' }), '');
+});
+
+// A name is typed by hand into a shell, so it is held to what a shell will
+// accept as one: anything else would produce a line that cannot be sourced.
+test('a name a shell would refuse is refused here', () => {
+    assert.equal(db.aliasLine('my alias', { model: 'opus' }), '');
+    assert.equal(db.aliasLine("bad';rm -rf /", { model: 'opus' }), '');
+    assert.match(db.aliasLine('claude-vs', { model: 'opus' }), /^alias claude-vs=/);
+    assert.match(db.aliasLine('cx_2', { model: 'opus' }), /^alias cx_2=/);
+});
+
+test('the launch tab shows the alias beside the command, with its own copy', () => {
+    const launch = db.launchTab({ model: 'opus', aliasName: 'claude-vs' }, {}, []);
+    const panel = launch.slice(launch.indexOf('data-panel="command"'));
+    const block = panel.slice(0, panel.indexOf('</section>'));
+    assert.match(block, /alias claude-vs=/, 'the alias line is not drawn');
+    assert.match(block, /id="launchAlias"/, 'the alias needs an element of its own');
+    assert.match(block, /data-copy="launchAlias"/, 'the alias cannot be copied');
+    assert.match(block, /id="aliasName"/, 'there is nowhere to name it');
+});
+
+// The name is saved like the rest of the launch choices, and the alias follows
+// the command as it changes — a line that lagged behind the panels above it
+// would be worse than none, because it looks authoritative.
+test('the alias name is part of what the page saves and asks about', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: demoSystem(), config: { presets: [], palette: [] } });
+    assert.match(html, /aliasName: /, 'the name is never saved');
+    assert.match(html, /msg\.aliasLine|aliasOut/, 'nothing shows the answer');
+});
+
+// Writing into a shell file somebody else wrote and maintains. The rule is that
+// everything outside our own markers comes back byte for byte: this file holds
+// aliases the user tends by hand, and a feature that rearranged them once would
+// never be trusted again.
+const RC = [
+    '# my shell', 'export EDITOR=vim', '',
+    "alias cx='claude --effort max'", "alias cxf='claude --model fable'", '',
+].join('\n');
+
+test('the alias is added to a shell file without disturbing a line of it', () => {
+    const out = db.withAliasBlock(RC, "alias cvs='claude --model opus'");
+    assert.ok(out.startsWith(RC.trimEnd()), 'the file that was there must survive intact');
+    assert.match(out, /alias cvs='claude --model opus'/);
+    assert.match(out, /# >>> claude-dashboard >>>[\s\S]*# <<< claude-dashboard <<</);
+});
+
+test('writing it twice leaves one block, not two', () => {
+    const once = db.withAliasBlock(RC, "alias a='claude'");
+    const twice = db.withAliasBlock(once, "alias b='claude --effort max'");
+    assert.equal((twice.match(/>>> claude-dashboard >>>/g) || []).length, 1);
+    assert.match(twice, /alias b='claude --effort max'/);
+    assert.ok(!twice.includes("alias a='claude'"), 'the old alias is still there');
+});
+
+test('an empty line removes the block and leaves the file as it was', () => {
+    const withBlock = db.withAliasBlock(RC, "alias a='claude'");
+    const cleared = db.withAliasBlock(withBlock, '');
+    assert.equal(cleared.trimEnd(), RC.trimEnd());
+    assert.ok(!cleared.includes('claude-dashboard'), 'a marker was left behind');
+});
+
+// The user's own aliases sit in this file. Anything of theirs that happens to
+// mention us is still theirs.
+test('a line of the user own that mentions the extension is not touched', () => {
+    const theirs = `${RC}\n# claude-dashboard is a vscode extension\nalias mine='claude --model haiku'\n`;
+    const out = db.withAliasBlock(theirs, "alias ours='claude'");
+    assert.match(out, /# claude-dashboard is a vscode extension/);
+    assert.match(out, /alias mine='claude --model haiku'/);
+});
+
+test('an empty file gets a block and nothing else', () => {
+    const out = db.withAliasBlock('', "alias a='claude'");
+    assert.match(out, /^# >>> claude-dashboard >>>/);
+    assert.ok(out.endsWith('\n'), 'a shell file ends in a newline');
+});
+
+// Removing what is not there is not an error, and does not add a trailing blank
+// line every time it is asked.
+test('clearing a block that was never written changes nothing', () => {
+    assert.equal(db.withAliasBlock(RC, ''), RC);
+});
+
+// The block says where it came from, because a stranger reading this file in a
+// year has to know what wrote it and how to be rid of it.
+test('the block explains itself', () => {
+    const out = db.withAliasBlock('', "alias a='claude'");
+    assert.match(out, /Setup . Launch/, 'nothing says where it is managed from');
+    assert.match(out, /claudeStatusline\.aliasName|alias name/i, 'nothing says how to remove it');
+});
+
+test('the shell file is chosen by the shell, not guessed', () => {
+    assert.match(db.shellRcFor('/bin/zsh'), /\.zshrc$/);
+    assert.match(db.shellRcFor('/bin/bash'), /\.bashrc$/);
+    assert.equal(db.shellRcFor('/usr/local/bin/fish'), '', 'fish does not take this syntax');
+    assert.equal(db.shellRcFor(''), '');
+});
+
+// The button that writes it, and what it says. Writing into somebody's shell
+// file is not something to do behind a Save: it is asked for by name, and the
+// panel says which file and that a new terminal is needed before it exists.
+test('the alias can be written into the shell file from the page', () => {
+    const launch = db.launchTab({ model: 'opus', aliasName: 'claude-vs' }, {}, []);
+    const block = launch.slice(launch.indexOf('data-panel="command"'));
+    const panel = block.slice(0, block.indexOf('</section>'));
+    assert.match(panel, /data-install-alias/, 'nothing offers to write it');
+    assert.match(panel, /\.zshrc|shell file/i, 'the file it would touch is not named');
+});
+
+test('the page sends the install and says nothing was written until it is', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: demoSystem(), config: { presets: [], palette: [] } });
+    assert.match(html, /type: 'installAlias'/, 'the button never reaches the extension');
+    assert.match(html, /data-install-alias/, 'the button is not wired');
+});
+
+// The page hands over choices, never the text: whatever it draws, the extension
+// builds what it writes into a file a shell runs.
+test('the install button sends the choices rather than the drawn line', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: demoSystem(), config: { presets: [], palette: [] } });
+    const call = html.slice(html.indexOf("type: 'installAlias'"));
+    assert.match(call.slice(0, 120), /settings: settingsToSave\(\)/);
+    assert.ok(!/type: 'installAlias', line:/.test(html), 'the page still sends its own text');
 });

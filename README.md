@@ -69,7 +69,7 @@ yourself, and a dashboard over every transcript on the machine.
 |  |  |
 | --- | --- |
 | **📉 Never hit the wall by surprise** | The weekly and 5-hour windows with a pace bar: `█` is spend, `▓` is spend ahead of an even burn, `▒` is plan you have not reached yet. `dry` says when you hit 100 % if the pace holds, and stays quiet when that lands after the reset. |
-| **🧠 The context of *this* window** | How full the model's window is for the Claude session open in this VS Code window, rather than the newest session on the machine. Hover for model, effort, thinking, advisor, cache share, auto-compact distance, branch and client version. |
+| **🧠 The context of the tab you are in** | How full the model's window is for the session in the terminal tab you are looking at — switch tabs and the bar follows, rather than describing whichever session wrote last. Hover for model, effort, thinking, advisor, cache share, auto-compact distance, branch and client version. |
 | **💸 What it actually costs** | Session spend with a burn rate, today across every project, and a dashboard that breaks it down by day, model, project, branch, tool and skill. Estimated from public rates; usage credits, the one figure that is real money, are labelled as such. |
 | **🤖 The agents nobody else shows** | Subagents and workflow agents write their own transcripts, so on a machine that runs fan-outs their spend is the larger half, and the terminal statusline never sees it. Here they get a tree, a table and a live row each. |
 | **🎛️ A bar you write yourself** | The bar is a template, not a layout: 45 placeholders, optional groups that vanish when empty, 11 ready-made bars, and an editor with a live preview. |
@@ -464,6 +464,7 @@ All of these apply the moment they change; none needs a window reload.
 | `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>`: `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
 | `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>`: `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |
 | `claudeStatusline.outputStyle` | `""` | Ask for an output style for the session: `default`, `Proactive`, `Explanatory`, `Learning`, `Concise`. There is no flag for it, so it travels as `--settings '{"outputStyle":"…"}'`, which merges with your settings files rather than replacing them. A style of your own is a markdown file in `~/.claude/output-styles`; the **Setup → Launch** tab lists what is there and writes the name here for you |
+| `claudeStatusline.aliasName` | `""` | A name for the same session started from a terminal. The **Setup → Launch** tab writes out `alias <name>='claude …'` carrying every choice above it, and copies it on a click; paste it into your `~/.zshrc`. Nothing here writes to your shell files. A name is what a shell accepts for one, or no line is offered. User settings only |
 | `claudeStatusline.launchArgs` | `""` | Anything else for the command line, after those: `--permission-mode acceptEdits`, an exact model id. Written as typed, so quoting is yours. User settings only, so a project cannot set it through `.vscode/settings.json` |
 | `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal, because VS Code's rename acts on the active terminal |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
@@ -512,6 +513,14 @@ claude --model 'opus[1m]' --effort 'max' --advisor 'fable' --settings '{"outputS
 
 Values are quoted on the way in for a reason: unquoted, `opus[1m]` is a shell
 pattern, and zsh answers `no matches found` without running anything.
+
+The tab writes that line out under the choices, with a button that copies it, and
+under it the same command as a shell alias — name it in `claudeStatusline.aliasName`
+and paste the line into your `~/.zshrc` to start the session you configured here
+from a terminal instead. The alias is quoted a second time, because written the
+obvious way its inner quotes would close the outer ones and hand `opus[1m]` back
+to the shell as a pattern. Nothing here writes to your shell files; the line is
+yours to paste.
 **Claude: Open Claude Code with…** asks for a model and an effort instead of
 reading the settings, for the one run that is not like the others.
 
@@ -535,10 +544,13 @@ Nothing is asked of the CLI; it has no channel to ask.
   stamp use the same file a terminal `statusline.sh` would, so if you run one too
   the two share a single request rather than making two. Data older than 30
   minutes is not drawn.
-- **The window's session** — `~/.claude/sessions/*.json`. The panel's process is a
-  direct child of the extension host, so `ppid(pid) === process.pid` maps a
-  window to its own session exactly, rather than guessing at the most recent
-  record.
+- **The window's session** — `~/.claude/sessions/*.json`, and which of them the
+  bar is about is decided in that order: the terminal tab you are looking at
+  first, matched by `ppid(claude) === pid(shell)`; then the Claude Code panel,
+  whose process is a direct child of the extension host, so
+  `ppid(pid) === process.pid` names it exactly; then, failing both, the most
+  recent session in this workspace. A tab with no Claude in it changes nothing —
+  the answer falls back rather than emptying the bar.
 - **Context and statistics** — `~/.claude/projects/<slug>/<sessionId>.jsonl`.
   Context is read from a 256 KB tail in about 2 ms; the full pass for cost,
   duration and edits takes about 20 ms and runs on the minute tick.

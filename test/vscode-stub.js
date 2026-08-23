@@ -186,7 +186,7 @@ const vscode = {
     extensions: {
         getExtension: (id) => installed.get(id),
     },
-    env: { clipboard: { writeText: async () => {} } },
+    env: { clipboard: { writeText: async (text) => { vscode.__copied.push(text); } } },
 };
 
 // --- helpers for the tests --------------------------------------------------
@@ -251,8 +251,14 @@ vscode.__activateTerminal = (terminal) => {
 };
 vscode.__setSettings = (next) => { settings = next; };
 vscode.__setSaveTarget = (uri) => { saveTarget = uri; };
+// One path is one folder, as every older caller means it; an array is a
+// multi-root workspace, where the order is the whole point — VS Code answers
+// "the first folder" from it, and a test about that cannot be written with one.
 vscode.__setWorkspace = (folder) => {
-    vscode.workspace.workspaceFolders = folder ? [{ uri: { fsPath: folder } }] : undefined;
+    const folders = Array.isArray(folder) ? folder : [folder].filter(Boolean);
+    vscode.workspace.workspaceFolders = folders.length
+        ? folders.map((fsPath) => ({ uri: { fsPath } }))
+        : undefined;
 };
 vscode.__changeConfiguration = (key) => {
     // A real event answers per key. Without an argument every key matches, which
@@ -265,7 +271,9 @@ vscode.__changeConfiguration = (key) => {
 vscode.__focusWindow = (focused = true) => {
     for (const cb of listeners.window) cb({ focused });
 };
+vscode.__copied = [];
 vscode.__reset = () => {
+    vscode.__copied.length = 0;
     items.length = 0;
     panels.length = 0;
     errors.length = 0;

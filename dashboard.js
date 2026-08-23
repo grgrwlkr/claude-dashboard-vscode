@@ -10,6 +10,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { fmtCost, ratesFor } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
@@ -2610,6 +2611,149 @@ function settingsTab(config) {
 const statePills = (...items) => `<div class="pills">${items.filter(Boolean).map(([text, value, muted]) =>
     `<span class="pill${muted ? ' pill-muted' : ''}">${esc(text)} <b>${esc(value)}</b></span>`).join('')}</div>`;
 
+// What the button types into the terminal it opens. A bare name, resolved by the
+// shell's PATH like any other command — no path of ours to go stale.
+const CLAUDE_COMMAND = 'claude';
+
+// It lives here rather than beside the button that runs it so that the page can
+// write the line out without a second implementation: what the Launch tab shows
+// and what the terminal receives are the same string from the same function, and
+// a quoting rule cannot hold in one and not the other.
+
+// A value is quoted because it is being written into a shell, and `opus[1m]` is
+// the case that decides it: unquoted, zsh reads the brackets as a glob and
+// answers `no matches found: opus[1m]` without running anything at all.
+const quoted = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+
+/**
+ * The command line the button runs.
+ *
+ * Flags first, in a fixed order, then whatever the user wrote themselves — their
+ * text goes in as typed, because quoting it would break the moment it holds more
+ * than one argument.
+ */
+function claudeCommand({ model, effort, advisor, outputStyle, args } = {}) {
+    const parts = [CLAUDE_COMMAND];
+    if (model) parts.push('--model', quoted(model));
+    if (effort) parts.push('--effort', quoted(effort));
+    if (advisor) parts.push('--advisor', quoted(advisor));
+    // The client has no `--output-style` flag; `outputStyle` is an ordinary
+    // setting, and `--settings` takes JSON that merges with the settings files —
+    // "a key you set here overrides the same key in local, project, or user
+    // settings, and a key you omit keeps its lower-level value". So one key is
+    // sent and everything else the user has configured stays as it was.
+    if (outputStyle) parts.push('--settings', quoted(JSON.stringify({ outputStyle })));
+    if (args) parts.push(String(args).trim());
+    return parts.join(' ');
+}
+
+/**
+ * The same command as a shell alias, for starting a session outside the editor.
+ *
+ * The command is quoted a second time on the way in, and that is the whole
+ * difficulty: written the obvious way, `alias name='<command>'` breaks the
+ * moment the command carries a quote of its own — the inner one closes the
+ * outer, and zsh answers `no matches found: opus[1m]`, which is the exact
+ * failure the quoting was added to prevent. `quoted` turns each into `'\''`,
+ * which survives both levels.
+ *
+ * The name is held to what a shell accepts for one, because it is typed into a
+ * shell by hand: a name with a space in it produces a line nobody can source,
+ * and a name with a quote in it produces one nobody should.
+ */
+function aliasLine(name, launch) {
+    const clean = String(name || '').trim();
+    if (!clean || !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(clean)) return '';
+    return `alias ${clean}=${quoted(claudeCommand(launch))}`;
+}
+
+// The fence around the one part of a shell file this extension owns. Everything
+// outside it is the user's, and comes back byte for byte: this is a file people
+// tend by hand for years, and a tool that reordered it once would never be let
+// near it again. The markers are on their own lines and unmistakable, so a line
+// of theirs that happens to mention us is still theirs.
+const ALIAS_OPEN = '# >>> claude-dashboard >>>';
+const ALIAS_CLOSE = '# <<< claude-dashboard <<<';
+
+/**
+ * A shell file with our alias in it, given the file as it is now.
+ *
+ * Pure on purpose: the writing is somebody else's job, so what goes into the
+ * file can be held against what was in it without a disk anywhere near a test.
+ * An empty line removes the block, which is what clearing the name means.
+ */
+function withAliasBlock(text, line) {
+    const body = String(text || '');
+    const open = body.indexOf(ALIAS_OPEN);
+    const close = body.indexOf(ALIAS_CLOSE);
+    // Cut the old block out first, so writing and removing are the same path and
+    // a second write cannot leave a second block.
+    let rest = body;
+    if (open >= 0 && close > open) {
+        const after = close + ALIAS_CLOSE.length;
+        rest = body.slice(0, open).replace(/\n*$/, '') + body.slice(after).replace(/^\n/, '\n');
+    }
+    rest = rest.replace(/\s+$/, '');
+    if (!String(line || '').trim()) return rest ? `${rest}\n` : '';
+
+    const block = [
+        ALIAS_OPEN,
+        '# Written by the Claude Dashboard extension, from Setup → Launch.',
+        '# Rename or clear the alias name there to change or remove this.',
+        line,
+        ALIAS_CLOSE,
+    ].join('\n');
+    return rest ? `${rest}\n\n${block}\n` : `${block}\n`;
+}
+
+/**
+ * The file this shell reads at startup, or nothing when we do not know.
+ *
+ * Only the two shells whose `alias` takes this syntax. Fish has aliases too, but
+ * spells the rest differently, and a line written in the wrong dialect is worse
+ * than no line: it fails at every prompt, in a file the user has to go and fix.
+ */
+function shellRcFor(shell, home = os.homedir()) {
+    const name = String(shell || '').split('/').pop();
+    if (name === 'zsh') return path.join(home, '.zshrc');
+    if (name === 'bash') return path.join(home, '.bashrc');
+    return '';
+}
+
+/**
+ * The one thing the page can say before any choice is made: what the published
+ * measurements settle, and what they leave open. It sits above the options
+ * because the choice below it is otherwise made from a price list and a memory
+ * of which name sounds strongest — which is exactly how `max` and Fable ended up
+ * being carried for weeks against the numbers.
+ *
+ * Figures are quoted with the date they were checked. A verdict with no date
+ * rots silently, and this one is one system card away from being wrong.
+ */
+const launchCanon = () => `<aside class="canon">
+    <h2 class="canon-title">What the measurements settle</h2>
+    <ul class="canon-list">
+        <li><b>Opus 5 with a Fable advisor</b><i>85.7%</i>
+            the most accurate configuration Anthropic has published &mdash; against Opus alone at
+            84.4% and Fable alone at <code>medium</code> 83.4%. One run does not separate them.</li>
+        <li><b><code>xhigh</code>, not <code>max</code></b><i>44.4% vs 43%</i>
+            Opus 5 on FrontierBench. No published measurement puts <code>max</code> above
+            <code>xhigh</code>; on most work it only adds cost, and can tip into overthinking.</li>
+        <li><b>Opus 5 matches Fable 5</b><i>91.7% vs 91.3%</i>
+            on a coding subset both models largely saturate, at about 60% of the cost &mdash;
+            inside run-to-run noise. Fable still leads on multimodal work and human preference.</li>
+    </ul>
+    <p class="canon-set"><span>In the controls below that is
+        <b>model</b> <code>opus 1M</code> &middot; <b>effort</b> <code>xhigh</code> &middot;
+        <b>advisor</b> <code>fable</code> &mdash; Opus does the work, Fable reads the whole
+        conversation and advises it.</span>
+        <button type="button" class="canon-apply" data-model="opus[1m]" data-effort="xhigh"
+            data-advisor="fable">Apply these</button></p>
+    <p class="canon-src">Checked 2026-08-23 against the Claude Opus 5 system card and Anthropic&rsquo;s
+        cost-and-intelligence page. The gap in the evidence: Fable alone above <code>medium</code>
+        against the pairing &mdash; every published comparison uses Fable at <code>medium</code>.</p>
+</aside>`;
+
 function launchTab(config, total, styles) {
     const cfg = config || {};
     const session = tierOf(cfg.model);
@@ -2626,6 +2770,19 @@ function launchTab(config, total, styles) {
     // defaults to false, so a style that does not ask for them replaces Claude
     // Code's engineering instructions rather than adding to them — a fact that
     // otherwise announces itself only after the session has started answering.
+    // One reading of the choices, used three times: the line that is shown, the
+    // alias built from it, and the command the button runs.
+    const launch = {
+        model: cfg.model, effort: cfg.effort, advisor: cfg.advisor,
+        outputStyle: cfg.outputStyle, args: cfg.launchArgs,
+    };
+    const alias = aliasLine(cfg.aliasName, launch);
+    // Named on the button so nobody has to guess which file is about to change.
+    // The page cannot see the shell, so the extension's own is the answer, and
+    // the fallback is what this project is developed and used on.
+    const rcName = (shellRcFor(cfg.shell || process.env.SHELL || '/bin/zsh') || '~/.zshrc')
+        .replace(os.homedir(), '~');
+
     const ownStyles = (styles || []).map((s) => [
         s.name, s.name, s.description || 'A style of your own',
         s.keepCoding ? '' : 'without the coding instructions',
@@ -2675,6 +2832,7 @@ function launchTab(config, total, styles) {
     const flags = args ? args.split(/\s+/).filter((a) => a.startsWith('-')).length : 0;
 
     return `<section class="tab" data-tab="launch" hidden>
+        ${launchCanon()}
         ${panel('Where it opens', cards('openLocation', PLACES, cfg.openLocation || 'activeGroup'), {
         note: 'What <b>Open Claude Code</b> runs, and where the session lands. <b>Claude: Open Claude Code with…</b> asks for a model and an effort instead, for a single run.',
         aside: statePills(['opens', named(cfg.openLocation || 'activeGroup', PLACES)]),
@@ -2714,6 +2872,29 @@ function launchTab(config, total, styles) {
                 value="${esc(cfg.launchArgs || '')}">`, {
         note: 'Anything else for that command line, written as typed — user settings only.',
         aside: statePills(flags ? ['', `${flags} extra flag${flags === 1 ? '' : 's'}`] : ['', 'none', true]),
+    })}
+        ${panel('The command', `<div class="cmd"><code id="launchCommand">${esc(claudeCommand(launch))}</code>
+          <button class="btn" data-copy="launchCommand">Copy</button></div>
+        <div class="cmd-alias">
+          <label for="aliasName">Shell alias</label>
+          <input id="aliasName" type="text" spellcheck="false" placeholder="claude-vs"
+                 value="${esc(cfg.aliasName || '')}">
+          <span class="cmd-hint">a name for your own shell, so the same session starts outside the editor</span>
+        </div>
+        <div class="cmd"><code id="launchAlias"${alias ? '' : ' class="empty-preview"'}>${
+        esc(alias || 'Name it above to get a line for your .zshrc')}</code>
+          <button class="btn" data-copy="launchAlias"${alias ? '' : ' disabled'}>Copy</button>
+          <button class="btn" data-install-alias${alias ? '' : ' disabled'}>Write to ${esc(rcName)}</button></div>
+        <div class="cmd-hint">Writing puts it in a block of its own; everything else in that file is
+        left as it is, and a copy is kept beside it the first time. A terminal already
+        open will not have it — open a new one.</div>`, {
+        id: 'command',
+        // Written out because six panels of choices add up to one line nobody
+        // can hold in their head, and because that line is the thing you paste
+        // into a terminal somewhere else. Shown, not typed into: the panels
+        // above are the controls, and an editable copy would raise the question
+        // of which of the two wins.
+        note: 'What <b>Open Claude Code</b> runs with these choices. It follows them as you pick; nothing here is read back, so editing it is not offered.',
     })}
         <div class="save-bar">
           <span class="save-where">Save to</span>
@@ -3154,10 +3335,68 @@ if (list && api) {
   // A radio, a checkbox and a typed character all reach this: the input event
   // covers typing, change covers the rest, and every tab holding a field is part
   // of the same form.
+  // The command line under the choices, kept in step with them. It is asked
+  // for rather than assembled here: the builder that answers is the one that
+  // opens the terminal, so the line shown and the line run cannot drift apart
+  // over a quoting rule. Debounced like the segment previews, because typing in
+  // the extra arguments would otherwise send a message per keystroke.
+  const commandOut = document.getElementById('launchCommand');
+  const aliasOut = document.getElementById('launchAlias');
+  let commandTimer;
+  const askCommand = () => {
+    if (!commandOut || !api) return;
+    clearTimeout(commandTimer);
+    commandTimer = setTimeout(() => api.postMessage({ type: 'launchPreview', settings: settingsToSave() }), 120);
+  };
+
   for (const form of document.querySelectorAll('section.tab[data-tab="settings"], section.tab[data-tab="launch"]')) {
-    form.addEventListener('input', settleSave);
-    form.addEventListener('change', settleSave);
+    form.addEventListener('input', () => { settleSave(); askCommand(); });
+    form.addEventListener('change', () => { settleSave(); askCommand(); });
   }
+
+  // The banner states a verdict; this puts that verdict into the controls it is
+  // about, so reading it and acting on it are not two separate jobs.
+  //
+  // Model goes first on purpose: rankAdvisors runs off the model's own change
+  // event and clears the advisor when the pair would be refused, so setting the
+  // advisor before the model would hand it a model it no longer has.
+  // Assigning the checked property fires nothing by itself, so each input is
+  // told to announce the change: that is what lights Save and re-ranks the
+  // advisor rows.
+  for (const btn of document.querySelectorAll('.canon-apply')) {
+    btn.addEventListener('click', () => {
+      for (const name of ['model', 'effort', 'advisor']) {
+        const want = btn.dataset[name];
+        if (want == null) continue;
+        const input = document.querySelector('input[name="' + name + '"][value="' + want + '"]');
+        // A value this client no longer offers leaves the row alone rather than
+        // clearing it: a stale button must not silently unset a live choice.
+        if (!input || input.disabled) continue;
+        input.checked = true;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+  }
+
+  // Through the editor: a webview's own clipboard write is not guaranteed, and
+  // handing this line over is the whole reason it is drawn.
+  document.addEventListener('click', (e) => {
+    const install = e.target.closest('[data-install-alias]');
+    if (install && api) {
+      // The choices, not the line: the extension builds what it writes, so the
+      // page cannot hand a shell file a string of its own.
+      api.postMessage({ type: 'installAlias', settings: settingsToSave() });
+      return;
+    }
+    const btn = e.target.closest('[data-copy]');
+    if (!btn || !api) return;
+    const src = document.getElementById(btn.dataset.copy);
+    if (!src) return;
+    api.postMessage({ type: 'copy', text: src.textContent });
+    const was = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = was; }, 1200);
+  });
 
   for (const btn of saveBtns) {
     btn.addEventListener('click', () => {
@@ -3186,11 +3425,23 @@ if (list && api) {
         advisor: picked('advisor', ''),
         outputStyle: picked('outputStyle', ''),
         launchArgs: document.getElementById('launchArgs').value.trim(),
+        aliasName: document.getElementById('aliasName').value.trim(),
     };
   }
 
   window.addEventListener('message', (event) => {
     const msg = event.data || {};
+    if (msg.type === 'launchPreview') {
+      if (commandOut) commandOut.textContent = msg.command || 'claude';
+      if (aliasOut) {
+        const has = !!msg.alias;
+        aliasOut.textContent = has ? msg.alias : 'Name it above to get a line for your .zshrc';
+        aliasOut.classList.toggle('empty-preview', !has);
+        const btn = document.querySelector('[data-copy="launchAlias"]');
+        if (btn) btn.disabled = !has;
+      }
+      return;
+    }
     if (msg.type === 'preview') {
       [...list.querySelectorAll('.seg-preview')].forEach((el, i) => {
         const out = msg.previews[i];
@@ -3523,6 +3774,7 @@ module.exports = {
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab, launchTab,
+    claudeCommand, aliasLine, withAliasBlock, shellRcFor,
     limitsTab, weekLabel, nowTab, sidebarNow, sidebarPage, sidebarSections, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     // The places a session can be opened in — the cards on the Settings tab and,

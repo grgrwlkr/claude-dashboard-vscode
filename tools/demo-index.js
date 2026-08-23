@@ -387,6 +387,7 @@ function demo(now = Date.now(), { weeklyPct = 57 } = {}) {
                 openLocation: 'activeGroup', model: 'opus[1m]', effort: 'max',
                 advisor: 'fable', outputStyle: 'Explanatory',
                 launchArgs: '--permission-mode acceptEdits',
+                aliasName: 'claude-vs',
                 palette: Object.entries(seg.fields({})).map(([name, f]) => ({
                     name, topic: f.topic, doc: f.doc, value: VALUES[name] ?? '',
                 })),

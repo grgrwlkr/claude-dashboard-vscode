@@ -8,6 +8,70 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
+## [Unreleased]
+
+### Added
+
+- Setup → Launch opens on what the published measurements settle, above the
+  options rather than inside them: the Opus 5 + Fable advisor pairing at 85.7%,
+  `xhigh` ahead of `max` at 44.4% against 43%, and Opus 5 matching Fable 5 at
+  about 60% of the cost. Each figure carries the date it was checked, because a
+  verdict with no date rots silently, and this one is one system card away from
+  being wrong.
+- The same banner spells the verdict out as settings — model `opus 1M`, effort
+  `xhigh`, advisor `fable` — and an **Apply these** button puts them in the
+  controls below, so reading the verdict and acting on it are not two jobs. Save
+  lights as it would for a choice made by hand; the write is still yours.
+
+### Changed
+
+- The bar describes the session in the terminal tab you are looking at, where it
+  used to describe whichever session in the workspace wrote last.
+- A tab with no Claude in it falls back to the workspace answer rather than
+  emptying the bar.
+- The switch redraws at once instead of waiting up to ten seconds for the next
+  tick.
+- VS Code's active terminal is the one with focus or the one that had it last,
+  so the bar does not go quiet when you click into a file.
+- A terminal already active when the window opens is picked up at startup, since
+  a reload restores the tabs without announcing which was last used.
+
+### Added
+
+- The Launch tab writes out the command **Open Claude Code** would run, with a
+  button that copies it.
+- The line follows the choices as they are picked, before anything is saved.
+- It is shown rather than typed into: the panels above are the controls, and an
+  editable copy would raise the question of which of the two wins.
+- The builder moved beside the page, so the line shown and the line run are the
+  same string from the same function.
+- The same command is offered as a shell alias, named by
+  `claudeStatusline.aliasName`, for starting the session from a terminal.
+- The alias is quoted a second time: written the obvious way, its inner quotes
+  close the outer ones and zsh answers `no matches found: opus[1m]`.
+- A name a shell would refuse produces no line rather than one that cannot be
+  sourced.
+- **Write to ~/.zshrc** puts it there, in a block of its own that the extension
+  owns; everything else in the file comes back byte for byte.
+- A copy of the file is kept beside it the first time, and the replace is atomic,
+  so a crash cannot leave it half-written.
+- It happens on that button and never on a save: a settings page that quietly
+  edited a shell file would be a surprise nobody asked for.
+- Clearing the name removes the block and leaves the file as it was.
+- A shell whose `alias` does not take this syntax is told so rather than handed a
+  line that fails at every prompt.
+
+### Fixed
+
+- The rule that paints inputs from the theme reached only a direct child of a
+  panel, so a field wrapped in a row of its own fell through to the browser's
+  control — dark on a light page, the same failure 0.42.0 shipped.
+- A session opens in the first folder of the workspace instead of wherever the
+  last editor happened to be. The button never said which directory it wanted,
+  so in a multi-root window VS Code answered from the editor history — and a
+  Claude session's directory is its identity: the CLAUDE.md it reads, the
+  project memory it carries and the transcript it writes all follow from it.
+
 ## [0.44.0] — 2026-08-21
 
 ### Added

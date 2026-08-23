@@ -133,6 +133,41 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
    the table wants that: anything else in the body — a switch, a paragraph —
    has to be put back in line with the heading above it. */
 .panel-flush > .panel-body > :not(table) { padding-left: 15px; padding-right: 15px; }
+
+/* The verdict above the launch options. Deliberately not a .panel: a panel is a
+   question the page is asking, and this one is an answer it already has, so it
+   carries an accent edge and no border of its own to keep the two apart. Figures
+   sit in a chip because the eye goes to them first and the sentence second. */
+.canon { background: var(--vscode-editorWidget-background);
+  border-left: 3px solid var(--vscode-charts-blue); border-radius: 0 6px 6px 0;
+  padding: 12px 15px 13px; margin: 0 0 16px; }
+.canon-title { font-size: 12px; font-weight: 600; margin: 0 0 9px; opacity: .75;
+  text-transform: uppercase; letter-spacing: .06em; }
+.canon-list { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.canon-list li { margin: 0 0 8px; line-height: 1.55; opacity: .85; }
+.canon-list li:last-child { margin-bottom: 0; }
+.canon-list b { font-weight: 600; opacity: 1; }
+/* An <i> so the figure is one token in the markup rather than a wrapper div —
+   the list stays readable in the source, which is where it gets edited. */
+.canon-list i { font-style: normal; font-family: var(--vscode-editor-font-family);
+  font-size: 11px; padding: 1px 6px; margin: 0 8px; border-radius: 3px;
+  white-space: nowrap; color: var(--vscode-charts-blue);
+  background: var(--vscode-input-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-panel-border); }
+/* The verdict turned into an instruction, with the button that carries it out.
+   The row wraps rather than truncates: the sentence is the point, and a button
+   that has slipped off the edge is a button nobody presses. */
+.canon-set { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px;
+  font-size: 12px; margin: 11px 0 0; padding: 10px 0 0; line-height: 1.55;
+  border-top: 1px solid var(--vscode-panel-border); }
+.canon-set > span { flex: 1 1 22ch; opacity: .85; }
+.canon-set code { font-size: 11px; }
+.canon-apply { flex: 0 0 auto; font: inherit; font-size: 12px; cursor: pointer;
+  padding: 4px 12px; border-radius: 3px; border: 1px solid transparent;
+  color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.canon-apply:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.canon-apply:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.canon-src { font-size: 11px; opacity: .55; margin: 10px 0 0; line-height: 1.5; max-width: 104ch; }
 .panel-flush th:first-child, .panel-flush td:first-child { padding-left: 15px; }
 .panel-flush th:last-child, .panel-flush td:last-child { padding-right: 15px; }
 /* Two panels side by side where the page is wide enough for it. */
@@ -720,13 +755,14 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .chip-btn:hover { background: var(--vscode-list-hoverBackground); }
 .pal-val { margin-left: auto; opacity: .5; font-size: 11px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 14ch; }
-/* Both containers an input appears in: inside a `field()` on Settings, and bare
-   in a panel body on Launch. These rules named .form for a long time, a class
-   nothing on the page carries, and then .field alone, which the Launch tab's
-   Extra arguments field is not inside — either way the input fell through to
-   the browser's own control, which under color-scheme: light dark is painted
-   dark on a light page. The bare case shipped that way in 0.42.0. */
-.field select, .field input, .panel-body > input { font: inherit; padding: 3px 6px; border-radius: 4px;
+/* Every input on the page, wherever it sits. This selector has been narrowed
+   twice and been wrong twice: it named .form, a class nothing carries, and then
+   .field alone, which the Launch tab's Extra arguments field is not inside —
+   that one shipped in 0.42.0 as a black box on a light theme. A child
+   combinator failed the same way the moment a field was wrapped in a row. The
+   browser's own control under color-scheme: light dark is painted dark whatever
+   the page is, so anything this misses is visibly wrong on one theme. */
+.field select, .field input, .panel-body input { font: inherit; padding: 3px 6px; border-radius: 4px;
   color: var(--vscode-input-foreground, inherit);
   background: var(--vscode-input-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
@@ -764,6 +800,26 @@ ul.log li { margin: 2px 0; opacity: .85; }
    is for, the reason it cannot be picked, and a figure to compare it by. The
    name and the description share a line rather than stacking, because ten models
    stacked two-high is a page of scrolling for a list you read across. */
+/* The command line and its button on one row: the line is monospace because it
+   is shell, wraps because it is long, and selects on click so it can be taken
+   without the button too. */
+.cmd { display: flex; align-items: flex-start; gap: 10px; }
+.cmd code { flex: 1; min-width: 0; font-family: var(--vscode-editor-font-family);
+    font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+    user-select: all; padding: 7px 9px; border-radius: 4px;
+    background: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background));
+    border: 1px solid var(--vscode-panel-border); }
+.cmd .btn { flex: none; }
+.cmd + .cmd, .cmd-alias { margin-top: 10px; }
+/* The name and what it is for on one line, so the field reads as a label rather
+   than as another setting that happens to sit here. */
+.cmd-alias { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.cmd-alias label { font-weight: 600; font-size: 12.5px; }
+.cmd-alias input { width: 22ch; }
+.cmd-hint { font-size: 11.5px; opacity: .72; }
+.cmd code.empty-preview { opacity: .55; font-style: italic; }
+.cmd .btn[disabled] { opacity: .4; cursor: default; }
+
 .cards { display: grid; gap: 4px; }
 /* Separates the client's styles from your own inside one radio group: a
    heading rather than a second panel, because the choice is still one choice. */

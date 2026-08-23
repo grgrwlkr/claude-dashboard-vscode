@@ -324,6 +324,12 @@
           "scope": "machine",
           "markdownDescription": "Anything else to put on the command line, after the two flags above — `--permission-mode acceptEdits`, `--fallback-model sonnet`, an exact model id.\n\nWritten into the shell exactly as typed, so quoting is yours: a value with brackets in it, such as a `[1m]` suffix, has to be quoted or the shell will read it as a pattern.\n\nThis one is yours alone — a project cannot set it through `.vscode/settings.json`, because free text going into a shell is not something a repository you opened should be able to choose."
         },
+        "claudeStatusline.aliasName": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "A name for the same session started from a terminal instead of the button.\n\nThe **Setup \u2192 Launch** tab writes the line out for you — `alias <name>='claude \u2026'`, carrying every choice above it — and copies it on a click. Paste it into your `~/.zshrc` or `~/.bashrc`; nothing here writes to your shell files.\n\nA name is what a shell accepts for one: a letter or underscore, then letters, digits, `_` or `-`. Anything else and no line is offered.\n\nYours alone — a repository cannot name an alias in your shell through `.vscode/settings.json`."
+        },
         "claudeStatusline.renameTabs": {
           "type": "boolean",
           "default": true,

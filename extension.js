@@ -24,42 +24,9 @@ const STALE_AFTER = 600;
 // often than the limits — those hit the network and stay on their minute tick.
 const CONTEXT_TICK = 10;
 
-// What the button types into the terminal it opens. A bare name, resolved by the
-// shell's PATH like any other command — no path of ours to go stale.
-const CLAUDE_COMMAND = 'claude';
-
-// The aliases `--model` takes and the levels `--effort` takes, from the one list
-// each that the page, the manifest and this quick pick all read — `dashboard.js`,
-// beside the other choices the Settings tab draws. The empty first entry is the
-// page's "client decides"; a pick has nothing to offer for it, so it is dropped.
 const values = (list) => list.map(([value]) => value).filter(Boolean);
 
-// A value is quoted because it is being written into a shell, and `opus[1m]` is
-// the case that decides it: unquoted, zsh reads the brackets as a glob and
-// answers `no matches found: opus[1m]` without running anything at all.
-const quoted = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
 
-/**
- * The command line the button runs.
- *
- * Flags first, in a fixed order, then whatever the user wrote themselves — their
- * text goes in as typed, because quoting it would break the moment it holds more
- * than one argument.
- */
-function claudeCommand({ model, effort, advisor, outputStyle, args } = {}) {
-    const parts = [CLAUDE_COMMAND];
-    if (model) parts.push('--model', quoted(model));
-    if (effort) parts.push('--effort', quoted(effort));
-    if (advisor) parts.push('--advisor', quoted(advisor));
-    // The client has no `--output-style` flag; `outputStyle` is an ordinary
-    // setting, and `--settings` takes JSON that merges with the settings files —
-    // "a key you set here overrides the same key in local, project, or user
-    // settings, and a key you omit keeps its lower-level value". So one key is
-    // sent and everything else the user has configured stays as it was.
-    if (outputStyle) parts.push('--settings', quoted(JSON.stringify({ outputStyle })));
-    if (args) parts.push(String(args).trim());
-    return parts.join(' ');
-}
 
 const launchSettings = () => {
     const conf = vscode.workspace.getConfiguration('claudeStatusline');
@@ -863,14 +830,67 @@ function fastTick(state) {
     renameActiveTab(state);
 }
 
-// The window's session outlives ticks, but a panel can be closed and reopened —
-// re-read the registry once the cached session is gone.
+/**
+ * Which session the bar is about.
+ *
+ * The terminal you are looking at wins. `findOwnSession` matches a session whose
+ * parent is the extension host, which is the Claude Code panel — a session
+ * started in a terminal has its shell for a parent, so those fall through to
+ * "same workspace, newest transcript". With two tabs open that answer flips
+ * between them as they write, and the bar describes whichever one typed last
+ * without saying so.
+ *
+ * A tab with no session in it — a shell, a dev server, `git log` — changes
+ * nothing: the previous answer stands rather than emptying the bar, because an
+ * empty bar reads as broken rather than as "nothing to say about this tab".
+ *
+ * VS Code's active terminal is "the one that currently has focus or most
+ * recently had focus", so this follows the last terminal you touched and does
+ * not go quiet when the focus moves into a file.
+ */
 function refreshSession(state) {
-    const current = state.session;
-    if (current) {
-        try { process.kill(current.pid, 0); return; } catch { state.session = null; }
+    const shell = state.activeShellPid;
+    if (shell) {
+        const inTab = s.sessionForShell(shell);
+        if (inTab) { state.session = inTab; state.sessionShell = shell; return; }
     }
+    // The cached session is kept while its process lives — but not when it was
+    // taken from a tab that is no longer the active one, or switching tabs would
+    // leave the bar on the tab you just left.
+    const current = state.sessionShell && state.sessionShell !== shell ? null : state.session;
+    if (current) {
+        try { process.kill(current.pid, 0); state.session = current; return; } catch { /* gone */ }
+    }
+    state.sessionShell = 0;
     state.session = s.findOwnSession(state.workspace);
+}
+
+/**
+ * The shell of the terminal being looked at, which is what ties a tab to the
+ * session running in it. The pid arrives through a promise, so it is resolved
+ * once here rather than on every tick.
+ *
+ * The bar is redrawn as soon as it lands rather than on the next tick: ten
+ * seconds of the previous tab's context and spend, with nothing saying whose
+ * numbers they are, is the silently-wrong-session this exists to remove. Only
+ * the cheap reads run — the expensive pass keeps its own tick.
+ */
+function watchActiveTerminal(state, draw = false) {
+    const redraw = () => {
+        if (!draw) return;
+        refreshSession(state);
+        collectFast(state);
+        render(state);
+    };
+    const active = vscode.window.activeTerminal;
+    // A terminal with no pid to offer is not an error: `processId` is somebody
+    // else's promise, and a tab that never started a shell has none.
+    if (!active || !active.processId) { state.activeShellPid = 0; redraw(); return; }
+    active.processId.then((pid) => {
+        if (vscode.window.activeTerminal !== active) return;
+        state.activeShellPid = pid || 0;
+        redraw();
+    }, () => { /* never started */ });
 }
 
 // --- dashboard --------------------------------------------------------------
@@ -1074,6 +1094,7 @@ function configView(state) {
         advisor: cfg.get('advisor'),
         outputStyle: cfg.get('outputStyle'),
         launchArgs: cfg.get('launchArgs'),
+        aliasName: cfg.get('aliasName'),
         refreshInterval: cfg.get('refreshInterval'),
         monthlyBudget: cfg.get('monthlyBudget'),
         checkPluginUpdates: cfg.get('checkPluginUpdates'),
@@ -1092,13 +1113,14 @@ function configView(state) {
 // avoid. The list is the gate: a message naming anything else is dropped.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
     'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog',
-    'openLocation', 'model', 'effort', 'advisor', 'outputStyle', 'launchArgs'];
+    'openLocation', 'model', 'effort', 'advisor', 'outputStyle', 'launchArgs', 'aliasName'];
 
-// The one key that ignores the scope the page offers. `launchArgs` is declared
-// `machine` in the manifest — free text going into a shell is not something a
-// repository gets to set — and VS Code rejects a workspace write to such a key
-// with an error that would take the rest of the save down with it.
-const USER_ONLY = ['launchArgs'];
+// The keys that ignore the scope the page offers. Both are declared `machine`
+// in the manifest — free text going into a shell is not something a repository
+// gets to set, and neither is the name of an alias in your own terminal — and VS
+// Code rejects a workspace write to such a key with an error that would take the
+// rest of the save down with it.
+const USER_ONLY = ['launchArgs', 'aliasName'];
 
 // The full changelog, when the user has allowed the fetch. One public file, no
 // credentials, and at most once an hour — kept in the extension's own storage
@@ -1271,6 +1293,42 @@ async function handleMessage(context, msg) {
         return;
     }
 
+    // The Launch tab's command line, built while the choices are still unsaved.
+    // It is answered here rather than assembled in the page because the builder
+    // is the one that opens the terminal: two implementations of the same
+    // quoting would be two chances to disagree about what will run.
+    if (msg.type === 'launchPreview') {
+        const c = msg.settings || {};
+        const launch = {
+            model: c.model, effort: c.effort, advisor: c.advisor,
+            outputStyle: c.outputStyle, args: c.launchArgs,
+        };
+        panel.webview.postMessage({
+            type: 'launchPreview',
+            command: dashboard.claudeCommand(launch),
+            alias: dashboard.aliasLine(c.aliasName, launch),
+        });
+        return;
+    }
+
+    // Choices in, nothing else. The line is rebuilt here and the file is the one
+    // this process finds on its own: a message may say what the user picked, but
+    // it may not name the text to write or the file to write it into. That is
+    // not about this page, whose content is ours and escaped — it is that this
+    // is the single write that leaves our own storage and lands somewhere a
+    // shell executes, and the narrow door is the cheap one to keep.
+    if (msg.type === 'installAlias') {
+        installAlias({ settings: msg.settings });
+        return;
+    }
+
+    // Through the editor, because a webview's own clipboard write is not
+    // guaranteed and handing this line over is the whole point of showing it.
+    if (msg.type === 'copy') {
+        if (msg.text) vscode.env.clipboard.writeText(String(msg.text));
+        return;
+    }
+
     if (msg.type === 'defaults') {
         panel.webview.postMessage({ type: 'defaults', segments: seg.DEFAULT_SEGMENTS });
         return;
@@ -1330,6 +1388,68 @@ async function handleMessage(context, msg) {
         } catch (err) {
             vscode.window.showErrorMessage(`Claude statusline: could not save settings — ${err.message}`);
         }
+    }
+}
+
+/**
+ * The alias written into the shell file this process would read at startup.
+ *
+ * The one write this extension makes outside its own storage, so everything
+ * here is about not losing what was there: the line is built by the same
+ * function the page draws, the user's own content comes back byte for byte from
+ * `withAliasBlock`, a copy is kept before the first change, the replace is
+ * atomic, and the file keeps the mode it had.
+ *
+ * `home` and `shell` are for the tests and nothing else — the message channel
+ * cannot reach them, because a payload that named its own destination would be
+ * a payload that picks a file to write into.
+ */
+function installAlias({ settings, home = os.homedir(), shell = process.env.SHELL || '' } = {}) {
+    const c = settings || {};
+    const rc = dashboard.shellRcFor(shell, home);
+    if (!rc) {
+        vscode.window.showWarningMessage(
+            'Claude statusline: this shell does not take an alias written that way — copy the line instead.');
+        return;
+    }
+    // The path is ours, but assert it anyway: a shell startup file is the last
+    // place to find out that a directory was not what it looked like.
+    try {
+        if (path.resolve(path.dirname(rc)) !== path.resolve(home)) return;
+    } catch { return; }
+
+    const line = dashboard.aliasLine(c.aliasName, {
+        model: c.model, effort: c.effort, advisor: c.advisor,
+        outputStyle: c.outputStyle, args: c.launchArgs,
+    });
+    // `aliasLine` builds it from a name it has already checked and a command it
+    // quoted itself, so it is one line by construction. Checked all the same:
+    // this is the assertion that would catch the day that stops being true.
+    if (line && !/^alias [A-Za-z_][A-Za-z0-9_-]*='[^\n\r]*'$/.test(line)) {
+        vscode.window.showErrorMessage('Claude statusline: refusing to write an unexpected alias line.');
+        return;
+    }
+
+    try {
+        let before = '';
+        let mode;
+        try {
+            before = fs.readFileSync(rc, 'utf8');
+            mode = fs.statSync(rc).mode & 0o777;
+        } catch { /* not there yet */ }
+        const after = dashboard.withAliasBlock(before, line);
+        if (after === before) return;
+        // Kept once, from the state we found: a backup rewritten on every
+        // install would, after two of them, be a copy of our own work.
+        const backup = `${rc}.claude-dashboard.bak`;
+        if (before && !fs.existsSync(backup)) fs.writeFileSync(backup, before, { mode: mode || 0o600 });
+        const tmp = `${rc}.claude-dashboard.tmp`;
+        fs.writeFileSync(tmp, after, { mode: mode || 0o600 });
+        fs.renameSync(tmp, rc);
+        vscode.window.showInformationMessage(
+            `Claude statusline: alias ${line ? 'written to' : 'removed from'} ${rc}. Open a new terminal to pick it up.`);
+    } catch (err) {
+        vscode.window.showErrorMessage(`Claude statusline: could not write ${rc} — ${err.message}`);
     }
 }
 
@@ -1606,7 +1726,10 @@ function activate(context) {
         }),
         // Switching to a tab is the moment its name matters, and the moment the
         // rename command can reach it at all.
-        vscode.window.onDidChangeActiveTerminal(() => renameActiveTab(state)),
+        vscode.window.onDidChangeActiveTerminal(() => {
+            watchActiveTerminal(state, true);
+            renameActiveTab(state);
+        }),
         // A tab restored after a reload opens as far as this process is
         // concerned, so this is where it is recognised. The sweep below covers
         // the other order, where the tabs were back before the extension was.
@@ -1682,6 +1805,10 @@ function activate(context) {
     // reconnect its terminals either side of the extension starting, and only
     // the ones that land afterwards arrive as an event.
     for (const terminal of vscode.window.terminals || []) adopt(terminal, context);
+    // The same gap for the active one: a reload restores both the terminals and
+    // which of them was last used, and no change event is fired for that — so
+    // without this the bar sits on the workspace guess until a tab is clicked.
+    watchActiveTerminal(state);
 }
 
 /**
@@ -1825,13 +1952,28 @@ async function openClaudeWith(context) {
 
 async function openClaude(context, launch = launchSettings()) {
     const where = PLACES[vscode.workspace.getConfiguration('claudeStatusline').get('openLocation')] || PLACES.activeGroup;
-    const command = claudeCommand(launch);
+    const command = dashboard.claudeCommand(launch);
     const terminal = vscode.window.createTerminal({
         // The same env var Claude Code reads for its own terminal, so a machine
         // that renames one renames both.
         name: tabName(),
         iconPath: claudeIcon(context),
         location: where.location,
+        // Where the session lands on disk, said out loud rather than left to the
+        // terminal. Without this VS Code resolves the cwd itself, and in a
+        // multi-root workspace that is `getLastActiveWorkspaceRoot()` — a walk
+        // of the editor history, so the folder of whichever file was clicked
+        // last (`workbench.desktop.main.js`, 1.134: `if(!this._workspaceFolder)`
+        // falls through to it). For a terminal that is a fair guess; for this
+        // one it is not, because a Claude session's cwd is its identity — the
+        // CLAUDE.md it reads, the project memory it carries, the settings scope
+        // it obeys and the directory its transcript is written to all follow
+        // from it, so the same button would open a different session depending
+        // on which repo was in front of it. The first folder is what Claude
+        // Code's own extension gives its sidebar sessions, so the two launchers
+        // agree on the answer. No folder open, no answer: VS Code's own
+        // fallback — the home directory — is right for a session with no project.
+        cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         // Not for the shell, which never reads it — for the next window. This is
         // what says "this tab is ours" after a reload has thrown away everything
         // else about how it was made.
@@ -2007,6 +2149,9 @@ function deactivate() {}
 module.exports = {
     activate,
     deactivate,
+    // Exported for the tests, which give it a scratch home rather than the real
+    // one — the message channel cannot, and that is the point.
+    installAlias,
     __render: render,
     __collectWorkflowsFast: collectWorkflowsFast,
     // The places the button can put a session, exported for the one test that
