@@ -2339,6 +2339,12 @@ test('a message with choices reaches the writer, which takes its own shell', asy
     let panel;
     const rc = path.join(os.homedir(), '.zshrc');
     const before = fs.existsSync(rc) ? fs.readFileSync(rc, 'utf8') : null;
+    // The backup is asserted against its own state before this run, not against
+    // absence: **Write to ~/.zshrc** leaves exactly this file beside the real
+    // one, so a machine where the feature has been used has it already and an
+    // absence check fails there for the right feature working correctly.
+    const bak = `${rc}.claude-dashboard.bak`;
+    const bakBefore = fs.existsSync(bak) ? fs.readFileSync(bak, 'utf8') : null;
     try {
         panel = await openDashboard();
         await panel.__receive({
@@ -2354,6 +2360,7 @@ test('a message with choices reaches the writer, which takes its own shell', asy
         // Belt and braces, because this test once wrote into the real file: it
         // is byte for byte what it was, and no backup was left beside it.
         if (before !== null) assert.equal(fs.readFileSync(rc, 'utf8'), before);
-        assert.ok(!fs.existsSync(`${rc}.claude-dashboard.bak`), 'a backup was left behind');
+        if (bakBefore === null) assert.ok(!fs.existsSync(bak), 'a backup was left behind');
+        else assert.equal(fs.readFileSync(bak, 'utf8'), bakBefore, 'the backup was rewritten');
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });

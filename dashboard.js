@@ -2729,19 +2729,43 @@ function shellRcFor(shell, home = os.homedir()) {
  *
  * Figures are quoted with the date they were checked. A verdict with no date
  * rots silently, and this one is one system card away from being wrong.
+ *
+ * Each figure also names the benchmark under it rather than sharing the footer's
+ * two document names, because the three come from three different measurements
+ * and are not commensurable: 85.7% is a solve rate on Anthropic's own repository
+ * tasks, 44.4% is a mean reward on FrontierBench, and 91.7% is a subset of
+ * SWE-bench Pro whose scores contradict the public leaderboard by design. A
+ * reader who cannot tell which is which reads them as one measurement.
  */
 const launchCanon = () => `<aside class="canon">
     <h2 class="canon-title">What the measurements settle</h2>
     <ul class="canon-list">
         <li><b>Opus 5 with a Fable advisor</b><i>85.7%</i>
             the most accurate configuration Anthropic has published &mdash; against Opus alone at
-            84.4% and Fable alone at <code>medium</code> 83.4%. One run does not separate them.</li>
+            84.4% and Fable alone at <code>medium</code> 83.4%. One run does not separate them.
+            <span class="canon-where">Anthropic&rsquo;s internal agentic-coding benchmark, from its
+            cost-and-intelligence page: 370 repository tasks graded by the repositories&rsquo; own
+            tests, run through a plain API agent at the default effort, August 2026. The pairing averaged about two consultations
+            per attempt and cost $8.40 an attempt, against $8.50 and $8.20 for the models alone; an
+            earlier run through Claude Code&rsquo;s own advisor mode put the three in the same
+            order.</span></li>
         <li><b><code>xhigh</code>, not <code>max</code></b><i>44.4% vs 43%</i>
-            Opus 5 on FrontierBench. No published measurement puts <code>max</code> above
-            <code>xhigh</code>; on most work it only adds cost, and can tip into overthinking.</li>
+            Opus 5 on FrontierBench v0.1, where the system card calls <code>max</code> similar and
+            within noise. Where <code>max</code> does win, <code>xhigh</code> trails it cheaply
+            &mdash; ELO 1827 against 1861 on GDPval-AA v2 with 25% fewer output tokens, 1693 against
+            1720 on AA-Briefcase with 15% fewer.
+            <span class="canon-where">FrontierBench v0.1: 74 terminal and command-line tasks,
+            successor to Terminal-Bench 2.1, scored as mean reward over five attempts each on the
+            mini-SWE-agent harness. Claude Opus 5 system card, sections 8.5, 8.13.4 and 8.13.5.
+            </span></li>
         <li><b>Opus 5 matches Fable 5</b><i>91.7% vs 91.3%</i>
             on a coding subset both models largely saturate, at about 60% of the cost &mdash;
-            inside run-to-run noise. Fable still leads on multimodal work and human preference.</li>
+            inside run-to-run noise. On harder work, such as DeepResearch Bench II, Fable&rsquo;s
+            advantage reappears.
+            <span class="canon-where">Anthropic&rsquo;s 482-problem subset of SWE-bench Pro, from
+            the cost-and-intelligence page: cut for its own evaluation harness and not comparable
+            to the public leaderboard &mdash; where the ordering reverses, Fable at 80 against
+            79.2.</span></li>
     </ul>
     <p class="canon-set"><span>In the controls below that is
         <b>model</b> <code>opus 1M</code> &middot; <b>effort</b> <code>xhigh</code> &middot;
@@ -2749,8 +2773,8 @@ const launchCanon = () => `<aside class="canon">
         conversation and advises it.</span>
         <button type="button" class="canon-apply" data-model="opus[1m]" data-effort="xhigh"
             data-advisor="fable">Apply these</button></p>
-    <p class="canon-src">Checked 2026-08-23 against the Claude Opus 5 system card and Anthropic&rsquo;s
-        cost-and-intelligence page. The gap in the evidence: Fable alone above <code>medium</code>
+    <p class="canon-src">Checked 2026-08-24 against the Claude Opus 5 system card of 2026-07-24 and
+        Anthropic&rsquo;s cost-and-intelligence page. The gap in the evidence: Fable alone above <code>medium</code>
         against the pairing &mdash; every published comparison uses Fable at <code>medium</code>.</p>
 </aside>`;
 

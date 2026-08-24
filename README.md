@@ -48,17 +48,17 @@
 ✻ 7d 27% ██░░░░ dry 12.08 ~13h    ▤ 29% 294k/1M    ~$114.29 $5.18/h    ⧉ 2 ▸ 3/6
 ```
 
-Claude Code writes a great deal to disk and shows you almost none of it. Its VS
-Code panel has no status line at all: the `statusLine` command from
-`~/.claude/settings.json` is never run, and the upstream requests for parity with
-the CLI were closed as stale
-([#55643](https://github.com/anthropics/claude-code/issues/55643),
-[#21265](https://github.com/anthropics/claude-code/issues/21265)). Nothing
-anywhere adds up what your subagents and workflow runs cost, which on a machine
-that uses them is the larger half of the bill.
+This extension reads Claude Code's own state on this machine — the transcripts,
+sessions and settings under `~/.claude`, plus the OAuth usage endpoint — and
+renders it as a status bar you write yourself and a dashboard of 24 tabs over
+every transcript on the machine.
 
-This extension reads that state and gives it two surfaces: a status bar you write
-yourself, and a dashboard over every transcript on the machine.
+VS Code's Claude Code panel runs no status line: the `statusLine` command in
+`~/.claude/settings.json` is never executed, and the requests for parity with
+the CLI are closed as stale
+([#55643](https://github.com/anthropics/claude-code/issues/55643),
+[#21265](https://github.com/anthropics/claude-code/issues/21265)). Subagent and
+workflow-run spend appears in no other view.
 
 ![The Now tab: four headline figures, the week as a track of the time it has left, then three panels — limits, the session with its context broken into what fills it, and the spend — a strip of tasks, and the agents of a running workflow](media/screenshots/now-dark.png)
 
@@ -68,11 +68,11 @@ yourself, and a dashboard over every transcript on the machine.
 
 |  |  |
 | --- | --- |
-| **📉 Never hit the wall by surprise** | The weekly and 5-hour windows with a pace bar: `█` is spend, `▓` is spend ahead of an even burn, `▒` is plan you have not reached yet. `dry` says when you hit 100 % if the pace holds, and stays quiet when that lands after the reset. |
-| **🧠 The context of the tab you are in** | How full the model's window is for the session in the terminal tab you are looking at — switch tabs and the bar follows, rather than describing whichever session wrote last. Hover for model, effort, thinking, advisor, cache share, auto-compact distance, branch and client version. |
-| **💸 What it actually costs** | Session spend with a burn rate, today across every project, and a dashboard that breaks it down by day, model, project, branch, tool and skill. Estimated from public rates; usage credits, the one figure that is real money, are labelled as such. |
-| **🤖 The agents nobody else shows** | Subagents and workflow agents write their own transcripts, so on a machine that runs fan-outs their spend is the larger half, and the terminal statusline never sees it. Here they get a tree, a table and a live row each. |
-| **🎛️ A bar you write yourself** | The bar is a template, not a layout: 45 placeholders, optional groups that vanish when empty, 11 ready-made bars, and an editor with a live preview. |
+| **📉 Limits and pace** | The weekly and 5-hour windows with a pace bar: `█` is spend, `▓` is spend ahead of an even burn, `▒` is plan you have not reached yet. `dry` says when you hit 100 % if the pace holds, and stays quiet when that lands after the reset. |
+| **🧠 Context of the tab you are in** | How full the model's window is for the session in the terminal tab you are looking at; switching tabs switches the bar. Hover for model, effort, thinking, advisor, cache share, auto-compact distance, branch and client version. |
+| **💸 Spend** | Session spend with a burn rate, today across every project, and a dashboard that breaks it down by day, model, project, branch, tool and skill. Estimated from public rates; usage credits are real money and are labelled as such. |
+| **🤖 Subagents and workflows** | Subagents and workflow agents write their own transcripts. Each gets a tree, a table and a live row. |
+| **🎛️ A bar you write yourself** | 45 placeholders, optional groups that vanish when empty, 11 ready-made bars, and an editor with a live preview. |
 | **🔒 Local by default** | Everything is read from your own disk. One request leaves the machine, the limits, and it has a switch; two further opt-ins are off until you turn them on. No telemetry. See [Privacy](#user-content-privacy). |
 
 <a name="dark-and-light"></a><a name="user-content-dark-and-light"></a>
@@ -127,8 +127,8 @@ switched off and no cache exists. The dashboard works either way, through
 - **Claude Code** installed and used on this machine. The extension reads its
   state and asks nothing of the CLI.
 - **VS Code 1.100** or newer.
-- **macOS or Linux.** On Windows the extension degrades quietly rather than
-  showing wrong numbers, but that is tolerance rather than support; see
+- **macOS or Linux.** On Windows the extension hides items instead of printing
+  wrong numbers; it is not supported there. See
   [Known issues](#user-content-known-issues-and-limits).
 
 <a name="configuring-the-bar"></a><a name="user-content-configuring-the-bar"></a>
@@ -148,18 +148,15 @@ string is one status-bar item, left to right:
 ]
 ```
 
-Anything outside `{…}` is literal, so the icons and separators are yours to
-choose, including VS Code's own `$(flame)` codicons. Square brackets mark an
-**optional group**, which disappears whole when a placeholder inside it has
-nothing to say: that is how `[ dry {dry}]` stays silent for the first half hour
-of a window and appears by itself once a forecast exists. A segment whose
-placeholders are all empty hides itself, which is the whole of the last line
-above. A segment of pure text always shows. A backslash escapes `{`, `}`, `[`
-and `]`.
+Anything outside `{…}` is literal: the icons and separators are yours to choose,
+including VS Code's own `$(flame)` codicons. Square brackets mark an **optional
+group**, which disappears whole when a placeholder inside it has nothing to
+say — `[ dry {dry}]` is silent for the first half hour of a window and appears
+once a forecast exists. A segment whose placeholders are all empty hides itself;
+a segment of pure text always shows. A backslash escapes `{`, `}`, `[` and `]`.
 
-Two placeholders answer "when do I run out", and they differ: `{dry}` is silent
-when the forecast lands after the reset, because running out then never happens,
-while `{dryAt}` names the date either way.
+`{dry}` is empty when the forecast lands after the reset; `{dryAt}` names the
+date either way.
 
 **Setup → Settings** in the dashboard is an editor for exactly this: a field per
 segment, a preview under each one rendered by the extension itself, buttons to
@@ -176,10 +173,10 @@ editor; nothing is written until you press Save.
 
 The rest of the tab is the extension's own settings: what is read, what leaves
 the machine, and how the bar behaves. What a session is *launched* with lives on
-the **Launch** tab beside it. Save sits at the foot of the tab and says whether
-there is anything to save: inert until something is edited, lit and marked
-**unsaved changes** once it is, inert again if the edit is undone by hand. Both
-tabs are one form, so a change on either lights both Save buttons.
+the **Launch** tab beside it. Save sits at the foot of the tab: inert until
+something is edited, lit and marked **unsaved changes** once it is, inert again
+if the edit is undone by hand. Both tabs are one form, and a change on either
+lights both Save buttons.
 
 <details>
 <summary><b>All 45 placeholders</b></summary>
@@ -210,13 +207,12 @@ the same list in a quick pick and copies whichever you choose.
 
 </details>
 
-Tooltips are not configurable and do not need to be: each segment gets the full
-tooltip of every topic it mentions, so hiding a number from the bar never hides
-it from the hover. Colour follows the same rule, a segment carrying a limit or a
-context fill taking the editor's own warning background past 50 % and its error
-background past 80 %, which in the stock themes are amber and red. Reading is
-lazy: a field no segment mentions is never collected, so a bar without `{today}`
-does not pay for the walk across every project it needs.
+Tooltips are not configurable. Each segment gets the full tooltip of every topic
+it mentions, so a number hidden from the bar is still on the hover. A segment
+carrying a limit or a context fill takes the editor's warning background past
+50 % and its error background past 80 % — amber and red in the stock themes.
+A field no segment mentions is never collected: a bar without `{today}` does not
+walk every project.
 
 ### The week as a track
 
@@ -224,21 +220,19 @@ The Now tab draws the pace answer instead of stating it:
 
 ![The week as a track of seven days inside a panel headed This week: the blue part is spent, a rule in the theme's text colour marks where an even burn would be by now, the red block is the overspend, a red line marks the day the window runs out, and four pills beside the heading read 76% spent, plan 64%, 12% over and dry in 1d10h](media/screenshots/dry-dark.png)
 
-The rail carries no text: what each mark means is said once, in the pills beside
-the heading. The **blue** length is the week as it has been spent, day by day.
-The **rule in the theme's own text colour**, white on a dark theme and black on a
-light one, is where an even burn would stand right now, and the pill `plan 64%`
-wears a dot of that colour to join the two. The **red block** past the rule is
-the overspend, stated by the pill `12% over`. The **red line** further along is
-the forecast, and its pill carries a red dot and the whole statement:
-`dry in 1d10h → Thu 20.08, ~14h`. The gap between that line and the end of the
-track is time without quota, measured against the `resets … · in 2d12h` in the
-footer.
+The rail carries no text; what each mark means is in the pills beside the
+heading. The **blue** length is the week as it has been spent, day by day. The
+**rule in the theme's own text colour** — white on a dark theme, black on a light
+one — is where an even burn would stand right now, and the pill `plan 64%` wears
+a dot of that colour. The **red block** past the rule is the overspend, stated by
+the pill `12% over`. The **red line** further along is the forecast, and its pill
+carries a red dot and the whole statement: `dry in 1d10h → Thu 20.08, ~14h`. The
+gap between that line and the end of the track is time without quota, measured
+against the `resets … · in 2d12h` in the footer.
 
-That rule is the only mark that changes colour between themes, because it is the
-only one drawn in the editor's foreground rather than in a chart colour: blue for
-spent, red for the overspend and the forecast, green for the slack when a week is
-running under its plan.
+That rule is the only mark that changes colour between themes; the others are
+chart colours — blue for spent, red for the overspend and the forecast, green
+for the slack when a week runs under its plan.
 
 The same week spent under its plan is the other half of the vocabulary:
 
@@ -246,49 +240,43 @@ The same week spent under its plan is the other half of the vocabulary:
 
 Every red mark is gone, and two things take their place. The **green block**
 between the spent length and the plan rule is the slack, seven points of the week
-still in hand, which the pill states as `7% under`. And the forecast pill loses
-its dot: `dry Sat 22.08, ~13h, after the reset` names the day the quota would
-empty while the rail has no mark to point at, because the window resets on Friday
-and this rate would only empty it on Saturday. That is the same case in which
-`{dry}` stays empty in the status bar while `{dryAt}` still names the date, so
-the bar and the track agree on when to speak.
+still in hand, stated by the pill `7% under`. The forecast pill loses its dot:
+`dry Sat 22.08, ~13h, after the reset` names the day the quota would empty, and
+the rail carries no mark for it — the window resets on Friday, this rate empties
+it on Saturday. This is the case where `{dry}` is empty in the status bar and
+`{dryAt}` still names the date.
 
 ### What fills the context window
 
-The weekly allowance is one limit; the context window is the other, and the
-session section breaks it into what is in it. How the session is set up — effort,
-advisor, thinking, output style — sits beside the model's name as state rather
-than as rows. Under it the window is one figure with the absolute numbers beside
-it, then a colour bar of everything in use, then that bar's legend: one line per
-part, biggest share first, each in the colour it has in the bar. The same block
-appears on the Now tab and in the sidebar, because both draw this one section:
+The session section breaks the context window into what is in it. How the session
+is set up — effort, advisor, thinking, output style — sits beside the model's
+name as state. Under it: the window as one figure with the absolute numbers, a
+colour bar of everything in use, and that bar's legend — one line per part,
+biggest share first, each in the colour it has in the bar. The same block appears
+on the Now tab and in the sidebar:
 
 ![The session panel: the model with its effort and advisor as pills, the context window as one large percentage with its token count beside it, a colour bar of what is in use, and its legend — the rest in use, memory files, skills, agents, tool names, MCP instructions and hooks, each with its token count and its share](media/screenshots/context-dark.png)
 
-The client works this out for `/context` from figures it keeps in memory and
-writes none of them to disk. What it does record are the blocks it adds to the
+The client computes `/context` from figures it keeps in memory and writes none of
+them to disk. The transcript does record the blocks the client adds to the
 prompt: the skill listing, the deferred tool names, the agent listing and each
 MCP server's instructions. Those, with the instruction files, are what these rows
-weigh, at four characters to a token. Hence the tildes, which are right in the
+weigh, at four characters to a token — hence the tildes, which are right in the
 first digit.
 
 **`rest in use` is not "messages".** The conversation, the system prompt and the
 tool schemas arrive as one figure, the input the last reply was billed for, and
-nothing on disk splits them, so the row is named for what is inside it.
-**`tools` counts names, not schemas**, because the transcript carries the names
-of deferred tools and never their definitions, which puts the schemas inside
-`rest in use` too. The rows therefore add up to everything in use, unmeasurable
-parts included. Free space is not among them: it is the other end of the bar
-above.
+nothing on disk splits them. **`tools` counts names, not schemas**: the
+transcript carries the names of deferred tools and never their definitions, which
+puts the schemas inside `rest in use` too. The rows add up to everything in use,
+unmeasurable parts included. Free space is the other end of the bar above.
 
-On the line that introduces the legend sits **`your setup`**, what the six
-measured rows come to together as a share of the window, next to where
-auto-compact waits. That is the figure to act on: the bill for the skills,
-agents, MCP servers and instruction files that load before you type a word, paid
-on every prompt of the session. When the window fills early, this says whether
-that is the conversation or the setup. The branch and the client version close
-the panel as a footer, with a chip when a newer client is already unpacked and
-waiting for the next launch.
+On the line that introduces the legend sits **`your setup`**: what the six
+measured rows come to as a share of the window, next to where auto-compact waits.
+It is the cost of the skills, agents, MCP servers and instruction files that load
+before you type, paid on every prompt of the session. The branch and the client
+version close the panel as a footer, with a chip when a newer client is unpacked
+and waiting for the next launch.
 
 <a name="the-dashboard"></a><a name="user-content-the-dashboard"></a>
 
@@ -299,18 +287,15 @@ six sections: one for the state of Claude right now, three drawn from an index o
 every transcript on the machine, one for how the installation is configured, and
 one for what is happening on the machine at this moment.
 
-Every tab is built the same way: a strip of headline figures, then one panel per
-answer, with a figure that is a share of something drawn as one. Panels keep a
-fixed order too — the heading with the current state as pills, the one figure the
-panel exists for, what that figure is made of, the facts, and a footer of what
-does not change while you work.
+Every tab has the same shape: a strip of headline figures, then one panel per
+answer. Each panel runs heading with the current state as pills, the figure the
+panel exists for, what that figure is made of, the facts, and a footer.
 
-**⏱️ Now** is the state of Claude as the page was opened: the four numbers that
-decide the next hour as headline tiles, the week as a track of time, then the
-limits, the session and the spend as three panels at full width, the task list as
-one strip under them, and a row per agent of every workflow still running. Those
-panels and the status-bar tooltips are rendered from the same sections in
-`status.js`, so the page cannot fall behind the hover.
+**⏱️ Now** is the state of Claude as the page was opened: four headline tiles,
+the week as a track of time, then limits, session and spend as three panels at
+full width, the task list as one strip under them, and a row per agent of every
+workflow still running. These panels carry the same text as the status-bar
+tooltips.
 
 <details>
 <summary><b>💸 Spend</b> — where the money went</summary>
@@ -380,45 +365,42 @@ anywhere in it.
 
 </details>
 
-**Indexing.** The first run reads every transcript, about 1.1 GB and 4–5 s on the
-machine this was built on, behind a progress notification. After that a file
-whose size and mtime are unchanged is reused as-is, so a refresh costs tens of
-milliseconds. Only a fraction of the lines are parsed: a line is JSON-decoded
-only if it carries a marker that matters. The index lives in the extension's own
-storage, holds only aggregates, and never stores prompt text.
+**Indexing.** The first run reads every transcript — about 1.1 GB and 4–5 s on
+the machine this was built on — behind a progress notification. After that a file
+whose size and mtime are unchanged is reused as-is, and a refresh costs tens of
+milliseconds. A line is JSON-decoded only if it carries a marker that matters.
+The index lives in the extension's own storage, holds only aggregates, and never
+stores prompt text.
 
 <a name="workflow-runs"></a><a name="user-content-workflow-runs"></a>
 
 ## 🧵 Workflow runs
 
-The `/workflows` progress tree lives in the terminal and dies with it. What
-survives is on disk, and this extension reads it into three surfaces: a
-**Workflow runs** tree in the Activity Bar (run → phase → agent), the runs table
-on the dashboard, and the placeholders above.
+The `/workflows` progress tree lives in the terminal and dies with it; what it
+wrote to disk stays. The extension reads that into three surfaces: a **Workflow
+runs** tree in the Activity Bar (run → phase → agent), the runs table on the
+dashboard, and the placeholders above.
 
 That tree is the last of four sections in the **Claude Dashboard** container.
-Above it sit **Limits**, the week as the figure with the 5-hour and per-model
-windows as rows under it, whether the spend is over or under plan, and when the
-window would run out at this rate; **Session**, the model, the context window
-with a breakdown of what fills it, and what the session open in this window has
-cost, hidden entirely when there is no session here; and **Live sessions**, every
-session on the machine whose process is alive, named by its project. The first
-two are the status bar's own tooltip sections, so the panel and the hover cannot
-disagree. The container opens with those two sharing the height and the two lists
-collapsed; drag or open whatever you like and VS Code remembers that instead. The
-icon carries a badge with the number of live sessions, and no badge when nothing
-is running.
+Above it: **Limits** — the week as the figure, the 5-hour and per-model windows
+as rows under it, whether spend is over or under plan, and when the window runs
+out at this rate; **Session** — the model, the context window with a breakdown of
+what fills it, and what the session in this window has cost, hidden when there is
+no session here; and **Live sessions** — every session on the machine whose
+process is alive, named by its project. The first two carry the status bar's own
+tooltip text. The container opens with those two sharing the height and the two
+lists collapsed; VS Code remembers whatever you drag or open instead. The icon
+carries a badge with the number of live sessions.
 
 A run is in one of three states: **running** (no final snapshot, the owning
 session is alive, the directory moved in the last ten minutes), **finished** (the
-client wrote its one snapshot), and **abandoned** (everything else). The snapshot
-is written once, at the end, so a client that dies never writes one, and without
-the third state such a run would spin in the panel forever.
+client wrote its one snapshot), and **abandoned** (everything else). The client
+writes the snapshot once, at the end; a client that dies never writes one.
 
 **Money comes from `usage` records only**, from the index for an agent that has
 stopped and straight from the transcript for one still writing. The totals a
-snapshot carries are never turned into dollars: they are context sizes, not
-spend, and on this machine the two are about thirty times apart.
+snapshot carries are context sizes, not spend, and are never turned into dollars;
+on this machine the two are about thirty times apart.
 
 Right-click a run to open the workflow script it was launched from, or to copy
 its `runId` together with that path, which is what `resumeFromRunId` needs to
@@ -438,7 +420,7 @@ request can leave the machine, and it is optional.**
 | **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage`, the same endpoint Claude Code's own `/usage` screen reads, carrying the OAuth token Claude Code already stores. At most once a minute per machine, however many windows are open, and shared with a terminal `statusline.sh` through the same cache file if you run one. |
 | **What happens to the token** | Read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and put into one `Authorization` header. Never logged, never cached, never written, never sent anywhere else. |
 | **Two things that could, and do not** | `claudeStatusline.checkPluginUpdates` asks each plugin's marketplace whether a newer version exists; `claudeStatusline.fetchChangelog` refreshes Anthropic's own published documentation and changelog — public files, no credentials, at most once an hour, cached in the extension's storage. **Both are off by default**, and off means those requests are never made: the settings reference then comes from the copy packaged with the extension, which says how old it is. |
-| **Credentials are hidden even from you** | Anything in the settings whose name looks like a key, token, secret or password renders as `•••`, at any depth inside an object. A plain number is left readable, because `MAX_THINKING_TOKENS` is a budget. A test plants a token in the settings and asserts it never reaches the rendered page. |
+| **Credentials are hidden even from you** | Anything in the settings whose name looks like a key, token, secret or password renders as `•••`, at any depth inside an object. A plain number stays readable, such as `MAX_THINKING_TOKENS`. A test plants a token in the settings and asserts it never reaches the rendered page. |
 | **Telemetry** | None. No analytics, no crash reporting, no phoning home. |
 | **How to switch it all off** | `"claudeStatusline.fetchLimits": false`. Off means the token is not read at all, and with the two opt-ins above left alone the extension then makes no network request whatsoever. |
 
@@ -464,9 +446,9 @@ All of these apply the moment they change; none needs a window reload.
 | `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>`: `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
 | `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>`: `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |
 | `claudeStatusline.outputStyle` | `""` | Ask for an output style for the session: `default`, `Proactive`, `Explanatory`, `Learning`, `Concise`. There is no flag for it, so it travels as `--settings '{"outputStyle":"…"}'`, which merges with your settings files rather than replacing them. A style of your own is a markdown file in `~/.claude/output-styles`; the **Setup → Launch** tab lists what is there and writes the name here for you |
-| `claudeStatusline.aliasName` | `""` | A name for the same session started from a terminal. The **Setup → Launch** tab writes out `alias <name>='claude …'` carrying every choice above it, and copies it on a click; paste it into your `~/.zshrc`. Nothing here writes to your shell files. A name is what a shell accepts for one, or no line is offered. User settings only |
+| `claudeStatusline.aliasName` | `""` | A name for the same session started from a terminal. The **Setup → Launch** tab writes out `alias <name>='claude …'` carrying every choice above it, copies it on a click, and can write it into `~/.zshrc` on the **Write to ~/.zshrc** button. A name is what a shell accepts for one, or no line is offered. User settings only |
 | `claudeStatusline.launchArgs` | `""` | Anything else for the command line, after those: `--permission-mode acceptEdits`, an exact model id. Written as typed, so quoting is yours. User settings only, so a project cannot set it through `.vscode/settings.json` |
-| `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal, because VS Code's rename acts on the active terminal |
+| `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal — VS Code's rename acts on the active terminal |
 | `claudeStatusline.refreshInterval` | `60` | Refresh period for limits and session stats, seconds |
 | `claudeStatusline.alignment` | `right` | Which side of the status bar |
 | `claudeStatusline.priority` | `100` | Position within that side |
@@ -479,22 +461,19 @@ script and Copy the workflow run id.
 ### Open Claude Code
 
 A button in the editor's title bar, next to Claude Code's own, and a second one
-in the status bar. Both start a terminal session; what differs is where it lands.
-Claude Code's button splits a new editor group off to the right and keeps the
-session there, half a window wide. This one goes where
-`claudeStatusline.openLocation` says, by default a tab in the group you are
-already looking at, and runs `claude` from the shell's `PATH`. The setting is
-read at the moment you press the button, and the button's hover names the place
-it will use. Right-click the title bar to hide whichever of the two you would
-rather not have.
+in the status bar. Both start a terminal session; they differ in where it lands.
+Claude Code's button splits a new editor group off to the right. This one goes
+where `claudeStatusline.openLocation` says — by default a tab in the group you
+are looking at — and runs `claude` from the shell's `PATH`. The setting is read
+when you press the button, and the hover names the place it will use. Right-click
+the title bar to hide either button.
 
 The status-bar copy sits left of every segment, on whichever side
-`claudeStatusline.alignment` puts them, as `$(terminal)$(sparkle)` — this
-extension's icon in the two glyphs the status bar allows, since it takes codicons
-and nothing else. It is there before anything has been read, so a machine that
-has never run Claude Code still has the one control that starts it. Right-click
-the status bar and untick **Claude Statusline: Open** to put it away; the
-segments are listed there as **Claude Statusline 1**, **2**, and so on.
+`claudeStatusline.alignment` puts them, as `$(terminal)$(sparkle)` — the status
+bar takes codicons and nothing else. It is drawn before anything has been read,
+on a machine that has never run Claude Code included. Right-click the status bar
+and untick **Claude Statusline: Open** to put it away; the segments are listed
+there as **Claude Statusline 1**, **2**, and so on.
 
 **The session can be started on settings of your own**: the model, how hard it
 thinks, whether a second model advises it, and how it answers you. That is the
@@ -502,6 +481,14 @@ thinks, whether a second model advises it, and how it answers you. That is the
 and what it costs:
 
 ![Starting a session: six panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the output style with the client's five above the ones you wrote yourself, and any extra arguments](media/screenshots/launch-dark.png)
+
+The tab opens on a banner of what the published measurements say: the Opus 5 +
+Fable advisor pairing at 85.7%, `xhigh` at 44.4% against `max` at 43%, and Opus 5
+at 91.7% against Fable 5 at 91.3% for about 60% of the cost. Each figure names
+the benchmark behind it, its size and its method, and the footer carries the date
+the three were checked. An **Apply these** button sets the settings the verdict
+implies — model `opus 1M`, effort `xhigh`, advisor `fable` — in the controls
+below; the write is still yours to save.
 
 Each choice becomes one flag on the command line the button runs, and each one
 left alone passes no flag, so the client decides exactly as it did before. A
@@ -511,25 +498,28 @@ fully configured button runs:
 claude --model 'opus[1m]' --effort 'max' --advisor 'fable' --settings '{"outputStyle":"Explanatory"}' --permission-mode acceptEdits
 ```
 
-Values are quoted on the way in for a reason: unquoted, `opus[1m]` is a shell
-pattern, and zsh answers `no matches found` without running anything.
+Values are quoted on the way in: unquoted, `opus[1m]` is a shell pattern and zsh
+answers `no matches found` without running anything.
 
-The tab writes that line out under the choices, with a button that copies it, and
-under it the same command as a shell alias — name it in `claudeStatusline.aliasName`
-and paste the line into your `~/.zshrc` to start the session you configured here
-from a terminal instead. The alias is quoted a second time, because written the
-obvious way its inner quotes would close the outer ones and hand `opus[1m]` back
-to the shell as a pattern. Nothing here writes to your shell files; the line is
-yours to paste.
+The tab writes that line out under the choices with a button that copies it, and
+under it the same command as a shell alias, named in
+`claudeStatusline.aliasName`. The alias is quoted a second time, so its inner
+quotes do not close the outer ones.
+
+**Write to ~/.zshrc** puts the alias in the file, inside a block the extension
+owns; the rest of the file comes back byte for byte. The first write keeps a copy
+beside it and the replace is atomic. It happens on that button only, never on
+Save. Clearing the alias name removes the block. A shell whose `alias` takes
+different syntax is told so instead of being handed a line.
 **Claude: Open Claude Code with…** asks for a model and an effort instead of
 reading the settings, for the one run that is not like the others.
 
 A session opened this way survives a window reload: VS Code reconnects the tab to
-a shell that never stopped, and the tab is picked back up so it keeps following
-the session's name. A full quit is different, because there is no process left to
-reconnect to, so the tab comes back with its scrollback and no `claude` in it.
-Nothing survives if `terminal.integrated.enablePersistentSessions` is off, which
-is VS Code's own switch for all of this.
+a shell that never stopped, and the tab keeps following the session's name. After
+a full quit there is no process to reconnect to, and the tab comes back with its
+scrollback and no `claude` in it. Nothing survives with
+`terminal.integrated.enablePersistentSessions` off, which is VS Code's own switch
+for all of this.
 
 <a name="where-the-data-comes-from"></a><a name="user-content-where-the-data-comes-from"></a>
 
@@ -544,27 +534,25 @@ Nothing is asked of the CLI; it has no channel to ask.
   stamp use the same file a terminal `statusline.sh` would, so if you run one too
   the two share a single request rather than making two. Data older than 30
   minutes is not drawn.
-- **The window's session** — `~/.claude/sessions/*.json`, and which of them the
-  bar is about is decided in that order: the terminal tab you are looking at
-  first, matched by `ppid(claude) === pid(shell)`; then the Claude Code panel,
-  whose process is a direct child of the extension host, so
-  `ppid(pid) === process.pid` names it exactly; then, failing both, the most
-  recent session in this workspace. A tab with no Claude in it changes nothing —
-  the answer falls back rather than emptying the bar.
+- **The window's session** — `~/.claude/sessions/*.json`. Which of them the bar
+  describes is decided in order: the terminal tab you are looking at, matched by
+  `ppid(claude) === pid(shell)`; then the Claude Code panel, a direct child of
+  the extension host, matched by `ppid(pid) === process.pid`; then the most
+  recent session in this workspace. A tab with no Claude in it falls back to that
+  last answer.
 - **Context and statistics** — `~/.claude/projects/<slug>/<sessionId>.jsonl`.
   Context is read from a 256 KB tail in about 2 ms; the full pass for cost,
   duration and edits takes about 20 ms and runs on the minute tick.
 - **Workflow runs** — the run's snapshot once it has ended, and while it has not,
   the roll-call journal the runtime keeps for `resumeFromRunId` plus the agents'
-  transcripts as they grow. All of it is undocumented internal state, so every
-  field is optional and a read that fails hides a row instead of filling it in.
+  transcripts as they grow. All of it is undocumented internal state: every field
+  is optional, and a read that fails hides a row instead of filling it in.
 - **Spend** — computed from public per-million-token rates in `pricing.js`. It is
   an estimate, not a bill: the real figure depends on plan and discounts. An
   unrecognised model is priced at Opus rates and flagged as such.
-- **Limit history** — nowhere, until this extension writes it, because the usage
-  endpoint answers only for the present moment. A row is appended to the
-  extension's own storage whenever a percentage moves, plus a heartbeat every six
-  hours so a quiet stretch is distinguishable from a closed laptop.
+- **Limit history** — nowhere: the usage endpoint answers only for the present
+  moment. The extension appends a row to its own storage whenever a percentage
+  moves, plus a heartbeat every six hours.
 
 <a name="known-issues-and-limits"></a><a name="user-content-known-issues-and-limits"></a>
 
@@ -595,9 +583,9 @@ naming your OS, VS Code version and Claude Code version is one that can be
 chased.
 
 **Compatibility.** The transcript and session-registry formats are private to
-Claude Code and are not part of any published contract. This extension reads them
-anyway, because there is no other source. When a Claude Code release changes
-them, the affected item degrades to a dash rather than showing a wrong number.
+Claude Code and are not part of any published contract. When a Claude Code
+release changes them, the affected item degrades to a dash rather than showing a
+wrong number.
 
 ## 📄 Licence
 

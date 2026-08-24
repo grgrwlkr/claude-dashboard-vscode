@@ -1416,12 +1416,60 @@ test('the launch tab opens with the measured verdict', () => {
     assert.match(launch, /44\.4%/);
     assert.match(launch, /91\.7%/);
     // A verdict with no date rots silently.
-    assert.match(launch, /2026-08-23/);
+    assert.match(launch, /2026-08-24/);
     // The gap is Fable alone *against the pairing* — the system card does measure
     // Fable alone at max. A negative absolute here would be false, and the figures
     // above are exactly what would make a reader believe it.
     assert.match(launch, /against the pairing/);
     assert.ok(!/Not measured anywhere/.test(launch), 'no unqualified negative absolute');
+});
+
+// A percentage with no benchmark behind it is a number the reader has to take on
+// faith, and three of them read as one measurement rather than three unrelated
+// ones. Each line names what was run, on how much, and by which method — the
+// three figures come from three different documents and two different harnesses,
+// which is exactly what a shared footer hid.
+test('each figure in the verdict names the benchmark it comes from', () => {
+    // The source lines wrap in the template, so a phrase can be split by a
+    // newline the rendered page never shows. Match what the reader sees.
+    const raw = db.launchTab({}, {});
+    const launch = raw.replace(/\s+/g, ' ');
+    // Line one is Anthropic's own repository-task benchmark, published on the
+    // cost-and-intelligence page — it is not in the system card, and naming the
+    // wrong document is how a reader fails to find the figure.
+    assert.match(launch, /internal agentic-coding benchmark/i);
+    assert.match(launch, /370 repository tasks/);
+    // Line two is the system card's own section, and the number is a mean reward
+    // rather than a pass rate — a distinction the bare "44.4%" loses.
+    assert.match(launch, /FrontierBench v0\.1/);
+    assert.match(launch, /mean reward/i);
+    // Line three is Anthropic's cut of SWE-bench Pro, whose scores are explicitly
+    // not comparable to the public leaderboard — where the ordering is the other
+    // way round. Without that sentence 91.7% contradicts the published 79.2%.
+    assert.match(launch, /SWE-bench Pro/);
+    assert.match(launch, /not comparable|not the public leaderboard/i);
+    // Every source line carries its own class, so the page can dim them as one.
+    assert.ok((launch.match(/class="canon-where"/g) || []).length === 3,
+        'one source line per finding');
+});
+
+// Two claims the banner used to make are refuted by the document it cites, and a
+// verdict that is wrong about its own evidence is worse than no verdict: the
+// button below applies it. Both are asserted as absences, because that is the
+// shape the error took — a negative absolute nobody could check from the page.
+test('the verdict claims nothing the system card refutes', () => {
+    const launch = db.launchTab({}, {});
+    // GDPval-AA v2 (ELO 1861 vs 1827) and AA-Briefcase (1720 vs 1693) both put
+    // max above xhigh. What is true is the price of that win, not its absence.
+    assert.ok(!/No published measurement/i.test(launch),
+        'max above xhigh is measured — GDPval-AA and AA-Briefcase');
+    assert.match(launch, /within noise|inside noise/i);
+    assert.match(launch, /GDPval-AA/);
+    // The system card has Opus 5 ahead of Fable on SWE-bench Multimodal (59.4 vs
+    // 54.1) and compares the multimodal sections against Mythos, not Fable; the
+    // measured place Fable pulls ahead is harder work.
+    assert.ok(!/leads on multimodal/i.test(launch), 'unmeasured multimodal claim');
+    assert.match(launch, /DeepResearch Bench II/);
 });
 
 // A verdict the reader has to translate into three separate clicks is a verdict

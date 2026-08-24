@@ -147,6 +147,13 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .canon-list li { margin: 0 0 8px; line-height: 1.55; opacity: .85; }
 .canon-list li:last-child { margin-bottom: 0; }
 .canon-list b { font-weight: 600; opacity: 1; }
+/* Where the figure came from, dimmer than the finding it belongs to and on its
+   own line: it is read once, when a number is doubted, and never again. The
+   opacity compounds with the li's, landing beside .canon-src on purpose — these
+   are the same register as the footer, moved next to the number they explain. */
+.canon-where { display: block; margin: 3px 0 0; font-size: 11px; opacity: .65;
+  line-height: 1.45; max-width: 104ch; }
+.canon-list li + li { margin-top: 10px; }
 /* An <i> so the figure is one token in the markup rather than a wrapper div —
    the list stays readable in the source, which is where it gets edited. */
 .canon-list i { font-style: normal; font-family: var(--vscode-editor-font-family);

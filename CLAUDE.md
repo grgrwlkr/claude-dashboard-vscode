@@ -68,6 +68,14 @@ had a full entry, a bump in `package.json` and no tag, so the file claimed a ver
 could install, and the next release had to work out by grep which of its lines were already
 described. An unnumbered section cannot drift that way — it has no number to be wrong about.
 
+**How those lines are written is `.claude/skills/writing-docs`, and it is not optional.** A
+changelog entry is a fact about the change — what it is and where it is visible — in about fifteen
+words. The reason for the change goes in the commit message and in the code comment, never in
+`CHANGELOG.md` or `README.md`; those two files are read by users of the extension, who do not
+maintain it. Read the skill before writing either file. The measured norm across eight comparable
+extensions is a 7–15 word entry with 0–2.5% of entries carrying any reason at all; this file's own
+history had drifted to 21 words and 22% before the skill was written.
+
 **The version moves at a release and nowhere else (2026-08-12, since the extension went public).**
 Ordinary commits — fixes, features, refactors, docs — leave `package.json` alone. The number is
 raised once, in the commit that carries the tag: bump, stamp `[Unreleased]` with the number and the
