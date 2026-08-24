@@ -2210,12 +2210,18 @@ test('the shell file is chosen by the shell, not guessed', () => {
 // The button that writes it, and what it says. Writing into somebody's shell
 // file is not something to do behind a Save: it is asked for by name, and the
 // panel says which file and that a new terminal is needed before it exists.
+// The shell is named in the config rather than read from the environment: the
+// panel says whichever file that shell reads, so a test that leaves it out
+// asserts about the machine it runs on — green on a zsh laptop, red on a bash
+// CI runner, which is what happened.
 test('the alias can be written into the shell file from the page', () => {
-    const launch = db.launchTab({ model: 'opus', aliasName: 'claude-vs' }, {}, []);
-    const block = launch.slice(launch.indexOf('data-panel="command"'));
-    const panel = block.slice(0, block.indexOf('</section>'));
-    assert.match(panel, /data-install-alias/, 'nothing offers to write it');
-    assert.match(panel, /\.zshrc|shell file/i, 'the file it would touch is not named');
+    for (const [shell, file] of [['/bin/zsh', '.zshrc'], ['/bin/bash', '.bashrc']]) {
+        const launch = db.launchTab({ model: 'opus', aliasName: 'claude-vs', shell }, {}, []);
+        const block = launch.slice(launch.indexOf('data-panel="command"'));
+        const panel = block.slice(0, block.indexOf('</section>'));
+        assert.match(panel, /data-install-alias/, `${shell}: nothing offers to write it`);
+        assert.ok(panel.includes(file), `${shell}: the file it would touch is not named`);
+    }
 });
 
 test('the page sends the install and says nothing was written until it is', () => {

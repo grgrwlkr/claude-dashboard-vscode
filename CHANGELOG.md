@@ -8,7 +8,7 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
-## [0.46.0] — 2026-08-24
+## [0.46.1] — 2026-08-24
 
 ### Added
 
@@ -57,6 +57,8 @@ not published yet.
 
 ### Fixed
 
+- The shell file named on the Launch tab is the one the chosen shell reads; a
+  test asserted `.zshrc` whatever the shell was, and CI runs bash.
 - Fields wrapped in a row of their own are themed; they were drawn by the
   browser, dark on a light page (0.42.0).
 - **Open Claude Code** starts the session in the workspace's first folder, not
