@@ -29,13 +29,36 @@ const RATES = {
 // better overestimated than shown as a reassuringly small number.
 const FALLBACK = { in: 5, out: 25 };
 
-// Suffixes like [1m], -fast and a dated snapshot do not change the rate — the
-// model id underneath is the same one. The date matters most: transcripts carry
-// `claude-haiku-4-5-20251001`, and without stripping it the id misses `RATES`
-// and is billed at the Opus fallback — five times Haiku's own rate, under a row
-// that still reads "haiku 4.5" because `shortModel` strips what this did not.
+// The Anthropic id a spelling names. Suffixes like [1m], -fast and a dated
+// snapshot do not change the rate, and neither does the way a provider spells
+// the id: Bedrock writes `us.anthropic.claude-opus-5-v1:0`, Vertex pins the
+// version after an `@`, a gateway puts its host in front. Every one of those
+// carries the same model underneath.
+//
+// The date matters most, because transcripts carry it: `claude-haiku-4-5-20251001`
+// without the suffix off misses `RATES` and is billed at the Opus fallback —
+// five times Haiku's own rate, under a row that still reads "haiku 4.5" because
+// `shortModel` strips what this did not. The provider spellings reach us the
+// same way now: `modelPicker` (CLI 2.1.242) takes each row's model verbatim and
+// accepts exactly these formats, so what the picker offers is what the
+// transcript records.
+//
+// Stripping invents nothing — a model the table never listed stays unknown, and
+// the fallback covers it.
+function canonicalModel(model) {
+    return (model || '')
+        .replace(/^.*\//, '')                       // gateway host: my-gateway/claude-opus-5
+        .replace(/^(?:[a-z0-9-]+\.)?anthropic\./, '') // Bedrock region profile + vendor
+        .replace(/:\d+$/, '')                        // Bedrock version qualifier: -v1:0
+        .replace(/-v\d+$/, '')
+        .replace(/@.*$/, '')                         // Vertex version pin
+        .replace(/\[[^\]]*\]$/, '')
+        .replace(/-fast$/, '')
+        .replace(/-\d{8}$/, '');
+}
+
 function ratesFor(model) {
-    const id = (model || '').replace(/\[[^\]]*\]$/, '').replace(/-fast$/, '').replace(/-\d{8}$/, '');
+    const id = canonicalModel(model);
     return { rates: RATES[id] || FALLBACK, known: Boolean(RATES[id]) };
 }
 
@@ -89,5 +112,5 @@ function fmtCost(usd) {
 
 module.exports = {
     RATES, CACHE_WRITE_5M, CACHE_WRITE_1H, CACHE_READ,
-    ratesFor, costOf, cacheSplit, cacheSaving, fmtCost,
+    ratesFor, costOf, cacheSplit, cacheSaving, fmtCost, canonicalModel,
 };

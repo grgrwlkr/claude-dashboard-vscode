@@ -50,70 +50,111 @@ const ENV_PAGE = `# Environment variables
 | \`MAX_THINKING_TOKENS\` | Fixed token budget for extended thinking. |
 `;
 
+// The settings page was a table until 2026-08; it is now one section per key,
+// with the facts in bullets under a prose paragraph. Every shape here is taken
+// from the live document: a default written as a bare value, one written as a
+// sentence with no value at all, a scope that makes the key managed-only, a
+// scope that puts the key in a different file, and a version gate.
+const REF_PAGE = `# Claude Code settings reference
+
+## All settings
+
+| Key | Description | Topic | Scope |
+| :-- | :---------- | :---- | :---- |
+| [\`cleanupPeriodDays\`](#cleanupperioddays) | Delete old session files | Memory and context | Any file |
+
+## Memory and context
+
+### \`cleanupPeriodDays\`
+
+How long Claude Code keeps [session files](/docs/en/claude-directory) before deleting them.
+
+* **Scope**: [\`Any file\`](#scopes)
+* **Type**: number of days, minimum \`1\`
+* **Default**: \`30\`
+
+### \`forceWorkspaceDir\`
+
+Pin sessions to a directory. Requires Claude Code v2.1.175 or later.
+
+* **Scope**: [\`Managed\`](#scopes)
+* **Type**: string
+* **Default**: unset, so sessions run where they are launched
+
+## Agents, sessions, and worktrees
+
+### \`worktree.baseRef\`
+
+Which ref new worktrees branch from.
+
+* **Scope**: [\`Any file\`](#scopes)
+* **Type**: string
+* **Default**: \`"HEAD"\`
+
+## Global config settings
+
+### \`autoConnectIde\`
+
+Connect to a running IDE automatically.
+
+* **Scope**: [\`Global config\`](#scopes)
+* **Type**: Boolean
+* **Default**: \`false\`
+`;
+
 test('a cell keeps an escaped pipe, and the row loses its rails', () => {
     assert.deepEqual(d.splitRow('| a | b \\| c | d |'), ['a', 'b | c', 'd']);
 });
 
 test('a section stops at the next heading of its level', () => {
-    const lines = d.sectionLines(PAGE, 'Available settings');
+    const lines = d.sectionLines(REF_PAGE, 'Memory and context');
     assert.ok(lines.some((l) => l.includes('cleanupPeriodDays')));
-    assert.ok(!lines.some((l) => l.includes('worktree.baseRef')), 'ran past its own section');
+    assert.ok(!lines.some((l) => l.includes('autoConnectIde')), 'ran past its own section');
 });
 
 test('a heading that is not there yields nothing, rather than the whole page', () => {
-    assert.deepEqual(d.sectionLines(PAGE, 'Settings reference'), []);
+    assert.deepEqual(d.sectionLines(REF_PAGE, 'Available settings'), []);
 });
 
-test('the default is a sentence, and comes out as value plus note', () => {
-    const byKey = Object.fromEntries(d.parseSettingsDoc(PAGE).map((e) => [e.key, e]));
+// A key documented without a `**Default**` bullet has no default, and saying
+// its type is "string" because the value looks like one would be a guess. The
+// tab has to tell "no default" from "defaults to empty".
+test('a key with no default bullet keeps both fields empty', () => {
+    const page = REF_PAGE + `
+### \`model\`
 
-    assert.equal(byKey.cleanupPeriodDays.default, '30');
-    assert.equal(byKey.cleanupPeriodDays.type, 'number');
-    assert.equal(byKey.cleanupPeriodDays.defaultNote, 'days, minimum `1`');
-    // The description must not open with the tail of the default sentence.
-    assert.match(byKey.cleanupPeriodDays.description, /^Claude Code deletes/);
-    // A link is unfollowable in a table cell, so only its text survives.
-    assert.match(byKey.cleanupPeriodDays.description, /session files older than this/);
+Override the default model.
 
-    assert.equal(byKey.autoCompactEnabled.type, 'boolean');
-    assert.equal(byKey.model.default, '', 'no documented default is not a default of ""');
-    assert.equal(byKey.model.type, '');
+* **Scope**: [\`Any file\`](#scopes)
+`;
+    const entry = d.parseSettingsDoc(page).find((e) => e.key === 'model');
+    assert.equal(entry.default, '');
+    assert.equal(entry.type, '');
+    assert.equal(entry.defaultNote, '');
 });
 
-test('managed-only and the version gate are read off the row', () => {
-    const forced = d.parseSettingsDoc(PAGE).find((e) => e.key === 'forceWorkspaceDir');
-    assert.equal(forced.managedOnly, true);
-    assert.equal(forced.since, '2.1.175');
-    assert.ok(!forced.description.includes('Managed settings only'));
-});
-
-test('the table above the one we want is not read', () => {
-    const keys = d.parseSettingsDoc(PAGE).map((e) => e.key);
-    // `availableModels` appears only in the invalid-entries table.
-    assert.ok(!keys.includes('availableModels'), 'read a neighbouring table');
-    assert.ok(!keys.some((k) => k.includes('stray')), 'read a row with no key');
-    assert.ok(keys.includes('worktree.baseRef'), 'worktree keys live in settings.json too');
-});
-
-test('global config is a different file, and says so', () => {
-    const [entry] = d.parseGlobalConfigDoc(PAGE);
-    assert.equal(entry.key, 'autoConnectIde');
-    assert.equal(entry.file, '~/.claude.json');
-    assert.equal(d.parseSettingsDoc(PAGE).find((e) => e.key === 'autoConnectIde'), undefined);
+// The page opens with an `All settings` table that links to every key. It
+// carries no default, no type and no scope — reading it would double every
+// entry and halve what each one says.
+test('the index table at the top of the page is not read as entries', () => {
+    const entries = d.parseSettingsDoc(REF_PAGE);
+    assert.equal(entries.filter((e) => e.key === 'cleanupPeriodDays').length, 1);
+    assert.ok(!entries.some((e) => e.key.includes('](')), 'read a link cell as a key');
+    assert.ok(entries.some((e) => e.key === 'worktree.baseRef'), 'worktree keys live in settings.json too');
 });
 
 // The failure this guards against is the one that cannot be seen: a docs
-// restructure renames the heading, every table comes back empty, and the tab
-// reports that nothing can be configured — which reads exactly like a machine
-// with nothing configured.
-test('a renamed heading fails loudly instead of yielding an empty registry', () => {
-    const renamed = PAGE.replace('### Available settings', '### Settings reference');
+// restructure drops the per-key sections, everything comes back empty, and the
+// tab reports that nothing can be configured — which reads exactly like a
+// machine with nothing configured.
+test('a restructured page fails loudly instead of yielding an empty registry', () => {
+    const flattened = REF_PAGE.replace(/^### /gm, '#### ');
     assert.throws(
-        () => d.buildRegistry({ settingsMd: renamed, envMd: ENV_PAGE }),
-        /settings table yielded 1 rows/,
+        () => d.buildRegistry({ settingsMd: flattened, envMd: ENV_PAGE }),
+        /settings table yielded 0 rows/,
     );
     assert.throws(
-        () => d.buildRegistry({ settingsMd: PAGE, envMd: '# nothing here' }),
+        () => d.buildRegistry({ settingsMd: REF_PAGE, envMd: '# nothing here' }),
         /env table yielded 0 rows/,
     );
 });
@@ -134,4 +175,42 @@ test('the committed snapshot is a whole registry', () => {
     assert.equal(byKey.autoCompactEnabled.default, 'true');
     assert.equal(byKey.cleanupPeriodDays.default, '30');
     assert.ok(byKey.env, 'the env block is itself a documented setting');
+});
+
+
+test('the reference page yields one entry per key section', () => {
+    const settings = d.parseSettingsDoc(REF_PAGE);
+    const keys = settings.map((e) => e.key);
+    assert.deepEqual(keys.sort(), ['cleanupPeriodDays', 'forceWorkspaceDir', 'worktree.baseRef']);
+    // The `All settings` index table lists every key too; counting it as well
+    // would double each entry.
+    assert.equal(settings.filter((e) => e.key === 'cleanupPeriodDays').length, 1);
+});
+
+test('an entry carries the facts from its bullets, not from prose', () => {
+    const byKey = Object.fromEntries(d.parseSettingsDoc(REF_PAGE).map((e) => [e.key, e]));
+
+    const cleanup = byKey.cleanupPeriodDays;
+    assert.equal(cleanup.default, '30');
+    assert.equal(cleanup.type, 'number of days, minimum `1`');
+    assert.equal(cleanup.file, 'settings.json');
+    assert.equal(cleanup.managedOnly, false);
+    assert.ok(cleanup.description.startsWith('How long Claude Code keeps session files'), cleanup.description);
+
+    // A default written as a sentence has no value to show, so the sentence is
+    // the note and the value stays empty rather than becoming the word "unset".
+    const forced = byKey.forceWorkspaceDir;
+    assert.equal(forced.default, '');
+    assert.equal(forced.defaultNote, 'unset, so sessions run where they are launched');
+    assert.equal(forced.managedOnly, true);
+    assert.equal(forced.since, '2.1.175');
+});
+
+test('a global-config key is filed where it actually goes', () => {
+    const settings = d.parseSettingsDoc(REF_PAGE);
+    assert.ok(!settings.some((e) => e.key === 'autoConnectIde'), 'global config key filed as a settings.json key');
+    const globalConfig = d.parseGlobalConfigDoc(REF_PAGE);
+    assert.deepEqual(globalConfig.map((e) => e.key), ['autoConnectIde']);
+    assert.equal(globalConfig[0].file, '~/.claude.json');
+    assert.equal(globalConfig[0].default, 'false');
 });

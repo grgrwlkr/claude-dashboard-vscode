@@ -11,7 +11,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { fmtCost, ratesFor } = require('./pricing');
+const { fmtCost, ratesFor, canonicalModel } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
 const wfm = require('./workflows');
@@ -96,11 +96,11 @@ function modelRows(models) {
     return Object.entries(models).filter(([m]) => m !== SYNTHETIC_MODEL);
 }
 
+// The label and the rate read an id the same way, so a Bedrock or gateway
+// spelling cannot show up as its own model in a legend that already has the row.
 function shortModel(model) {
-    return (model || 'unknown')
+    return (canonicalModel(model) || 'unknown')
         .replace(/^claude-/, '')
-        .replace(/-\d{8}$/, '')
-        .replace(/\[[^\]]*\]$/, '')
         .replace(/-(\d)-(\d)$/, ' $1.$2')
         .replace(/-(\d)$/, ' $1');
 }
@@ -731,6 +731,7 @@ function agentCard(agent, run) {
     const outcome = wfm.outcomeOf(agent.state, run.state);
     const facts = [
         agent.model ? shortModel(agent.model) : '',
+        agent.effort || '',
         agent.tokens ? `~${tok(agent.tokens)}` : '',
         agent.cost ? `~${fmtCost(agent.cost)}` : '',
         agent.toolCalls ? `${agent.toolCalls} tool call${agent.toolCalls === 1 ? '' : 's'}` : '',
@@ -3678,7 +3679,7 @@ function clientTab(client, cfg = {}) {
         'Fetch the reference and the changelog from Anthropic', fetched,
         'Two public documentation files and the changelog, no credentials, at most once an hour. Off, the list below is the one packaged with this extension.'), {
         note: client.checkedAt
-            ? `Parsed from <code>code.claude.com/docs/en/settings.md</code> and <code>env-vars.md</code>, read on ${esc(client.checkedAt)}: ${c.documented} settings and ${c.variables} variables. ${fetched ? 'Refreshed in the background and kept in the extension\'s own storage, so this still reads offline.' : 'This is the packaged copy — settings ship most weeks, so it drifts.'}`
+            ? `Parsed from <code>code.claude.com/docs/en/settings-reference.md</code> and <code>env-vars.md</code>, read on ${esc(client.checkedAt)}: ${c.documented} settings and ${c.variables} variables. ${fetched ? 'Refreshed in the background and kept in the extension\'s own storage, so this still reads offline.' : 'This is the packaged copy — settings ship most weeks, so it drifts.'}`
             : 'No reference is loaded, so this tab can only say what is set — not what else exists, nor what any of it defaults to.',
     })}
     </section>`;

@@ -1124,7 +1124,10 @@ function treeNodes(runs) {
             kind: 'agent',
             id: `${key}/${agent.agentId}`,
             label: agentLabel(agent),
-            description: [agent.model, agent.tokens ? tokenLabel(agent.tokens) : '']
+            // The effort sits beside the model because that pair is what a
+            // dispatch label claims — and an agent whose transcript recorded no
+            // effort shows none rather than the session's own rung.
+            description: [agent.model, agent.effort, agent.tokens ? tokenLabel(agent.tokens) : '']
                 .filter(Boolean).join(' · '),
             icon: agentIcon(agent, run),
             state: agent.state,

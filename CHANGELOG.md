@@ -8,6 +8,19 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
+## [0.48.0] — 2026-08-25
+
+### Added
+
+- Agent rows and agent cards name the effort the agent ran on, beside its model.
+
+### Fixed
+
+- Settings come from `settings-reference.md`; the Client tab refreshes again.
+- The registry ships 208 settings and 341 variables; it held 135 and 315.
+- Bedrock, Vertex and gateway model ids are priced and labelled as the model they
+  name.
+
 ## [0.46.3] — 2026-08-25
 
 ### Added

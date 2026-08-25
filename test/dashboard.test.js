@@ -32,6 +32,17 @@ test('shortModel strips the vendor prefix and any date snapshot', () => {
     assert.equal(db.shortModel(''), 'unknown');
 });
 
+// A provider spells the same model its own way, and a row labelled
+// `us.anthropic.claude-opus-5-v1:0` is unreadable at chip size next to one
+// labelled `opus 5` — worse, the two read as different models in the same
+// legend. The label follows the same normalisation the rate does.
+test('shortModel reads a provider-format id as the model it names', () => {
+    assert.equal(db.shortModel('us.anthropic.claude-opus-5-v1:0'), 'opus 5');
+    assert.equal(db.shortModel('anthropic.claude-sonnet-5'), 'sonnet 5');
+    assert.equal(db.shortModel('claude-haiku-4-5@20251001'), 'haiku 4.5');
+    assert.equal(db.shortModel('my-gateway/claude-opus-5'), 'opus 5');
+});
+
 test('fmtDur reads as minutes, hours or days', () => {
     assert.equal(db.fmtDur(0), '—');
     assert.equal(db.fmtDur(90 * 1000), '2m');
@@ -2253,4 +2264,20 @@ test('the install button sends the choices rather than the drawn line', () => {
     const call = html.slice(html.indexOf("type: 'installAlias'"));
     assert.match(call.slice(0, 120), /settings: settingsToSave\(\)/);
     assert.ok(!/type: 'installAlias', line:/.test(html), 'the page still sends its own text');
+});
+
+// The card already names the model; the rung beside it is what tells a dispatch
+// that claimed `[opus·medium]` from one that inherited the session's level.
+test('an agent card names the effort the agent ran on', () => {
+    const html = db.agentsTab(ix.summarize(demoIndex()), [demoRun({
+        agents: [demoAgent({ effort: 'medium' })],
+    })]);
+    assert.match(html, /opus 5 · medium/);
+});
+
+test('an agent card says nothing about effort when the transcript recorded none', () => {
+    const html = db.agentsTab(ix.summarize(demoIndex()), [demoRun({
+        agents: [demoAgent({ effort: '' })],
+    })]);
+    assert.doesNotMatch(html, /opus 5 · (low|medium|high|xhigh|max)/);
 });

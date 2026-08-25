@@ -13,7 +13,7 @@ const path = require('node:path');
 const { buildRegistry } = require('../settingsDocs');
 
 const SOURCE = {
-    settings: 'https://code.claude.com/docs/en/settings.md',
+    settings: 'https://code.claude.com/docs/en/settings-reference.md',
     env: 'https://code.claude.com/docs/en/env-vars.md',
 };
 const OUT = path.join(__dirname, '..', 'claude-settings-registry.json');

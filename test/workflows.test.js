@@ -1292,3 +1292,23 @@ test('agentLabel names an agent that has no label yet by what it was told', () =
     assert.equal(wf.agentLabel({ agentId: 'a1', label: '', promptPreview: ' найди баги\nвторая строка' }), 'найди баги');
     assert.equal(wf.agentLabel({ agentId: 'abcdef1234', label: '', promptPreview: '' }), 'abcdef12');
 });
+
+// The rung an agent actually ran on is the one fact a label cannot be trusted
+// for: a dispatch labelled `[opus·medium]` is a claim, and the transcript field
+// beside the model is what settles it. The row already reads the field — it
+// just did not show it.
+test('an agent row shows the effort it ran on beside its model', () => {
+    const run = {
+        runId: 'wf_e-1', name: 'e', state: 'finished', status: 'completed', lastActivity: 1,
+        phases: [], totals: { agents: 2, cost: 0 },
+        agents: [
+            { agentId: 'e1', label: 'collect:one', phase: '', model: 'claude-opus-5', effort: 'medium', state: 'done', tokens: 2000, cost: 0 },
+            { agentId: 'e2', label: 'collect:two', phase: '', model: 'claude-opus-5', effort: '', state: 'done', tokens: 2000, cost: 0 },
+        ],
+    };
+    const [withEffort, without] = wf.treeNodes([run])[0].children;
+    assert.match(withEffort.description, /medium/);
+    // An agent whose transcript never recorded one says nothing rather than
+    // inventing the session's rung.
+    assert.ok(!/medium|high|low/.test(without.description), without.description);
+});

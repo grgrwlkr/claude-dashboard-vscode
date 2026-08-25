@@ -96,3 +96,34 @@ test('the rate table matches the published prices', () => {
         assert.deepEqual(p.ratesFor(id).rates, rate, `${id} is priced wrong`);
     }
 });
+
+// A provider-format id names the same model as its Anthropic id: Bedrock spells
+// it `us.anthropic.claude-opus-5-v1:0`, Vertex pins a version with `@`, and a
+// gateway prefixes a host. Without those coming off, every one of them misses
+// `RATES` and is billed at the Opus fallback — the same failure the dated
+// suffix caused, and now reachable from a `modelPicker` lineup, whose rows are
+// documented to accept exactly these spellings.
+test('a provider-format model id finds the rate of the model it names', () => {
+    const bedrock = 'us.anthropic.claude-haiku-4-5-v1:0';
+    assert.equal(p.ratesFor(bedrock).known, true);
+    assert.deepEqual(p.ratesFor(bedrock).rates, p.RATES['claude-haiku-4-5']);
+
+    for (const id of [
+        'anthropic.claude-sonnet-5',              // Bedrock, no region prefix
+        'eu.anthropic.claude-sonnet-5-v1:0',      // Bedrock, EU inference profile
+        'global.anthropic.claude-sonnet-5-v1:0',  // Bedrock, global profile
+        'claude-sonnet-5@20260101',               // Vertex, version pinned with @
+        'my-gateway/claude-sonnet-5',             // LLM gateway, host prefix
+    ]) {
+        assert.equal(p.ratesFor(id).known, true, `${id} should be known`);
+        assert.deepEqual(p.ratesFor(id).rates, p.RATES['claude-sonnet-5'], `${id} is priced wrong`);
+    }
+});
+
+// Stripping a provider's spelling invents nothing: a model the table never
+// listed stays unknown, and the Opus fallback still covers it.
+test('a provider-format id of an unlisted model is still unknown', () => {
+    assert.equal(p.ratesFor('us.anthropic.claude-newthing-9-v1:0').known, false);
+    assert.equal(p.ratesFor('my-gateway/claude-opus-4-5').known, false);
+    assert.deepEqual(p.ratesFor('my-gateway/claude-opus-4-5').rates, p.RATES['claude-opus-5']);
+});

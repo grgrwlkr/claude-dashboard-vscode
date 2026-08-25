@@ -4,9 +4,16 @@
 // None of that is on this machine. The client ships no schema, and the hundreds
 // of `CLAUDE_CODE_*` strings inside its bundle are internal flags with no
 // defaults and no descriptions — enumerable, but not answerable. The documented
-// tables are the only source that carries all three, so this parses them:
-// `### Available settings` from docs/en/settings.md and `## Variables` from
-// docs/en/env-vars.md, both served as raw markdown.
+// documentation is the only source that carries all three, so this parses it:
+// one `### `key`` section per setting in docs/en/settings-reference.md, and the
+// `## Variables` table in docs/en/env-vars.md, both served as raw markdown.
+//
+// The settings page was a table under `### Available settings` until 2026-08,
+// when it became a reference page of per-key sections and the table moved to an
+// index of links. The two shapes carry the same facts in different places: what
+// was one cell of prose is now a paragraph plus **Scope**, **Type** and
+// **Default** bullets — better to read, and the reason `typeOf` no longer has to
+// guess a type from the shape of a default.
 //
 // A snapshot of the result is committed as claude-settings-registry.json and
 // carries the date it was taken; the same parser runs again when the network
@@ -88,6 +95,9 @@ function plainText(md) {
 const DEFAULT_RE = /\*\*Defaults?\*\*:?\s*`([^`]*)`([^.]*)\.?/;
 const SINCE_RE = /(?:Requires |Applies in |Claude Code )v?(\d+\.\d+\.\d+)(?:\s+(?:or later|and later))?/;
 const MANAGED_RE = /\(Managed settings only\)/i;
+// The whole sentence a version gate is written as, so it can be removed rather
+// than trimmed: "Requires Claude Code v2.1.242 or later."
+const REQUIREMENT_RE = /\s*(?:Requires|Applies in) (?:Claude Code )?v?\d+\.\d+\.\d+(?:\s+(?:or later|and later))?\.?/i;
 
 // The type is read off the default rather than declared anywhere: `true` is a
 // boolean, `30` a number, `"latest"` a string. A key with no documented default
@@ -132,20 +142,86 @@ function parseTable(md, heading, file) {
     return out;
 }
 
-// Three tables, two files. `worktree.*` keys are documented apart from the rest
-// but live in the same settings.json, while the global-config table is a
-// different file entirely — the page says a key from it put into settings.json
-// is silently ignored, which is precisely the mistake the tab should let you
-// see rather than repeat.
+const KEY_HEADING = /^###\s+`([^`]+)`\s*$/;
+const BULLET = /^\*\s+\*\*([A-Za-z ]+)\*\*:\s*(.*)$/;    // top level only: a nested one is indented
+
+// One `### `key`` section: the paragraph is the description, the bullets are the
+// facts. Everything below the bullets — examples, JSON blocks, tables of allowed
+// values — belongs to the page, not to the tab, and is dropped.
+function entryFromSection(key, lines) {
+    const prose = [];
+    const bullets = {};
+    for (const line of lines) {
+        const b = BULLET.exec(line);
+        if (b) { bullets[b[1].trim().toLowerCase()] = b[2].trim(); continue; }
+        if (Object.keys(bullets).length) {
+            // A bullet can carry its own nested list — **Type**: Boolean spells
+            // out `true` and `false` underneath — and the bullets we want come
+            // after it. Only unindented prose ends the block: an example, a JSON
+            // fence, a table. Breaking on the first nested line lost every
+            // bullet below it, `**Default**` included.
+            if (!line.trim() || /^\s/.test(line)) continue;
+            break;
+        }
+        if (line.startsWith('#')) break;
+        prose.push(line);
+    }
+    const scope = plainText(bullets.scope || '').replace(/`/g, '');
+    const rawDefault = bullets.default || '';
+    // `**Default**: `30`` gives a value; `**Default**: unset, so sessions run
+    // where they are launched` gives none, and saying the default is the word
+    // "unset" would read as a value the key can be set to.
+    const valued = /^`([^`]*)`\s*(.*)$/.exec(rawDefault);
+    const description = plainText(prose.join(' '));
+    const whole = `${description} ${plainText(rawDefault)} ${scope}`;
+    const since = SINCE_RE.exec(whole);
+    return {
+        key,
+        file: /global config/i.test(scope) ? '~/.claude.json' : 'settings.json',
+        type: plainText(bullets.type || '') || typeOf(valued ? valued[1] : ''),
+        default: valued ? valued[1] : '',
+        defaultNote: valued ? plainText(valued[2] || '') : plainText(rawDefault),
+        // The gate has its own field, so the sentence that states it comes out of
+        // the description whole — cutting only what SINCE_RE matched left the
+        // word "Requires" dangling at the end.
+        description: description.replace(REQUIREMENT_RE, '').replace(/\s{2,}/g, ' ').trim(),
+        // A key the page marks `Managed` cannot be set from a user's own file at
+        // all, which is what the tab needs to say — the old page marked the same
+        // thing with a `(Managed settings only)` prefix in the cell.
+        managedOnly: /^managed$/i.test(scope) || MANAGED_RE.test(description),
+        since: since ? since[1] : '',
+    };
+}
+
+// Every documented key, wherever on the page it sits. The `All settings` table
+// at the top indexes the same keys as links, so it is deliberately not read:
+// the sections carry the facts, the index carries none of them.
+function parseKeySections(md) {
+    const lines = md.split('\n');
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+        const m = KEY_HEADING.exec(lines[i]);
+        if (!m) continue;
+        const body = [];
+        for (let j = i + 1; j < lines.length; j++) {
+            if (/^#{1,3}\s/.test(lines[j])) break;
+            body.push(lines[j]);
+        }
+        out.push(entryFromSection(m[1], body));
+    }
+    return out;
+}
+
+// Two files, one page. `worktree.*` keys sit under their own topic but live in
+// the same settings.json; the global-config keys are a different file entirely —
+// the page says a key from it put into settings.json is silently ignored, which
+// is precisely the mistake the tab should let you see rather than repeat.
 function parseSettingsDoc(md) {
-    return [
-        ...parseTable(md, 'Available settings', 'settings.json'),
-        ...parseTable(md, 'Worktree settings', 'settings.json'),
-    ];
+    return parseKeySections(md || '').filter((e) => e.file === 'settings.json');
 }
 
 function parseGlobalConfigDoc(md) {
-    return parseTable(md, 'Global config settings', '~/.claude.json');
+    return parseKeySections(md || '').filter((e) => e.file === '~/.claude.json');
 }
 
 function parseEnvDoc(md) {
@@ -179,6 +255,6 @@ function buildRegistry({ settingsMd, envMd, checkedAt, source }) {
 }
 
 module.exports = {
-    buildRegistry, parseSettingsDoc, parseGlobalConfigDoc, parseEnvDoc,
+    buildRegistry, parseSettingsDoc, parseGlobalConfigDoc, parseEnvDoc, parseKeySections,
     sectionLines, tableRows, splitRow, plainText, entryFrom,
 };

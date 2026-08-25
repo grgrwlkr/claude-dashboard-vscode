@@ -1139,7 +1139,7 @@ let changelogCache = { at: 0, text: '' };
 // switch as the changelog: one toggle for "read Anthropic's published docs",
 // rather than a third checkbox saying the same thing about a different URL.
 const DOCS_URL = {
-    settings: 'https://code.claude.com/docs/en/settings.md',
+    settings: 'https://code.claude.com/docs/en/settings-reference.md',
     env: 'https://code.claude.com/docs/en/env-vars.md',
 };
 let registryCache = null;

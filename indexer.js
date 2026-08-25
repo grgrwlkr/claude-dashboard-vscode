@@ -29,7 +29,10 @@ const PROJECTS = path.join(HOME, '.claude', 'projects');
 // the inflated figures and would keep them forever, since its file has not moved.
 // 7: Sonnet 5 is repriced $3/$15 → $2/$10. Money is baked into the aggregate at
 // index time, so a rate fix reprices nothing already stored — same reason as 6.
-const INDEX_VERSION = 7;
+// 8: Bedrock, Vertex and gateway model ids canonicalise to the model they name,
+// so what was billed at the Opus fallback is billed at its own rate — a rate fix
+// again, and stored aggregates keep the old money without a bump.
+const INDEX_VERSION = 8;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only
