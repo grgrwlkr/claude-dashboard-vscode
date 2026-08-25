@@ -1,6 +1,6 @@
 {
   "name": "claude-dashboard",
-  "displayName": "Dashboard & Statusline for Claude Code",
+  "displayName": "Claude dashnlines — Dashboard & Statusline for Claude Code",
   "description": "Unofficial. A 24-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
   "version": "0.48.0",
   "publisher": "grgrwlkr",
@@ -87,11 +87,11 @@
       },
       {
         "command": "claudeStatusline.refresh",
-        "title": "Claude Statusline: Refresh now"
+        "title": "Claude dashnlines: Refresh now"
       },
       {
         "command": "claudeStatusline.placeholders",
-        "title": "Claude Statusline: List status-bar placeholders"
+        "title": "Claude dashnlines: List status-bar placeholders"
       },
       {
         "command": "claudeStatusline.openWorkflowScript",
@@ -140,7 +140,7 @@
       "activitybar": [
         {
           "id": "claudeStatusline",
-          "title": "Claude Dashboard",
+          "title": "Claude dashnlines",
           "icon": "media/bar-icon.svg"
         }
       ]
@@ -173,7 +173,7 @@
       ]
     },
     "configuration": {
-      "title": "Claude Statusline",
+      "title": "Claude dashnlines",
       "properties": {
         "claudeStatusline.segments": {
           "type": "array",
@@ -187,7 +187,7 @@
             "[⧉ {peers}][ ▸ {todo}]",
             "[$(gear) {wfName}][ {wfAgents}][ {wfElapsed}][ ×{wfRuns}]"
           ],
-          "markdownDescription": "One status-bar item per string, left to right. Write literal text, `{placeholders}`, and `[optional groups]` that vanish whole when a placeholder inside them has nothing to say. A segment whose placeholders are all empty hides itself.\n\nRun **Claude Statusline: List status-bar placeholders** to see every name with the value it has right now.\n\nLimits: `{weekly}` `{weeklyBar}` `{plan}` `{drift}` `{dry}` `{dryAt}` `{dryLeft}` `{reset}` `{resetLeft}` `{session5h}` `{session5hLeft}` `{scoped}` `{scoped:Opus}`\n\nSession: `{ctx}` `{ctxTokens}` `{ctxWindow}` `{ctxCache}` `{compact}` `{model}` `{effort}` `{advisor}` `{thinking}` `{outputStyle}` `{branch}` `{version}` `{update}`\n\nSpend: `{cost}` `{burn}` `{today}` `{requests}` `{duration}` `{apiShare}` `{added}` `{removed}`\n\nWork: `{peers}` `{peersBusy}` `{todo}` `{todoActive}` `{jobs}` `{sessions}` `{openTasks}`\n\nWorkflow: `{wfName}` `{wfAgents}` `{wfElapsed}` `{wfCost}` `{wfRuns}`\n\nVS Code icons work too: `$(flame)`, `$(rocket)`. A backslash escapes `{`, `}`, `[` and `]`."
+          "markdownDescription": "One status-bar item per string, left to right. Write literal text, `{placeholders}`, and `[optional groups]` that vanish whole when a placeholder inside them has nothing to say. A segment whose placeholders are all empty hides itself.\n\nRun **Claude dashnlines: List status-bar placeholders** to see every name with the value it has right now.\n\nLimits: `{weekly}` `{weeklyBar}` `{plan}` `{drift}` `{dry}` `{dryAt}` `{dryLeft}` `{reset}` `{resetLeft}` `{session5h}` `{session5hLeft}` `{scoped}` `{scoped:Opus}`\n\nSession: `{ctx}` `{ctxTokens}` `{ctxWindow}` `{ctxCache}` `{compact}` `{model}` `{effort}` `{advisor}` `{thinking}` `{outputStyle}` `{branch}` `{version}` `{update}`\n\nSpend: `{cost}` `{burn}` `{today}` `{requests}` `{duration}` `{apiShare}` `{added}` `{removed}`\n\nWork: `{peers}` `{peersBusy}` `{todo}` `{todoActive}` `{jobs}` `{sessions}` `{openTasks}`\n\nWorkflow: `{wfName}` `{wfAgents}` `{wfElapsed}` `{wfCost}` `{wfRuns}`\n\nVS Code icons work too: `$(flame)`, `$(rocket)`. A backslash escapes `{`, `}`, `[` and `]`."
         },
         "claudeStatusline.fetchLimits": {
           "type": "boolean",

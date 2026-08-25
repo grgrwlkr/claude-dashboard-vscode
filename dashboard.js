@@ -2699,7 +2699,7 @@ function withAliasBlock(text, line) {
 
     const block = [
         ALIAS_OPEN,
-        '# Written by the Claude Dashboard extension, from Setup → Launch.',
+        '# Written by the Claude dashnlines extension, from Setup → Launch.',
         '# Rename or clear the alias name there to change or remove this.',
         line,
         ALIAS_CLOSE,
@@ -3759,9 +3759,9 @@ function render(index, total, meta) {
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-<title>Claude Dashboard</title><style>${STYLE}</style></head><body>
+<title>Claude dashnlines</title><style>${STYLE}</style></head><body>
 <header class="page-head">
-  <div class="mark">${MARK}<h1>Claude Dashboard</h1><span class="pill" data-version>v${esc(VERSION)}</span></div>
+  <div class="mark">${MARK}<h1>Claude dashnlines</h1><span class="pill" data-version>v${esc(VERSION)}</span></div>
   <div class="pills">
     <span class="pill">${plural(meta.files, 'transcript')}</span>
     <span class="pill" id="idx"${meta.lastRun ? ` title="Last built ${esc(fmtDateTime(meta.lastRun))}"` : ''}>${

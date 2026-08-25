@@ -1054,13 +1054,13 @@ test('a model keeps its colour whichever list it is drawn in', () => {
 test('the page names itself the same way the command that opens it does', () => {
     const manifest = JSON.parse(require('node:fs').readFileSync(`${__dirname}/../package.json`, 'utf8'));
     const html = db.render(demoIndex(), ix.summarize(demoIndex()), { files: 1, lastRun: Date.now(), history: [] });
-    assert.match(html, /<title>Claude Dashboard<\/title>/);
-    assert.match(html, /<h1>Claude Dashboard<\/h1>/);
+    assert.match(html, /<title>Claude dashnlines<\/title>/);
+    assert.match(html, /<h1>Claude dashnlines<\/h1>/);
     // The version rides beside the name as a pill, in the same shape the panels
     // use for state — it was a bare span with its own type treatment. The
     // attribute is what `--demo` strips it by; see the test that holds both
     // files to it.
-    assert.match(html, /<h1>Claude Dashboard<\/h1><span class="pill" data-version>v\d+\.\d+\.\d+<\/span>/);
+    assert.match(html, /<h1>Claude dashnlines<\/h1><span class="pill" data-version>v\d+\.\d+\.\d+<\/span>/);
     const open = manifest.contributes.commands.find((c) => c.command === 'claudeStatusline.dashboard');
     assert.equal(open.title, 'Claude: Open dashboard');
 });

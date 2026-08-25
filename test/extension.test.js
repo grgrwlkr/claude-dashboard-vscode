@@ -122,8 +122,8 @@ test('the bar opens with a button left of every segment', () => {
         // The name is what the bar's own context menu offers to hide, beside
         // every other extension's — so it names this one rather than reading as
         // an entry of Claude Code's, which sits in that same list.
-        assert.equal(btn.name, 'Claude Statusline: Open');
-        assert.deepEqual(segmentItems().map((i) => i.name), ['Claude Statusline 1', 'Claude Statusline 2']);
+        assert.equal(btn.name, 'Claude dashnlines: Open');
+        assert.deepEqual(segmentItems().map((i) => i.name), ['Claude dashnlines 1', 'Claude dashnlines 2']);
     } finally { run.dispose(); }
 });
 
@@ -2440,4 +2440,37 @@ test('a message with choices reaches the writer, which takes its own shell', asy
         if (bakBefore === null) assert.ok(!fs.existsSync(bak), 'a backup was left behind');
         else assert.equal(fs.readFileSync(bak, 'utf8'), bakBefore, 'the backup was rewritten');
     } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// The rebrand to Claude dashnlines renamed what a user reads, and left the extension id
+// and every `claudeStatusline.*` setting key alone. A half-applied rename is the
+// failure to catch: one forgotten title and the old product name sits in the
+// command palette next to the new one.
+test('no user-facing string still carries the old product name', () => {
+    const pkg = require('../package.json');
+    const strings = [
+        pkg.displayName,
+        pkg.description,
+        pkg.contributes.configuration.title,
+        ...pkg.contributes.commands.map((c) => c.title),
+        ...Object.values(pkg.contributes.viewsContainers).flat().map((v) => v.title),
+        ...Object.values(pkg.contributes.configuration.properties).map((p) => p.markdownDescription || p.description || ''),
+    ];
+    for (const s of strings) {
+        assert.ok(!/Claude Dashboard|Claude Statusline/.test(s), `old name in: ${String(s).slice(0, 70)}`);
+    }
+});
+
+test('the identifier and the setting keys are untouched by the rebrand', () => {
+    const pkg = require('../package.json');
+    // Renaming these would orphan globalStorage and reset everyone's settings;
+    // the rebrand deliberately stops at what is read rather than what is keyed.
+    assert.equal(pkg.name, 'claude-dashboard');
+    assert.equal(pkg.publisher, 'grgrwlkr');
+    for (const key of Object.keys(pkg.contributes.configuration.properties)) {
+        assert.ok(key.startsWith('claudeStatusline.'), `${key} left the claudeStatusline namespace`);
+    }
+    for (const c of pkg.contributes.commands) {
+        assert.ok(c.command.startsWith('claudeStatusline.'), `${c.command} left the claudeStatusline namespace`);
+    }
 });

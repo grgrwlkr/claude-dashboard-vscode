@@ -10,6 +10,13 @@ not published yet.
 
 ## [Unreleased]
 
+### Changed
+
+- The extension is named **Claude dashnlines**: the panel, the settings section,
+  the commands and the dashboard heading.
+- The identifier, every `claudeStatusline.*` setting and every keybinding are
+  unchanged; nothing to migrate.
+
 ### Added
 
 - A status line for the terminal: `node bin/statusline.js` as the `statusLine`
