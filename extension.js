@@ -926,10 +926,16 @@ let lastRender = 0;
 // than one of these.
 const tickSeconds = () => Math.max(15, vscode.workspace.getConfiguration('claudeStatusline').get('refreshInterval') || 60);
 
+// The tabs that are forms rather than readings. A redraw hands the document
+// back whatever the last save held, so anything typed and not yet saved is
+// gone — on Launch that is the alias name, and the button beside it writes a
+// shell file from the field it finds.
+const FORM_TABS = ['settings', 'launch'];
+
 // Returns the rebuild, so a caller — the tick ignores it, a test does not — can
 // wait for the page to actually be replaced.
 function refreshDashboard(context) {
-    if (!panel || !panel.visible || refreshing || openTab === 'settings') return Promise.resolve(false);
+    if (!panel || !panel.visible || refreshing || FORM_TABS.includes(openTab)) return Promise.resolve(false);
     // The timer is a setting, not a law: a page nobody asked to move is a page
     // that scrolls out from under a reader.
     // `!== false`, not a truthiness test: a settings file written before this key
@@ -1428,6 +1434,22 @@ function installAlias({ settings, home = os.homedir(), shell = process.env.SHELL
     if (line && !/^alias [A-Za-z_][A-Za-z0-9_-]*='[^\n\r]*'$/.test(line)) {
         vscode.window.showErrorMessage('Claude statusline: refusing to write an unexpected alias line.');
         return;
+    }
+
+    // No line means "remove the block", and the page can ask for that without
+    // meaning it: the field is drawn from the saved setting, so a rebuild
+    // between typing and clicking leaves the DOM holding nothing at all. The
+    // blank is honoured only when the saved name is blank too — the two
+    // disagreeing is a stale page, not a decision, and this write is the one
+    // that leaves the extension's own storage.
+    if (!line) {
+        const saved = String(vscode.workspace.getConfiguration('claudeStatusline').get('aliasName') || '').trim();
+        if (saved) {
+            vscode.window.showWarningMessage(
+                `Claude statusline: the alias is still named ${saved} in your settings, so nothing was removed. `
+                + 'Clear the name on Setup → Launch and save it to take the alias out.');
+            return;
+        }
     }
 
     try {

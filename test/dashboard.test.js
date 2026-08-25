@@ -1516,7 +1516,7 @@ test('every launch option says what it is for', () => {
     assert.match(launch, /Fable where your organization has access to it/);
     assert.ok(!/whichever the client considers best for the task/i.test(launch));
     // opusplan costs two rates and drops the cache when it switches.
-    assert.match(launch, /\$5\/\$25 → \$3\/\$15/);
+    assert.match(launch, /\$5\/\$25 → \$2\/\$10/);
     assert.match(launch, /drops the prompt cache/);
     // Concise shipped in 2.1.237 and has to be offered like the rest.
     assert.match(launch, /Leads with the result and skips preamble/);

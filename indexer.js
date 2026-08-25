@@ -27,7 +27,9 @@ const PROJECTS = path.join(HOME, '.claude', 'projects');
 // 6: a response is charged once rather than once per content block. The shape is
 // unchanged and every number in it is different — an aggregate of shape 5 holds
 // the inflated figures and would keep them forever, since its file has not moved.
-const INDEX_VERSION = 6;
+// 7: Sonnet 5 is repriced $3/$15 → $2/$10. Money is baked into the aggregate at
+// index time, so a rate fix reprices nothing already stored — same reason as 6.
+const INDEX_VERSION = 7;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only

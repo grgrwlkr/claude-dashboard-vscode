@@ -8,6 +8,27 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
+## [0.46.2] — 2026-08-25
+
+### Changed
+
+- The Launch banner is headed **The most you can get for the price**; it read
+  *What the measurements settle*.
+- A panel's title and its state pills stay on one line; the pills wrap under
+  themselves instead of dropping whole under the title.
+- Below 360px of panel width the two stack; the pills keep the right edge on
+  whatever line they land on.
+
+### Fixed
+
+- Claude Sonnet 5 is priced at $2/$10 per million tokens, in the rate table and
+  on the Launch tab; it was $3/$15.
+- The first run after this re-reads every transcript and reprices Sonnet 5 spend.
+- **Write to ~/.zshrc** keeps the alias when the field is blank and the setting
+  still names one.
+- The refresh tick leaves the Launch tab alone, as it already did the Settings
+  tab.
+
 ## [0.46.1] — 2026-08-24
 
 ### Added

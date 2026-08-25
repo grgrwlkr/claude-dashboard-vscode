@@ -18,7 +18,7 @@ const RATES = {
     'claude-opus-4-8': { in: 5, out: 25 },
     'claude-opus-4-7': { in: 5, out: 25 },
     'claude-opus-4-6': { in: 5, out: 25 },
-    'claude-sonnet-5': { in: 3, out: 15 },
+    'claude-sonnet-5': { in: 2, out: 10 },
     'claude-sonnet-4-6': { in: 3, out: 15 },
     'claude-haiku-4-5': { in: 1, out: 5 },
     'claude-fable-5': { in: 10, out: 50 },

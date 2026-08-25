@@ -480,7 +480,7 @@ thinks, whether a second model advises it, and how it answers you. That is the
 **Setup → Launch** tab, one panel per choice, each option carrying what it is for
 and what it costs:
 
-![Starting a session: six panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the output style with the client's five above the ones you wrote yourself, and any extra arguments](media/screenshots/launch-dark.png)
+![Starting a session: the verdict banner over seven panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the output style with the client's five above the ones you wrote yourself, any extra arguments, and the command the button runs with a shell alias for it](media/screenshots/launch-dark.png)
 
 The tab opens on a banner of what the published measurements say: the Opus 5 +
 Fable advisor pairing at 85.7%, `xhigh` at 44.4% against `max` at 43%, and Opus 5
@@ -509,8 +509,10 @@ quotes do not close the outer ones.
 **Write to ~/.zshrc** puts the alias in the file, inside a block the extension
 owns; the rest of the file comes back byte for byte. The first write keeps a copy
 beside it and the replace is atomic. It happens on that button only, never on
-Save. Clearing the alias name removes the block. A shell whose `alias` takes
-different syntax is told so instead of being handed a line.
+Save. The button removes the block when the alias name is blank, and only once
+that blank is what `claudeStatusline.aliasName` holds: clear the name, save it,
+then press the button. A shell whose `alias` takes different syntax is told so
+instead of being handed a line.
 **Claude: Open Claude Code with…** asks for a model and an effort instead of
 reading the settings, for the one run that is not like the others.
 

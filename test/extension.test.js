@@ -1138,6 +1138,14 @@ test('the open dashboard is rebuilt on the tick, except while settings are open'
         await ext.__refreshDashboard(run.context);
         assert.equal(panel.webview.html, 'SETTINGS-OPEN', 'a redraw would have wiped the form');
 
+        // The launch tab is a form as well — the alias name is typed there and
+        // the button that writes it reads the field, so a redraw between the two
+        // hands a shell file a blank.
+        await panel.__receive({ type: 'tab', id: 'launch' });
+        panel.webview.html = 'LAUNCH-OPEN';
+        await ext.__refreshDashboard(run.context);
+        assert.equal(panel.webview.html, 'LAUNCH-OPEN', 'a redraw would have wiped the form');
+
         // Navigating away lets it resume.
         await panel.__receive({ type: 'tab', id: 'overview' });
         await ext.__refreshDashboard(run.context);
@@ -2325,6 +2333,50 @@ test('settings that would write more than one line are refused', async () => {
             assert.equal(fs.readFileSync(rc, 'utf8'), '# mine\n',
                 'a line with a newline in it reached the shell file');
             assert.ok(vscode.__errors.length > 0, 'it was refused without saying so');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// A blank name means "remove the block", and the page can send one it did not
+// mean: the field is drawn from the saved setting, and a tick that rebuilds the
+// page between typing and clicking leaves the DOM holding nothing. Removal is
+// therefore held against what was saved, not against what arrived — the two
+// disagreeing is the stale page, and the alias in the file stays.
+test('a blank name does not remove the alias the settings still name', async () => {
+    const run = activate({ segments: ['{today}'], settings: { aliasName: 'cx' } });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home, rc }) => {
+            fs.writeFileSync(rc, '# mine\n');
+            ext.installAlias({ settings: { aliasName: 'cx', model: 'opus' }, home, shell: '/bin/zsh' });
+            const written = fs.readFileSync(rc, 'utf8');
+            assert.match(written, /alias cx=/, 'nothing was written to remove');
+
+            vscode.__errors.length = 0;
+            vscode.__warnings.length = 0;
+            ext.installAlias({ settings: { aliasName: '', model: 'opus' }, home, shell: '/bin/zsh' });
+            assert.equal(fs.readFileSync(rc, 'utf8'), written, 'the alias was removed by a blank field');
+            assert.ok(vscode.__warnings.length > 0, 'it was refused without saying so');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// Clearing the name is still how the block goes away: with the setting cleared
+// too, the blank is what the user asked for and the file loses the block.
+test('a blank name removes the alias once the setting is blank as well', async () => {
+    const run = activate({ segments: ['{today}'], settings: { aliasName: '' } });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home, rc }) => {
+            const mine = '# mine\n';
+            fs.writeFileSync(rc, mine);
+            ext.installAlias({ settings: { aliasName: 'cx', model: 'opus' }, home, shell: '/bin/zsh' });
+            assert.match(fs.readFileSync(rc, 'utf8'), /alias cx=/);
+
+            ext.installAlias({ settings: { aliasName: '', model: 'opus' }, home, shell: '/bin/zsh' });
+            assert.equal(fs.readFileSync(rc, 'utf8'), mine, 'clearing the name no longer removes the block');
         });
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });

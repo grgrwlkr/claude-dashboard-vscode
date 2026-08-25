@@ -201,6 +201,14 @@ writes an overflow probe beside it: it walks every tab and compares each element
 that actually scroll. Run it at 1500/1280/1000/910/800/700/620/520 px and screenshot both themes
 before calling a change done.
 
+**Chromium only, and that is a deliberate override (2026-08-20).** The page lives in a VS Code
+webview, VS Code is Electron, and there is no way for a user to open this page in anything else. A
+WebKit render proves nothing here, so the global rule in `~/.claude/CLAUDE.md` — "UI changes are
+done only after two engines agree" — does not apply in this repository; do not "fix" the mismatch
+back. What does have a boundary is the Chromium **version** inside the running Electron: check that
+when a selector is genuinely new. Everything else — `:has()`, `color-mix()`, container queries — is
+fair game.
+
 **A checking tool is checked against a known-bad input, or it is not a tool (2026-08-11).** The probe
 above replaced one that compared `documentElement.scrollWidth` to `clientWidth` — structurally zero
 on a page whose body carries `overflow-x: hidden`, so it returned "clean" at every width from the day

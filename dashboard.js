@@ -2357,13 +2357,13 @@ const MODEL_ABOUT = {
     '': ['', 'No --model flag — whatever the client starts on by itself', ''],
     opus: ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 200k'],
     'opus[1m]': ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 1M'],
-    sonnet: ['Sonnet 5', 'Efficient for routine tasks', '$3/$15 · 200k'],
-    'sonnet[1m]': ['Sonnet 5', 'Efficient for routine tasks', '$3/$15 · 1M'],
+    sonnet: ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 200k'],
+    'sonnet[1m]': ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 1M'],
     fable: ['Fable 5', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 200k'],
     'fable[1m]': ['Fable 5', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 1M'],
     haiku: ['Haiku 4.5', 'Fastest for quick answers', '$1/$5 · 200k'],
     best: ['Fable 5 or Opus 5', 'Fable where your organization has access to it, latest Opus otherwise', ''],
-    opusplan: ['Opus 5 → Sonnet 5', 'Opus while planning, Sonnet for execution — the switch also drops the prompt cache', '$5/$25 → $3/$15'],
+    opusplan: ['Opus 5 → Sonnet 5', 'Opus while planning, Sonnet for execution — the switch also drops the prompt cache', '$5/$25 → $2/$10'],
 };
 const EFFORTS = [
     ['', 'client decides'],
@@ -2397,7 +2397,7 @@ const STYLE_ABOUT = {
  */
 const TIERS = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
 const ADVISOR_ABOUT = {
-    opus: ['Opus 5', '$5/$25'], sonnet: ['Sonnet 5', '$3/$15'],
+    opus: ['Opus 5', '$5/$25'], sonnet: ['Sonnet 5', '$2/$10'],
     fable: ['Fable 5', '$10/$50'], haiku: ['Haiku 4.5', '$1/$5'],
 };
 /**
@@ -2721,11 +2721,11 @@ function shellRcFor(shell, home = os.homedir()) {
 }
 
 /**
- * The one thing the page can say before any choice is made: what the published
- * measurements settle, and what they leave open. It sits above the options
- * because the choice below it is otherwise made from a price list and a memory
- * of which name sounds strongest — which is exactly how `max` and Fable ended up
- * being carried for weeks against the numbers.
+ * The one thing the page can say before any choice is made: which settings buy
+ * the most for what they cost. The measurements are the evidence, not the
+ * subject — the banner exists because the choice below it is otherwise made from
+ * a price list and a memory of which name sounds strongest, which is exactly how
+ * `max` and Fable ended up being carried for weeks against the numbers.
  *
  * Figures are quoted with the date they were checked. A verdict with no date
  * rots silently, and this one is one system card away from being wrong.
@@ -2738,7 +2738,7 @@ function shellRcFor(shell, home = os.homedir()) {
  * reader who cannot tell which is which reads them as one measurement.
  */
 const launchCanon = () => `<aside class="canon">
-    <h2 class="canon-title">What the measurements settle</h2>
+    <h2 class="canon-title">The most you can get for the price</h2>
     <ul class="canon-list">
         <li><b>Opus 5 with a Fable advisor</b><i>85.7%</i>
             the most accurate configuration Anthropic has published &mdash; against Opus alone at

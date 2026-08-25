@@ -74,3 +74,25 @@ test('output and input are unaffected by the cache change', () => {
     assert.equal(p.costOf('claude-opus-5', { cache_read_input_tokens: M }), 0.5);
     assert.equal(p.costOf('claude-opus-5', null), 0);
 });
+
+// Every rate in the table is a published price, and Sonnet 5 is the one that
+// moved: the $2/$10 announced as introductory became the standard price, and the
+// rise to $3/$15 scheduled for 2026-09-01 was cancelled. A rate that is wrong
+// costs attribution rather than money — the figure is simply not what was
+// billed. Checked 2026-08-24 against Anthropic's pricing page.
+test('the rate table matches the published prices', () => {
+    const published = {
+        'claude-opus-5': { in: 5, out: 25 },
+        'claude-opus-4-8': { in: 5, out: 25 },
+        'claude-opus-4-7': { in: 5, out: 25 },
+        'claude-opus-4-6': { in: 5, out: 25 },
+        'claude-sonnet-5': { in: 2, out: 10 },
+        'claude-sonnet-4-6': { in: 3, out: 15 },
+        'claude-haiku-4-5': { in: 1, out: 5 },
+        'claude-fable-5': { in: 10, out: 50 },
+        'claude-mythos-5': { in: 10, out: 50 },
+    };
+    for (const [id, rate] of Object.entries(published)) {
+        assert.deepEqual(p.ratesFor(id).rates, rate, `${id} is priced wrong`);
+    }
+});

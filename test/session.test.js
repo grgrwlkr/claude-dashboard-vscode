@@ -97,7 +97,7 @@ test('costOf prices all four rates separately', () => {
 
 test('costOf knows the different model rates', () => {
     assert.equal(costOf('claude-fable-5', { input_tokens: 1e6 }), 10);
-    assert.equal(costOf('claude-sonnet-5', { input_tokens: 1e6 }), 3);
+    assert.equal(costOf('claude-sonnet-5', { input_tokens: 1e6 }), 2);
     assert.equal(costOf('claude-haiku-4-5', { input_tokens: 1e6 }), 1);
 });
 
