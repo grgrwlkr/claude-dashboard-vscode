@@ -2091,6 +2091,20 @@ test('the page asks for a fresh command and hands it over on request', () => {
     assert.match(html, /type: 'copy'/, 'copying never reaches the editor');
 });
 
+// The two buttons beside the alias line have to follow the field, not the
+// render. Only Copy was ever re-enabled, so a page drawn with a name kept a live
+// **Write** button after the field was emptied — which is how a blank reached a
+// shell file — and a page drawn without one kept a dead button after a name was
+// typed.
+test('both alias buttons follow the field, not the state they were drawn in', () => {
+    const html = db.render(demoIndex(), ix.summarize(demoIndex()),
+        { files: 1, lastRun: Date.now(), history: [], system: demoSystem(), config: { presets: [], palette: [] } });
+    const handler = html.slice(html.indexOf("msg.type === 'launchPreview'"));
+    const body = handler.slice(0, handler.indexOf("msg.type === 'preview'"));
+    assert.match(body, /data-copy="launchAlias"/, 'the copy button is not followed');
+    assert.match(body, /data-install-alias/, 'the write button keeps the state it was drawn in');
+});
+
 // The same command as a shell alias, for the times the session is started
 // outside the editor. The naive `alias name='<command>'` does not survive our
 // own quoting — the inner quotes close the outer ones and zsh answers

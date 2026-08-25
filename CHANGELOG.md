@@ -8,6 +8,18 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
+## [0.46.3] — 2026-08-25
+
+### Added
+
+- **Claude: Remove the shell alias** takes the extension's block out of the
+  shell file.
+
+### Fixed
+
+- A blank alias field no longer removes the alias from the shell file.
+- **Write to ~/.zshrc** follows the alias field as you type it.
+
 ## [0.46.2] — 2026-08-25
 
 ### Changed

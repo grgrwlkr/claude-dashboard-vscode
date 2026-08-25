@@ -455,8 +455,8 @@ All of these apply the moment they change; none needs a window reload.
 
 **Commands:** Claude: Open dashboard · Open Claude Code · Open Claude Code with…
 · Rebuild the usage index · Export usage as CSV or JSON · Refresh now · List
-status-bar placeholders · and, from a row of the workflow view, Open the workflow
-script and Copy the workflow run id.
+status-bar placeholders · Remove the shell alias · and, from a row of the
+workflow view, Open the workflow script and Copy the workflow run id.
 
 ### Open Claude Code
 
@@ -509,10 +509,9 @@ quotes do not close the outer ones.
 **Write to ~/.zshrc** puts the alias in the file, inside a block the extension
 owns; the rest of the file comes back byte for byte. The first write keeps a copy
 beside it and the replace is atomic. It happens on that button only, never on
-Save. The button removes the block when the alias name is blank, and only once
-that blank is what `claudeStatusline.aliasName` holds: clear the name, save it,
-then press the button. A shell whose `alias` takes different syntax is told so
-instead of being handed a line.
+Save. The button only ever writes; **Claude: Remove the shell alias** is what
+takes the block out again. A shell whose `alias` takes different syntax is told
+so instead of being handed a line.
 **Claude: Open Claude Code with…** asks for a model and an effort instead of
 reading the settings, for the one run that is not like the others.
 

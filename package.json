@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashboard & Statusline for Claude Code",
   "description": "Unofficial. A 24-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.46.2",
+  "version": "0.46.3",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -68,6 +68,10 @@
           "light": "media/open-claude-light.svg",
           "dark": "media/open-claude-dark.svg"
         }
+      },
+      {
+        "command": "claudeStatusline.removeAlias",
+        "title": "Claude: Remove the shell alias"
       },
       {
         "command": "claudeStatusline.openClaudeWith",

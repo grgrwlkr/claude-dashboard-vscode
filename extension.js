@@ -1410,19 +1410,74 @@ async function handleMessage(context, msg) {
  * cannot reach them, because a payload that named its own destination would be
  * a payload that picks a file to write into.
  */
-function installAlias({ settings, home = os.homedir(), shell = process.env.SHELL || '' } = {}) {
-    const c = settings || {};
+function rcTarget(home, shell, { quiet = false } = {}) {
     const rc = dashboard.shellRcFor(shell, home);
     if (!rc) {
-        vscode.window.showWarningMessage(
-            'Claude statusline: this shell does not take an alias written that way — copy the line instead.');
-        return;
+        if (!quiet) {
+            vscode.window.showWarningMessage(
+                'Claude statusline: this shell does not take an alias written that way — copy the line instead.');
+        }
+        return null;
     }
     // The path is ours, but assert it anyway: a shell startup file is the last
     // place to find out that a directory was not what it looked like.
     try {
-        if (path.resolve(path.dirname(rc)) !== path.resolve(home)) return;
-    } catch { return; }
+        if (path.resolve(path.dirname(rc)) !== path.resolve(home)) return null;
+    } catch { return null; }
+    return rc;
+}
+
+// One writer for both halves, so removing is as careful as writing: the user's
+// own content comes back byte for byte, a copy is kept before the first change,
+// and the replace is atomic.
+function putAliasBlock(rc, line) {
+    try {
+        let before = '';
+        let mode;
+        try {
+            before = fs.readFileSync(rc, 'utf8');
+            mode = fs.statSync(rc).mode & 0o777;
+        } catch { /* not there yet */ }
+        const after = dashboard.withAliasBlock(before, line);
+        if (after === before) return false;
+        // Kept once, from the state we found: a backup rewritten on every
+        // install would, after two of them, be a copy of our own work.
+        const backup = `${rc}.claude-dashboard.bak`;
+        if (before && !fs.existsSync(backup)) fs.writeFileSync(backup, before, { mode: mode || 0o600 });
+        const tmp = `${rc}.claude-dashboard.tmp`;
+        fs.writeFileSync(tmp, after, { mode: mode || 0o600 });
+        fs.renameSync(tmp, rc);
+        return true;
+    } catch (err) {
+        vscode.window.showErrorMessage(`Claude statusline: could not write ${rc} — ${err.message}`);
+        return false;
+    }
+}
+
+/**
+ * Takes the block out, and it is the only thing that does.
+ *
+ * Removal used to be what an empty alias name meant, which made it reachable
+ * from a state nothing can read intent from: a field the page drew blank looks
+ * exactly like a field the user cleared on purpose, and `Save` writes that same
+ * blank into the setting, so one click made the file and the setting agree on a
+ * decision nobody took. It is an act of its own now, named as one.
+ */
+function removeAlias({ home = os.homedir(), shell = process.env.SHELL || '' } = {}) {
+    const rc = rcTarget(home, shell);
+    if (!rc) return;
+    if (putAliasBlock(rc, '')) {
+        vscode.window.showInformationMessage(
+            `Claude statusline: alias removed from ${rc}. A terminal already open still has it.`);
+    } else {
+        vscode.window.showInformationMessage(`Claude statusline: there was no alias of ours in ${rc}.`);
+    }
+}
+
+function installAlias({ settings, home = os.homedir(), shell = process.env.SHELL || '' } = {}) {
+    const c = settings || {};
+    const rc = rcTarget(home, shell);
+    if (!rc) return;
 
     const line = dashboard.aliasLine(c.aliasName, {
         model: c.model, effort: c.effort, advisor: c.advisor,
@@ -1436,42 +1491,20 @@ function installAlias({ settings, home = os.homedir(), shell = process.env.SHELL
         return;
     }
 
-    // No line means "remove the block", and the page can ask for that without
-    // meaning it: the field is drawn from the saved setting, so a rebuild
-    // between typing and clicking leaves the DOM holding nothing at all. The
-    // blank is honoured only when the saved name is blank too — the two
-    // disagreeing is a stale page, not a decision, and this write is the one
-    // that leaves the extension's own storage.
+    // A blank name is not an instruction. It is what the field holds when the
+    // user cleared it and equally what it holds when the page never put the
+    // value in, and nothing here can tell those apart — so this button writes
+    // and never takes away. Removal has its own command.
     if (!line) {
-        const saved = String(vscode.workspace.getConfiguration('claudeStatusline').get('aliasName') || '').trim();
-        if (saved) {
-            vscode.window.showWarningMessage(
-                `Claude statusline: the alias is still named ${saved} in your settings, so nothing was removed. `
-                + 'Clear the name on Setup → Launch and save it to take the alias out.');
-            return;
-        }
+        vscode.window.showWarningMessage(
+            'Claude statusline: name the alias on Setup → Launch to write it. '
+            + 'To take one out of the file, run Claude: Remove the shell alias.');
+        return;
     }
 
-    try {
-        let before = '';
-        let mode;
-        try {
-            before = fs.readFileSync(rc, 'utf8');
-            mode = fs.statSync(rc).mode & 0o777;
-        } catch { /* not there yet */ }
-        const after = dashboard.withAliasBlock(before, line);
-        if (after === before) return;
-        // Kept once, from the state we found: a backup rewritten on every
-        // install would, after two of them, be a copy of our own work.
-        const backup = `${rc}.claude-dashboard.bak`;
-        if (before && !fs.existsSync(backup)) fs.writeFileSync(backup, before, { mode: mode || 0o600 });
-        const tmp = `${rc}.claude-dashboard.tmp`;
-        fs.writeFileSync(tmp, after, { mode: mode || 0o600 });
-        fs.renameSync(tmp, rc);
+    if (putAliasBlock(rc, line)) {
         vscode.window.showInformationMessage(
-            `Claude statusline: alias ${line ? 'written to' : 'removed from'} ${rc}. Open a new terminal to pick it up.`);
-    } catch (err) {
-        vscode.window.showErrorMessage(`Claude statusline: could not write ${rc} — ${err.message}`);
+            `Claude statusline: alias written to ${rc}. Open a new terminal to pick it up.`);
     }
 }
 
@@ -1796,6 +1829,7 @@ function activate(context) {
         vscode.commands.registerCommand('claudeStatusline.placeholders', () => showPlaceholders(state)),
         vscode.commands.registerCommand('claudeStatusline.openClaude', () => openClaude(context)),
         vscode.commands.registerCommand('claudeStatusline.openClaudeWith', () => openClaudeWith(context)),
+        vscode.commands.registerCommand('claudeStatusline.removeAlias', () => removeAlias()),
         vscode.commands.registerCommand('claudeStatusline.copyRunId', async (node) => {
             const run = node && node.run;
             if (!run) return;
@@ -2174,6 +2208,7 @@ module.exports = {
     // Exported for the tests, which give it a scratch home rather than the real
     // one — the message channel cannot, and that is the point.
     installAlias,
+    removeAlias,
     __render: render,
     __collectWorkflowsFast: collectWorkflowsFast,
     // The places the button can put a session, exported for the one test that

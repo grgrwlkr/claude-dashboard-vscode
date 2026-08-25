@@ -2362,21 +2362,46 @@ test('a blank name does not remove the alias the settings still name', async () 
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
-// Clearing the name is still how the block goes away: with the setting cleared
-// too, the blank is what the user asked for and the file loses the block.
-test('a blank name removes the alias once the setting is blank as well', async () => {
+// A blank field cannot delete anything, whatever the setting says. Holding the
+// blank against the saved name was not enough: Save writes the same blank field
+// into the setting, so one click made the two agree and the next one removed the
+// block. A state that cannot be told apart from "the field never got its value"
+// is not an instruction, so removal is not reachable from it at all.
+test('a blank name removes nothing even when the setting is blank as well', async () => {
     const run = activate({ segments: ['{today}'], settings: { aliasName: '' } });
     let panel;
     try {
         panel = await openDashboard();
         await withHome(async ({ home, rc }) => {
-            const mine = '# mine\n';
+            fs.writeFileSync(rc, '# mine\n');
+            ext.installAlias({ settings: { aliasName: 'cx', model: 'opus' }, home, shell: '/bin/zsh' });
+            const written = fs.readFileSync(rc, 'utf8');
+            assert.match(written, /alias cx=/);
+
+            vscode.__warnings.length = 0;
+            ext.installAlias({ settings: { aliasName: '', model: 'opus' }, home, shell: '/bin/zsh' });
+            assert.equal(fs.readFileSync(rc, 'utf8'), written, 'a blank field removed the block');
+            assert.ok(vscode.__warnings.some((w) => /Remove the shell alias/.test(w)),
+                'the warning does not name the command that removes it');
+        });
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// Removal is its own act, named as one. It is the only path that takes the block
+// out, and it says so when there was nothing to take out.
+test('the remove command takes the block out and nothing else', async () => {
+    const run = activate({ segments: ['{today}'], settings: { aliasName: 'cx' } });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await withHome(async ({ home, rc }) => {
+            const mine = '# mine\nalias theirs=\'ls\'\n';
             fs.writeFileSync(rc, mine);
             ext.installAlias({ settings: { aliasName: 'cx', model: 'opus' }, home, shell: '/bin/zsh' });
             assert.match(fs.readFileSync(rc, 'utf8'), /alias cx=/);
 
-            ext.installAlias({ settings: { aliasName: '', model: 'opus' }, home, shell: '/bin/zsh' });
-            assert.equal(fs.readFileSync(rc, 'utf8'), mine, 'clearing the name no longer removes the block');
+            ext.removeAlias({ home, shell: '/bin/zsh' });
+            assert.equal(fs.readFileSync(rc, 'utf8'), mine, 'the command left the block, or took more than it');
         });
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });

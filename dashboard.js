@@ -3461,8 +3461,14 @@ if (list && api) {
         const has = !!msg.alias;
         aliasOut.textContent = has ? msg.alias : 'Name it above to get a line for your .zshrc';
         aliasOut.classList.toggle('empty-preview', !has);
-        const btn = document.querySelector('[data-copy="launchAlias"]');
-        if (btn) btn.disabled = !has;
+        // Both buttons, not just Copy. Write kept whatever state the render
+        // gave it, so a page drawn with a name stayed clickable after the field
+        // was emptied — and one drawn without a name stayed dead after one was
+        // typed.
+        for (const sel of ['[data-copy="launchAlias"]', '[data-install-alias]']) {
+          const btn = document.querySelector(sel);
+          if (btn) btn.disabled = !has;
+        }
       }
       return;
     }
