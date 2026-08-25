@@ -14,6 +14,43 @@
 // appear.
 const TOPICS = ['limits', 'context', 'money', 'work', 'workflow'];
 
+// The two thresholds every renderer colours by, ported from statusline.sh. They
+// live here rather than beside a renderer because there are two of them now —
+// the status bar, which has three background states, and the terminal, which
+// has ANSI — and a threshold kept in two places is a threshold that drifts.
+const TONE_WARN = 50;
+const TONE_ALARM = 80;
+
+// What a share means, as a word rather than as a colour: each renderer picks its
+// own paint for `alarm` and `warn`. -1 is the registry's "nothing to say" and
+// has to stay below the first threshold rather than above it.
+function toneOf(pct) {
+    if (!Number.isFinite(pct)) return null;
+    if (pct >= TONE_ALARM) return 'alarm';
+    if (pct >= TONE_WARN) return 'warn';
+    return null;
+}
+
+// The percentage a topic colours by. A segment showing both a limit and a
+// context fill takes the louder of the two: the point of the colour is to be
+// noticed, and the quieter number would hide the other one.
+const COLOUR_BY = {
+    limits: (d) => (d.weekly ? d.weekly.pct : -1),
+    context: (d) => (d.ctx ? d.ctx.pct : -1),
+    money: () => -1,
+    work: () => -1,
+    // A run in flight is not a threshold: there is nothing here to be warned
+    // about, and painting a segment red for one would spend the alarm on news.
+    workflow: () => -1,
+};
+
+// The tone of a segment carrying these topics. A topic missing from COLOUR_BY is
+// a bug in this file rather than a silent miss, which is what the test that
+// walks every topic is for.
+function worstTone(topics, d) {
+    return toneOf(Math.max(-1, ...topics.map((topic) => COLOUR_BY[topic](d))));
+}
+
 const pct = (n) => (Number.isFinite(n) && n >= 0 ? `${n}%` : '');
 const usd = (n, fmt) => (Number.isFinite(n) && n > 0 ? fmt(n) : '');
 
@@ -342,4 +379,4 @@ function usedFields(templates, registry) {
     return used;
 }
 
-module.exports = { TOPICS, DEFAULT_SEGMENTS, PRESETS, fields, renderSegment, usedFields, TOKEN_RE, NAME_RE };
+module.exports = { TOPICS, TONE_WARN, TONE_ALARM, toneOf, COLOUR_BY, worstTone, DEFAULT_SEGMENTS, PRESETS, fields, renderSegment, usedFields, TOKEN_RE, NAME_RE };

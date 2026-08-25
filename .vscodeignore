@@ -39,3 +39,10 @@ media/**
 !media/bar-icon.svg
 !media/open-claude-dark.svg
 !media/open-claude-light.svg
+
+# The terminal status line and the module behind it. Claude Code runs the script
+# from the repository clone: the installed path carries the version number, so a
+# `statusLine` command pointing into an installed .vsix breaks on the next
+# update. The editor never loads either file.
+bin/**
+terminal.js

@@ -270,3 +270,44 @@ test('preset prose is plain text, not markdown', () => {
         assert.ok(!/[`*_]/.test(preset.name), `${preset.id}: markdown in its name`);
     }
 });
+
+// The 50/80 thresholds and the map of which number colours which topic used to
+// live in extension.js, where the terminal renderer cannot reach them. Two
+// renderers reading two copies is how they come to disagree about when a week
+// is alarming, so both now read these.
+
+test('a share crosses into warning at 50 and into alarm at 80', () => {
+    assert.equal(seg.toneOf(80), 'alarm');
+    assert.equal(seg.toneOf(100), 'alarm');
+    assert.equal(seg.toneOf(79), 'warn');
+    assert.equal(seg.toneOf(50), 'warn');
+    assert.equal(seg.toneOf(49), null);
+    assert.equal(seg.toneOf(0), null);
+    // -1 is the registry's "nothing to say", not a number below the threshold.
+    assert.equal(seg.toneOf(-1), null);
+});
+
+test('a segment mixing topics takes the louder of the two', () => {
+    // The point of the colour is to be noticed: a quiet context fill beside a
+    // spent week must not paint over the week.
+    const d = { weekly: { pct: 91 }, ctx: { pct: 12 } };
+    assert.equal(seg.worstTone(['context', 'limits'], d), 'alarm');
+    assert.equal(seg.worstTone(['context'], d), null);
+    assert.equal(seg.worstTone([], d), null);
+});
+
+test('a topic with no number of its own never colours a segment', () => {
+    const d = { weekly: { pct: 91 }, ctx: { pct: 91 } };
+    // Money and work carry no threshold, and a workflow in flight is news
+    // rather than a warning.
+    assert.equal(seg.worstTone(['money', 'work', 'workflow'], d), null);
+});
+
+test('every topic a field can declare has a number that colours it', () => {
+    const declared = Object.values(seg.fields({})).map((f) => f.topic);
+    for (const topic of new Set([...seg.TOPICS, ...declared])) {
+        assert.equal(typeof seg.COLOUR_BY[topic], 'function', `topic ${topic} has no colour source`);
+        // Called with a bare object the way a first tick calls it.
+        assert.equal(typeof seg.COLOUR_BY[topic]({}), 'number', `topic ${topic} answers with a number`);
+    }
+});

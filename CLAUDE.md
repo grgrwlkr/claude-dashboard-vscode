@@ -104,10 +104,18 @@ dozen versions once ended up as one uncommitted pile.
 ## Architecture
 
 `extension.js` is the **only** module allowed to `require('vscode')`. `usage.js`, `session.js`,
-`indexer.js`, `pricing.js`, `history.js`, `system.js`, `segments.js`, `status.js`, `workflows.js` and
-`dashboard.js` are
+`indexer.js`, `pricing.js`, `history.js`, `system.js`, `segments.js`, `status.js`, `workflows.js`,
+`terminal.js` and `dashboard.js` are
 deliberately vscode-free so `node --test` can cover them without a harness — put new logic there, not in
-`extension.js`. `workflows.js` owns everything about a workflow run — the walk, the three states, the money,
+`extension.js`.
+
+**The bar has a second renderer, and it is not in the editor.** `terminal.js` maps the JSON Claude
+Code hands a `statusLine` command onto the same data object `segments.js` reads, and `bin/statusline.js`
+prints the result with ANSI. It opens no file and reads no credential — the limits arrive in that
+payload. Anything both renderers must agree about lives in `segments.js`: the field registry, the
+`{field}` grammar, and now `toneOf`/`COLOUR_BY`, which is where the 50/80 thresholds moved out of
+`extension.js`. A threshold or a formatter kept on one side is one the two surfaces will disagree
+about. `workflows.js` owns everything about a workflow run — the walk, the three states, the money,
 the tree nodes and the words on a row — because the tree, the dashboard tab and the bar fields must not
 disagree about the same run.
 

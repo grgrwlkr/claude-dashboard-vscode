@@ -40,11 +40,12 @@ const launchSettings = () => {
 };
 
 
-// StatusBarItem has no arbitrary colors — only these three states — so the
-// 50/80 thresholds from statusline.sh map onto them one to one.
-function background(pct) {
-    if (pct >= 80) return new vscode.ThemeColor('statusBarItem.errorBackground');
-    if (pct >= 50) return new vscode.ThemeColor('statusBarItem.warningBackground');
+// StatusBarItem has no arbitrary colors — only these three states — so the two
+// tones map onto them one to one. Which share earns which tone is decided in
+// segments.js, where the terminal renderer reads the same answer.
+function background(tone) {
+    if (tone === 'alarm') return new vscode.ThemeColor('statusBarItem.errorBackground');
+    if (tone === 'warn') return new vscode.ThemeColor('statusBarItem.warningBackground');
     return undefined;
 }
 
@@ -319,19 +320,6 @@ const TOOLTIPS = {
     workflow: workflowTooltip,
 };
 
-// The percentage a topic colours by. A segment showing both a limit and a
-// context fill takes the louder of the two: the point of the colour is to be
-// noticed, and the quieter number would hide the other one.
-const COLOUR_BY = {
-    limits: (d) => (d.weekly ? d.weekly.pct : -1),
-    context: (d) => (d.ctx ? d.ctx.pct : -1),
-    money: () => -1,
-    work: () => -1,
-    // A run in flight is not a threshold: there is nothing here to be warned
-    // about, and painting the bar red for one would spend the alarm on news.
-    workflow: () => -1,
-};
-
 // The tree is a thin skin over treeNodes(): what is grouped under what, what a
 // row says and which icon it carries are decided in workflows.js, where a test
 // can reach them. Nothing here reads a run — it reads the state the two ticks
@@ -507,8 +495,7 @@ function drawItem(state, item, i) {
     item.tooltip = sections.length
         ? new vscode.MarkdownString(sections.join('\n\n---\n\n'), true)
         : 'Claude — click for the usage dashboard';
-    const worst = Math.max(-1, ...out.topics.map((topic) => COLOUR_BY[topic](state.data)));
-    item.backgroundColor = background(worst);
+    item.backgroundColor = background(seg.worstTone(out.topics, state.data));
     item.show();
 }
 

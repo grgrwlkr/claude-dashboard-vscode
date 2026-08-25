@@ -8,6 +8,15 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
+## [Unreleased]
+
+### Added
+
+- A status line for the terminal: `node bin/statusline.js` as the `statusLine`
+  command in `~/.claude/settings.json`.
+- Segment templates are passed as arguments to it; `--no-color` and `NO_COLOR`
+  drop the escapes.
+
 ## [0.48.0] — 2026-08-25
 
 ### Added
