@@ -49,13 +49,10 @@ test('Tab walks the sections and wraps, keeping the tab index in range', () => {
     assert.deepEqual(tui.moveSection({ section: 4, tab: 5 }, 'next'), { section: 5, tab: 0 });
 });
 
-test('the arrows walk the tabs of the section, wrapping inside it', () => {
+test('the arrows walk the tabs of a section one at a time', () => {
     assert.deepEqual(tui.moveTab({ section: 1, tab: 0 }, 'right'), { section: 1, tab: 1 });
-    assert.deepEqual(tui.moveTab({ section: 1, tab: 3 }, 'right'), { section: 1, tab: 0 });
-    assert.deepEqual(tui.moveTab({ section: 1, tab: 0 }, 'left'), { section: 1, tab: 3 });
-    // A digit picks a tab of this section; one past the end changes nothing.
-    assert.deepEqual(tui.moveTab({ section: 1, tab: 0 }, '3'), { section: 1, tab: 2 });
-    assert.deepEqual(tui.moveTab({ section: 1, tab: 2 }, '9'), { section: 1, tab: 2 });
+    assert.deepEqual(tui.moveTab({ section: 1, tab: 2 }, 'left'), { section: 1, tab: 1 });
+    // Crossing out of a section is covered below; here it is the step inside.
 });
 
 test('the current tab is looked up by where you are', () => {
@@ -156,4 +153,61 @@ test('the synthetic record is left out of every model breakdown', () => {
         assert.ok(!text.includes('synthetic'), `${id} lists it: ${text}`);
         assert.match(text, /opus 5/, `${id} still lists the real models`);
     }
+});
+
+test('the arrows run through every tab, crossing into the next section', () => {
+    // The dashboard opens on Now, which holds one tab. Arrows that only move
+    // inside a section are dead on the very first screen — which is what a
+    // person presses first.
+    let at = { section: 0, tab: 0 };
+    at = tui.moveTab(at, 'right');
+    assert.deepEqual(at, { section: 1, tab: 0 }, 'past the only tab of Now comes Spend');
+
+    // …and back the other way.
+    assert.deepEqual(tui.moveTab({ section: 1, tab: 0 }, 'left'), { section: 0, tab: 0 });
+
+    // Within a section they still walk its tabs.
+    assert.deepEqual(tui.moveTab({ section: 1, tab: 0 }, 'right'), { section: 1, tab: 1 });
+    assert.deepEqual(tui.moveTab({ section: 1, tab: 3 }, 'right'), { section: 2, tab: 0 });
+});
+
+test('the arrows wrap around the whole dashboard, not off the end of it', () => {
+    const last = tui.SECTIONS.length - 1;
+    const lastTab = tui.SECTIONS[last].tabs.length - 1;
+    assert.deepEqual(tui.moveTab({ section: last, tab: lastTab }, 'right'), { section: 0, tab: 0 });
+    assert.deepEqual(tui.moveTab({ section: 0, tab: 0 }, 'left'), { section: last, tab: lastTab });
+});
+
+// --- reading the keyboard -------------------------------------------------
+
+const ESC = '\u001b';
+
+test('a chunk holding two key presses is read as two keys', () => {
+    // A terminal delivers what it has, not one key per chunk: hold an arrow
+    // down, or type fast, and several arrive together. Compared whole, the
+    // chunk matches nothing and every key in it is lost.
+    assert.deepEqual(tui.keysFrom(`${ESC}[Cq`), [`${ESC}[C`, 'q']);
+    assert.deepEqual(tui.keysFrom(`${ESC}[C${ESC}[C`), [`${ESC}[C`, `${ESC}[C`]);
+    assert.deepEqual(tui.keysFrom('jjk'), ['j', 'j', 'k']);
+});
+
+test('a lone escape sequence is still one key', () => {
+    for (const k of ['A', 'B', 'C', 'D', 'Z']) {
+        assert.deepEqual(tui.keysFrom(`${ESC}[${k}`), [`${ESC}[${k}`]);
+    }
+    assert.deepEqual(tui.keysFrom('\t'), ['\t']);
+    assert.deepEqual(tui.keysFrom(''), ['']);
+});
+
+test('a bare escape is a key of its own, not a broken sequence', () => {
+    assert.deepEqual(tui.keysFrom(ESC), [ESC]);
+});
+
+test('an empty chunk yields no keys', () => {
+    assert.deepEqual(tui.keysFrom(''), []);
+});
+
+test('a digit still picks a tab of the section you are in', () => {
+    assert.deepEqual(tui.moveTab({ section: 1, tab: 0 }, '3'), { section: 1, tab: 2 });
+    assert.deepEqual(tui.moveTab({ section: 1, tab: 2 }, '9'), { section: 1, tab: 2 });
 });

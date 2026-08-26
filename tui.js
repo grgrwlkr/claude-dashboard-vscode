@@ -575,6 +575,31 @@ function tabBarFor(section, tab, width, colour = true) {
     return `  ${tabBar(tabs, tab, width - 2, colour)}`;
 }
 
+/**
+ * A chunk of terminal input, split into the keys it holds.
+ *
+ * stdin delivers whatever has arrived, not one key per press: an arrow held
+ * down, or two presses in quick succession, come through together as
+ * `\u001b[C\u001b[C`. Compared whole, such a chunk equals no key at all and
+ * every press in it is dropped — which is exactly what "the arrows stopped
+ * working" looks like from the other side.
+ */
+function keysFrom(chunk) {
+    const out = [];
+    const text = String(chunk || '');
+    let i = 0;
+    while (i < text.length) {
+        // CSI: escape, `[`, digits or semicolons, then the letter that ends it.
+        const m = text[i] === '\u001b' && text[i + 1] === '['
+            ? /^\u001b\[[0-9;]*[A-Za-z~]/.exec(text.slice(i))
+            : null;
+        if (m) { out.push(m[0]); i += m[0].length; continue; }
+        out.push(text[i]);
+        i += 1;
+    }
+    return out;
+}
+
 /** Tab and Shift-Tab walk the sections, wrapping, and start at the first tab. */
 function moveSection(at, dir) {
     const count = SECTIONS.length;
@@ -582,10 +607,23 @@ function moveSection(at, dir) {
     return { section: next, tab: 0 };
 }
 
-/** The arrows and the digits walk the tabs of the section you are in. */
+/**
+ * The arrows walk every tab of the dashboard in order, crossing from the last
+ * tab of one section into the first of the next; a digit picks a tab of the
+ * section you are in.
+ *
+ * Arrows confined to a section are dead on the screen the dashboard opens on:
+ * `Now` holds one tab, and the first key anyone presses does nothing.
+ */
 function moveTab(at, key) {
     const tabs = sectionAt(at).tabs;
-    return { section: at.section, tab: nextTab(at.tab, key, tabs.length) };
+    if (/^[1-9]$/.test(key)) return { section: at.section, tab: nextTab(at.tab, key, tabs.length) };
+    if (key !== 'right' && key !== 'left') return at;
+
+    const flat = SECTIONS.flatMap((s, si) => s.tabs.map((_, ti) => ({ section: si, tab: ti })));
+    const now = flat.findIndex((p) => p.section === at.section && p.tab === at.tab);
+    const step = key === 'right' ? 1 : -1;
+    return flat[(now + step + flat.length) % flat.length];
 }
 
 // --- what each tab shows --------------------------------------------------
@@ -793,7 +831,7 @@ function tabsFor(opts) {
 
 module.exports = {
     row, meter, tiles, panel, pair, nowTiles, nowPage,
-    SECTIONS, sectionBar, tabBarFor, moveSection, moveTab, tabAt, bodyFor,
+    SECTIONS, sectionBar, tabBarFor, moveSection, moveTab, tabAt, bodyFor, keysFrom,
     renderSections, renderSection, clip, wrap, visibleLength, DEFAULT_WIDTH,
     tabBar, nextTab, screen, tabsFor,
 };

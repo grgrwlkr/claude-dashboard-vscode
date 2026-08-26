@@ -102,7 +102,7 @@ function interactive(width, colour) {
 
     const draw = () => {
         const { width: w, height: h } = size();
-        const footer = 'Tab section · ←→ or 1-9 tab · ↑↓ scroll · r reload · q quit';
+        const footer = '←→ tab · Tab section · 1-9 jump · ↑↓ scroll · r reload · q quit';
         const lines = tui.screen({
             width: w, height: h, colour, footer, scroll,
             bars: [tui.sectionBar(at.section, w, colour), tui.tabBarFor(at.section, at.tab, w, colour)],
@@ -130,11 +130,18 @@ function interactive(width, colour) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (key) => {
+    // One chunk can hold several presses — an arrow held down arrives as
+    // `ESC[C ESC[C ESC[C`. Each is handled in turn and the screen is drawn once
+    // at the end, rather than once per key.
+    const handle = (key) => {
         // Ctrl-C by hand: raw mode delivers it as a byte rather than raising
         // SIGINT, so without this the only way out of the alternate screen is
         // to kill the process from another terminal.
-        if (key === 'q' || key === '\u0003' || key === '\u001b') { leave(); process.exit(0); }
+        //
+        // Escape is deliberately not a way out. Some terminals deliver an arrow
+        // as two chunks — the escape, then `[C` — and a bare escape that quits
+        // turns every arrow press into an exit.
+        if (key === 'q' || key === '\u0003') { leave(); process.exit(0); }
         const where = `${at.section}/${at.tab}`;
         if (key === '\t') at = tui.moveSection(at, 'next');
         else if (key === '\u001b[Z') at = tui.moveSection(at, 'prev');
@@ -146,11 +153,17 @@ function interactive(width, colour) {
         else if (key === ' ') scroll += (process.stdout.rows || 24) - 4;
         else if (key === 'g') scroll = 0;
         else if (key === 'r') ctx = context(size().width, colour);
-        else return;
+        else return false;
         // A tab remembers no scroll position: arriving at one starts at the top,
         // which is where the answer to "what is this tab" always is.
         if (`${at.section}/${at.tab}` !== where) scroll = 0;
-        draw();
+        return true;
+    };
+
+    process.stdin.on('data', (chunk) => {
+        let moved = false;
+        for (const key of tui.keysFrom(chunk)) moved = handle(key) || moved;
+        if (moved) draw();
     });
 
     process.on('SIGINT', () => { leave(); process.exit(0); });
