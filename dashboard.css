@@ -5,7 +5,22 @@
    that may shrink, cells that may wrap, and a handful of columns that drop out
    when there is genuinely no room. */
 * { box-sizing: border-box; }
-body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--vscode-foreground);
+/* The monospace of this page, in one place.
+
+   Every figure is set in it, and it is the editor's own font where the webview
+   offers one. The fallback is not decoration: a webview that does not define
+   `--vscode-editor-font-family` leaves `font-family` invalid, and Chromium's
+   built-in default for monospace is Courier New — which is exactly what the
+   numbers turned into on a machine where the variable was missing. The preview
+   harness defines the variable itself, so it could not have caught this. */
+:root {
+  --dash-mono: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular,
+    "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
+  --dash-text: var(--vscode-font-family, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif);
+}
+
+body { font-family: var(--dash-text); font-size: 13px; color: var(--vscode-foreground);
   background: var(--vscode-editor-background); margin: 0; padding: 16px 20px 40px;
   overflow-x: hidden; }
 h1 { font-size: 18px; margin: 0 0 2px; font-weight: 600; }
@@ -55,7 +70,7 @@ h1 { font-size: 18px; margin: 0 0 2px; font-weight: 600; }
 .head-sep { width: 1px; height: 15px; margin: 0 3px; flex: 0 0 auto;
   background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
 .ver { font-size: 11.5px; font-weight: 500; opacity: .45; letter-spacing: .02em;
-  font-family: var(--vscode-editor-font-family); vertical-align: 2px; }
+  font-family: var(--dash-mono); vertical-align: 2px; }
 h2 { font-size: 13px; margin: 22px 0 8px; font-weight: 600; opacity: .85; }
 .sub { opacity: .6; margin: 0 0 16px; }
 .note { opacity: .65; margin: 0 0 12px; max-width: 78ch; line-height: 1.5; }
@@ -77,7 +92,7 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .memory { border-bottom: 1px solid var(--vscode-panel-border); padding: 4px 0; }
 .memory > summary { cursor: pointer; display: flex; align-items: baseline; gap: 10px;
   padding: 3px 0; font-size: 12.5px; }
-.mem-name { font-family: var(--vscode-editor-font-family); font-size: 11.5px;
+.mem-name { font-family: var(--dash-mono); font-size: 11.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
 .memory > summary .dim { font-size: 11px; margin-left: auto; white-space: nowrap; }
 .mem-open { flex: none; }
@@ -87,7 +102,7 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .mem-text { margin: 6px 0 10px; padding: 10px 12px; border-radius: 5px; max-height: 460px;
   overflow: auto; background: var(--vscode-editor-background);
   border: 1px solid var(--vscode-panel-border);
-  font-family: var(--vscode-editor-font-family); font-size: 11.5px; line-height: 1.55;
+  font-family: var(--dash-mono); font-size: 11.5px; line-height: 1.55;
   white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* A setting where it stands. The box is drawn rather than native so it reads
@@ -156,7 +171,7 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
 .canon-list li + li { margin-top: 10px; }
 /* An <i> so the figure is one token in the markup rather than a wrapper div —
    the list stays readable in the source, which is where it gets edited. */
-.canon-list i { font-style: normal; font-family: var(--vscode-editor-font-family);
+.canon-list i { font-style: normal; font-family: var(--dash-mono);
   font-size: 11px; padding: 1px 6px; margin: 0 8px; border-radius: 3px;
   white-space: nowrap; color: var(--vscode-charts-blue);
   background: var(--vscode-input-background, var(--vscode-editor-background));
@@ -229,7 +244,7 @@ td.share.wide i { left: 0; right: auto; }
   background: var(--vscode-editor-background);
   box-shadow: 0 0 0 1px var(--vscode-panel-border); }
 .tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; opacity: .5; }
-.tile-value { font-family: var(--vscode-editor-font-family); font-size: 24px; line-height: 1.05;
+.tile-value { font-family: var(--dash-mono); font-size: 24px; line-height: 1.05;
   font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .tile-meter { display: block; height: 3px; border-radius: 2px; overflow: hidden;
   background: color-mix(in srgb, var(--vscode-foreground) 14%, transparent); }
@@ -311,7 +326,7 @@ th { font-weight: 600; opacity: .6; font-size: 11px; text-transform: uppercase; 
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums;
   white-space: nowrap; overflow-wrap: normal; }
 tbody tr:hover { background: var(--vscode-list-hoverBackground); }
-.mono { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .75; }
+.mono { font-family: var(--dash-mono); font-size: 11px; opacity: .75; }
 .kind { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--vscode-editorWidget-background); opacity: .85; }
 .k-workflow { color: hsl(265 60% 65%); } .k-agent { color: hsl(200 60% 60%); } .k-main { color: hsl(145 45% 55%); }
 /* How an agent ended, in the five words outcomeOf answers with. A stopped agent
@@ -333,7 +348,7 @@ tr.detail td { padding-top: 0; }
 .prompt { margin: 4px 0 4px 16px; opacity: .8; max-width: 100ch; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere; }
 .result { margin: 4px 0 10px 16px; padding: 6px 8px; border-radius: 4px; max-width: 100ch;
-  background: var(--vscode-editorWidget-background); font-family: var(--vscode-editor-font-family);
+  background: var(--vscode-editorWidget-background); font-family: var(--dash-mono);
   font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cloud { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; max-width: 90ch; line-height: 1.7; }
 .word { opacity: .8; }
@@ -372,7 +387,7 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 .grid { stroke: currentColor; opacity: .12; }
 .plan { stroke: currentColor; opacity: .35; stroke-dasharray: 4 4; }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-code { font-family: var(--vscode-editor-font-family); font-size: 11.5px; opacity: .85; }
+code { font-family: var(--dash-mono); font-size: 11.5px; opacity: .85; }
 .kv { width: 100%; }
 /* The key column stays as narrow as its content allows but may wrap: an env
    var name is forty characters, which on one line was wider than the panel it
@@ -456,7 +471,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
    between two presets and actually wants it. */
 .preset-preview { display: none; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .preset:hover .preset-preview, .preset:focus-visible .preset-preview { display: flex; }
-.chip-seg { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8;
+.chip-seg { font-family: var(--dash-mono); font-size: 11px; opacity: .8;
   background: var(--vscode-list-hoverBackground); border-radius: 3px; padding: 1px 5px; }
 /* Spend, plan and forecast are three different jobs, so they get three roles
    from the theme's own chart ramp rather than three invented hues. */
@@ -527,7 +542,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .row-meter { height: 4px; border-radius: 2px; overflow: hidden;
   background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
 .row-meter i { display: block; height: 100%; border-radius: 2px; }
-.row-value { font-family: var(--vscode-editor-font-family); font-size: 12.5px; font-weight: 600;
+.row-value { font-family: var(--dash-mono); font-size: 12.5px; font-weight: 600;
   font-variant-numeric: tabular-nums; }
 .row-note { grid-column: 2 / -1; font-size: 11px; opacity: .45; }
 .row-note:empty { display: none; }
@@ -592,11 +607,11 @@ ul.log li { margin: 2px 0; opacity: .85; }
 /* The gauge: one figure large enough to find without reading, the two lines that
    qualify it on the right, and a track only when that figure is a share. */
 .gauge-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-.gauge-big { font-family: var(--vscode-editor-font-family); font-size: 28px; line-height: 1;
+.gauge-big { font-family: var(--dash-mono); font-size: 28px; line-height: 1;
   font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .g-hot { color: var(--vscode-charts-red); }
 .gauge-side { text-align: right; font-size: 11px; opacity: .55; line-height: 1.5; min-width: 0; }
-.gauge-side b { display: block; font-family: var(--vscode-editor-font-family); font-size: 12.5px;
+.gauge-side b { display: block; font-family: var(--dash-mono); font-size: 12.5px;
   font-weight: 600; opacity: 1; font-variant-numeric: tabular-nums; }
 .gauge-track { position: relative; height: 7px; border-radius: 99px; margin-top: 9px;
   background: color-mix(in srgb, var(--vscode-foreground) 11%, transparent); }
@@ -629,9 +644,9 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .part-dot { width: 8px; height: 8px; border-radius: 3px; }
 .part-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .part-name em { font-style: normal; opacity: .42; font-size: 11px; margin-left: 6px; }
-.part-figure { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .5;
+.part-figure { font-family: var(--dash-mono); font-size: 11px; opacity: .5;
   min-width: 3.2rem; text-align: right; font-variant-numeric: tabular-nums; }
-.part-value { font-family: var(--vscode-editor-font-family); font-size: 12px; font-weight: 600;
+.part-value { font-family: var(--dash-mono); font-size: 12px; font-weight: 600;
   min-width: 3.5rem; text-align: right; font-variant-numeric: tabular-nums; }
 /* Narrow enough and the qualifier is the first thing to go — it is the one part
    of the row that repeats what the label implies, and keeping it there cuts
@@ -667,12 +682,12 @@ ul.log li { margin: 2px 0; opacity: .85; }
   padding: 10px 14px; border-radius: 8px; border: 1px solid var(--vscode-panel-border);
   background: var(--vscode-editorWidget-background); }
 .strip-name { font-size: 13px; font-weight: 650; white-space: nowrap; }
-.strip-count { font-family: var(--vscode-editor-font-family); font-size: 15px; font-weight: 600;
+.strip-count { font-family: var(--dash-mono); font-size: 15px; font-weight: 600;
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 .strip-track { flex: 1 1 120px; min-width: 80px; height: 6px; border-radius: 99px;
   background: color-mix(in srgb, var(--vscode-foreground) 11%, transparent); }
 .strip-track i { display: block; height: 100%; border-radius: 99px; }
-.strip-pct { font-family: var(--vscode-editor-font-family); font-size: 12px; font-weight: 600;
+.strip-pct { font-family: var(--dash-mono); font-size: 12px; font-weight: 600;
   white-space: nowrap; }
 /* How many are left, and what "in progress" means — both were in the hover and
    nowhere on the page, which is the drift the shared vocabulary exists to stop. */
@@ -692,7 +707,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
   flex-wrap: wrap; margin-top: 12px; padding-top: 9px; font-size: 11px;
   border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
 .band-facts { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline;
-  font-family: var(--vscode-editor-font-family); }
+  font-family: var(--dash-mono); }
 .band-facts i { font-style: normal; opacity: .35; }
 .band-quiet { opacity: .45; }
 .band-quiet .band-facts { font-family: inherit; }
@@ -701,7 +716,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
    radius — a blue circle. It keeps its width and takes the next line instead. */
 .band-chip { flex: 0 0 auto; font-size: 10.5px; line-height: 18px; padding: 0 9px; border-radius: 999px;
   white-space: nowrap; background: color-mix(in srgb, var(--vscode-charts-blue) 18%, transparent); }
-.band-chip b { font-family: var(--vscode-editor-font-family); font-weight: 600; }
+.band-chip b { font-family: var(--dash-mono); font-weight: 600; }
 /* The sidebar view. No panel borders and no card padding: at 250px those two
    eat a third of the width, and the container already draws a frame and a
    collapsible heading around everything here. */
@@ -717,7 +732,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .now-table th[scope="row"] { font: inherit; text-transform: none; letter-spacing: 0;
   opacity: .55; text-align: left; white-space: nowrap; padding-right: 14px; width: 1%; }
 .now-table thead th { font-size: 10px; opacity: .4; padding-bottom: 3px; letter-spacing: .06em; }
-.now-value { font-family: var(--vscode-editor-font-family); font-size: 12.5px;
+.now-value { font-family: var(--dash-mono); font-size: 12.5px;
   font-variant-numeric: tabular-nums; font-weight: 600; }
 /* A dot rather than a bar down the side: the panel already has a colour bar and
    coloured legend dots, and a second colour language two elements later is what
@@ -739,7 +754,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .seg { margin-bottom: 8px; }
 .seg-head { display: flex; align-items: center; gap: 6px; }
 .seg-num { opacity: .45; font-size: 11px; width: 14px; text-align: right; }
-.seg-input { flex: 1; min-width: 0; font-family: var(--vscode-editor-font-family); font-size: 12px;
+.seg-input { flex: 1; min-width: 0; font-family: var(--dash-mono); font-size: 12px;
   padding: 5px 8px; border-radius: 4px; color: var(--vscode-input-foreground, inherit);
   background: var(--vscode-input-background, var(--vscode-editorWidget-background));
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
@@ -829,7 +844,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
    is shell, wraps because it is long, and selects on click so it can be taken
    without the button too. */
 .cmd { display: flex; align-items: flex-start; gap: 10px; }
-.cmd code { flex: 1; min-width: 0; font-family: var(--vscode-editor-font-family);
+.cmd code { flex: 1; min-width: 0; font-family: var(--dash-mono);
     font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
     user-select: all; padding: 7px 9px; border-radius: 4px;
     background: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background));
@@ -862,7 +877,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .card-about { font-size: 11.5px; opacity: .72; }
 /* A figure the options can be ranked by — a rate, a measured spend. Monospace so
    the column lines up down the list. */
-.card-meta { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .55;
+.card-meta { font-family: var(--dash-mono); font-size: 11px; opacity: .55;
   white-space: nowrap; margin-left: auto; padding-left: 10px; }
 /* An option the client would refuse. Dimmed and dashed rather than removed: a
    vanished option is a puzzle, a struck one explains itself. */

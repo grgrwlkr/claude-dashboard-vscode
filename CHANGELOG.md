@@ -17,6 +17,11 @@ not published yet.
 - The identifier, every `claudeStatusline.*` setting and every keybinding are
   unchanged; nothing to migrate.
 
+### Fixed
+
+- Figures keep their monospace font where the editor's font variable is
+  missing; they fell back to Courier New.
+
 ### Added
 
 - The repository is a Claude Code plugin: `/plugin marketplace add`, then

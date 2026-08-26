@@ -145,6 +145,13 @@ const html = db.render(index, total, demo ? demo.meta : {
 const THEMES = {
     dark: `:root{
   --vscode-font-family: -apple-system, system-ui, sans-serif;
+  /* This harness supplies the theme variables the webview would, which makes it
+     blind to one class of defect by construction: a variable VS Code does not
+     define. The editor font variable was missing on one machine and every
+     figure fell back to Chromium's default monospace, Courier New, while the
+     preview looked correct. Hence the fallbacks inside var() in dashboard.css,
+     and the test that keeps them there.
+     No backticks in here: this is inside a template literal. */
   --vscode-editor-font-family: ui-monospace, Menlo, monospace;
   --vscode-foreground:#cccccc; --vscode-editor-background:#1f1f1f;
   --vscode-editorWidget-background:#252526; --vscode-panel-border:#3c3c3c;

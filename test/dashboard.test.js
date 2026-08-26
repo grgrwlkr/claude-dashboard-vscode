@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const db = require('../dashboard');
 const ix = require('../indexer');
 const wf = require('../workflows');
@@ -2280,4 +2282,15 @@ test('an agent card says nothing about effort when the transcript recorded none'
         agents: [demoAgent({ effort: '' })],
     })]);
     assert.doesNotMatch(html, /opus 5 · (low|medium|high|xhigh|max)/);
+});
+
+test('every theme font variable carries a fallback of its own', () => {
+    // A webview that does not define `--vscode-editor-font-family` leaves the
+    // page with an invalid font-family, and Chromium's own default for
+    // monospace is Courier New — which is what the numbers turned into on one
+    // machine. `tools/preview.js` defines the variable itself, so the preview
+    // could never show this.
+    const css = fs.readFileSync(path.join(__dirname, '..', 'dashboard.css'), 'utf8');
+    const bare = [...css.matchAll(/var\(--vscode-[a-zA-Z-]*font-family\)/g)].map((m) => m[0]);
+    assert.deepEqual(bare, [], `${bare.length} font variables have no fallback`);
 });
