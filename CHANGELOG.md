@@ -19,8 +19,8 @@ not published yet.
 
 ### Fixed
 
-- A panel's pills stay beside its title while they fit; they dropped under it
-  on any panel narrower than 360px.
+- A panel's pills stay beside its title at every width; a set too wide for the
+  line folds its own tail onto a second row instead of dropping whole.
 - Figures keep their monospace font where the editor's font variable is
   missing; they fell back to Courier New.
 

@@ -563,7 +563,7 @@ ul.log li { margin: 2px 0; opacity: .85; }
    and the pills take the rest. Left shrinkable, `opus 5` broke after `opus`
    while the pills beside it still had room. */
 .panel-head > :first-child, .side-head > :first-child { flex: 0 0 auto; }
-.panel-head > .pills, .side-head > .pills { flex: 1 1 auto; min-width: 0; }
+.panel-head > .pills, .side-head > .pills { flex: 1 1 0; min-width: 0; }
 /* Dragged narrow, four pills stack one per line and the heading eats half the
    pane. The tail goes first: status.js orders them so what survives is what
    decides the cost of the session, not what merely records a setting. The
@@ -572,12 +572,18 @@ ul.log li { margin: 2px 0; opacity: .85; }
 @container (max-width: 280px) {
   .pills .pill:nth-child(n+3) { display: none; }
 }
-/* Whether both fit on one line is a question about these words, not about a
-   width. A fixed threshold answered it wrongly in both directions: at 345px a
-   panel dropped `2% under` under `Limits` with room to spare, while a set of
-   four long pills at 380px stayed cramped on the line. A basis of `auto` lets
-   the row wrap when the content actually asks — the pills keep the right edge
-   whatever line they land on, which is the edge they are read from. */
+/* The pills wrap under themselves; the set never drops under the title as a
+   block. A basis of `0` contributes nothing to the line, so the row wraps only
+   when something below asks it to, and `.pills` — which wraps internally — takes
+   whatever the title leaves and folds its own tail onto a second line.
+
+   Two ways this was wrong before. A container query at 360px dropped the whole
+   set on any narrow panel, so `Limits` sent `2% under` down with room beside
+   it. Replacing that with a basis of `auto` fixed the short case and broke the
+   long one: `opus 5` has four pills whose combined width exceeds the line, and
+   an `auto` basis pushed all four under a title with half the row still empty.
+   Neither is about a width — the pills belong beside the title, and only their
+   own overflow belongs on a second line. */
 .pills { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 .pill { font-size: 10.5px; line-height: 16px; padding: 0 8px; border-radius: 999px; white-space: nowrap;
   background: color-mix(in srgb, var(--vscode-foreground) 9%, transparent); }
