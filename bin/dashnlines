@@ -69,10 +69,11 @@ function collect() {
     return { d, summary, now };
 }
 
-function frames(width, colour) {
+// Everything a tab body might need, gathered once per reload.
+function context(width, colour) {
     const { d, summary, now } = collect();
     const sections = st.statusSections(d, helpers, { cacheStale: !u.readCache(now), cacheAt: null });
-    return tui.tabsFor({ sections, summary, helpers, width, colour, d });
+    return { d, summary, sections, helpers, width, colour };
 }
 
 const ALT_ON = '\u001b[?1049h\u001b[?25l';
@@ -81,15 +82,16 @@ const HOME = '\u001b[H';
 const CLEAR_EOL = '\u001b[K';
 
 function printOnce(width, colour) {
-    const tabs = frames(width, colour);
-    const which = value('--tab', 'now');
-    const tab = tabs.find((t) => t.id === which) || tabs[0];
-    for (const line of tab.body) process.stdout.write(`${line}\n`);
+    const ctx = context(width, colour);
+    for (const line of tui.bodyFor(value('--tab', 'now'), ctx)) {
+        process.stdout.write(`${line}\n`);
+    }
 }
 
 function interactive(width, colour) {
-    let tabs = frames(width, colour);
-    let active = 0;
+    let ctx = context(width, colour);
+    // Where we are on the page: which section, and which of its tabs.
+    let at = { section: 0, tab: 0 };
     let scroll = 0;
     let alive = true;
 
@@ -100,10 +102,11 @@ function interactive(width, colour) {
 
     const draw = () => {
         const { width: w, height: h } = size();
-        const footer = '←→ or 1-9 tabs · ↑↓ scroll · r reload · q quit';
+        const footer = 'Tab section · ←→ or 1-9 tab · ↑↓ scroll · r reload · q quit';
         const lines = tui.screen({
-            tabs, active, width: w, height: h, colour,
-            body: tabs[active].body, footer, scroll,
+            width: w, height: h, colour, footer, scroll,
+            bars: [tui.sectionBar(at.section, w, colour), tui.tabBarFor(at.section, at.tab, w, colour)],
+            body: tui.bodyFor(tui.tabAt(at).id, { ...ctx, width: w }),
         });
         // Repaint in place rather than clearing first: a clear between frames is
         // what a terminal renders as a flash.
@@ -132,19 +135,21 @@ function interactive(width, colour) {
         // SIGINT, so without this the only way out of the alternate screen is
         // to kill the process from another terminal.
         if (key === 'q' || key === '\u0003' || key === '\u001b') { leave(); process.exit(0); }
-        const before = `${active}/${scroll}`;
-        if (key === '\u001b[C') active = tui.nextTab(active, 'right', tabs.length);
-        else if (key === '\u001b[D') active = tui.nextTab(active, 'left', tabs.length);
-        else if (/^[1-9]$/.test(key)) active = tui.nextTab(active, key, tabs.length);
+        const where = `${at.section}/${at.tab}`;
+        if (key === '\t') at = tui.moveSection(at, 'next');
+        else if (key === '\u001b[Z') at = tui.moveSection(at, 'prev');
+        else if (key === '\u001b[C') at = tui.moveTab(at, 'right');
+        else if (key === '\u001b[D') at = tui.moveTab(at, 'left');
+        else if (/^[1-9]$/.test(key)) at = tui.moveTab(at, key);
         else if (key === '\u001b[B' || key === 'j') scroll += 1;
         else if (key === '\u001b[A' || key === 'k') scroll = Math.max(0, scroll - 1);
         else if (key === ' ') scroll += (process.stdout.rows || 24) - 4;
         else if (key === 'g') scroll = 0;
-        else if (key === 'r') { tabs = frames(size().width, colour); }
+        else if (key === 'r') ctx = context(size().width, colour);
         else return;
-        // A tab remembers nothing: moving away and back starts at the top,
+        // A tab remembers no scroll position: arriving at one starts at the top,
         // which is where the answer to "what is this tab" always is.
-        if (`${active}/${scroll}` !== before && key !== '\u001b[B' && key !== '\u001b[A' && key !== ' ') scroll = 0;
+        if (`${at.section}/${at.tab}` !== where) scroll = 0;
         draw();
     });
 
@@ -154,7 +159,28 @@ function interactive(width, colour) {
     process.stdout.on('resize', draw);
 }
 
+// Building the index is the one slow thing here: every transcript on the
+// machine, once. It prints progress because a command that sits silent for
+// minutes reads as a command that hung.
+function reindex() {
+    const dir = value('--storage', STORAGE);
+    let last = 0;
+    const { index, stats } = idx.refreshIndex(dir, {
+        // Positional, not an object: the indexer calls it every hundred files.
+        onProgress: (done, total) => {
+            const pct = Math.floor((done / total) * 100);
+            if (pct === last) return;
+            last = pct;
+            process.stderr.write(`\rreading transcripts: ${pct}%  (${done}/${total})`);
+        },
+    });
+    process.stderr.write('\n');
+    idx.saveIndex(dir, index);
+    process.stdout.write(`indexed ${stats.total} transcripts — ${stats.parsed} read, ${stats.reused} unchanged\n`);
+}
+
 function main() {
+    if (flag('--reindex')) { reindex(); return; }
     const width = Number(value('--width', 0)) || process.stdout.columns || tui.DEFAULT_WIDTH;
     const colour = !flag('--no-color') && !process.env.NO_COLOR;
     // No terminal, or asked for one frame: print and leave. `--print` is what a

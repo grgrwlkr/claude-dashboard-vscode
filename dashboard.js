@@ -11,7 +11,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { fmtCost, ratesFor, canonicalModel, shortModel } = require('./pricing');
+const { fmtCost, ratesFor, canonicalModel, shortModel, SYNTHETIC_MODEL } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
 const wfm = require('./workflows');
@@ -90,7 +90,6 @@ function fmtClock(ms) {
 // a 403 — Claude Code writes a record of its own and marks it with this id. Its
 // usage is all zeroes, so it costs nothing and buys nothing: a refusal log, not
 // a model, and therefore not a row in any breakdown of models.
-const SYNTHETIC_MODEL = '<synthetic>';
 
 function modelRows(models) {
     return Object.entries(models).filter(([m]) => m !== SYNTHETIC_MODEL);

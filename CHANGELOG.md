@@ -22,8 +22,11 @@ not published yet.
 - The repository is a Claude Code plugin: `/plugin marketplace add`, then
   `/plugin install dashnlines@dashnlines`.
 - `/dashnlines:dashboard` prints the dashboard inside a session.
-- A dashboard for the terminal: `bin/dashnlines`, with tabs, arrows to move
-  between them and `q` to leave.
+- A dashboard for the terminal: `bin/dashnlines`, carrying the page's six
+  sections and all 24 tabs.
+- `Tab` moves between sections, arrows and `1`–`9` between their tabs, `q`
+  leaves.
+- `dashnlines --reindex` builds the usage index from the terminal.
 - `--print` draws one frame instead, for a pipe or a screenshot; `--tab` picks
   which one.
 - A status line for the terminal: `node bin/statusline.js` as the `statusLine`

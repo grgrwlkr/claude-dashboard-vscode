@@ -471,7 +471,13 @@ function nextTab(active, key, count) {
  */
 function screen(opts) {
     const { tabs = [], active = 0, width = DEFAULT_WIDTH, height = 24, body = [], footer = '', colour = true } = opts;
-    const out = [tabBar(tabs, active, width, colour), ''];
+    // `bars` is the two-level form: a row of sections and a row of that
+    // section's tabs. A section holding one tab contributes no second row, and
+    // the empty string it returns is dropped rather than drawn as a blank line.
+    const head = Array.isArray(opts.bars)
+        ? opts.bars.filter((b) => b !== '')
+        : [tabBar(tabs, active, width, colour)];
+    const out = [...head, ''];
     const room = Math.max(0, height - out.length - (footer ? 2 : 0));
     // A body shorter than the window is never scrolled: the top of a short page
     // is the page.
@@ -482,9 +488,109 @@ function screen(opts) {
     return out.slice(0, height);
 }
 
+// --- the same map of the dashboard ----------------------------------------
+//
+// The page's own SECTIONS, kept in the same order and with the same words, so
+// that "Work → Skills" means one thing wherever it is read. Two levels rather
+// than one row of 24: a bar of every tab would take three lines and still
+// leave you guessing which of them belong together.
+
+const SECTIONS = [
+    { id: 'now', title: 'Now', tabs: [{ id: 'now', title: 'Now' }] },
+    {
+        id: 'spend',
+        title: 'Spend',
+        tabs: [
+            { id: 'overview', title: 'Overview' },
+            { id: 'sessions', title: 'Sessions' },
+            { id: 'projects', title: 'Projects' },
+            { id: 'branches', title: 'Branches' },
+        ],
+    },
+    {
+        id: 'work',
+        title: 'Work',
+        tabs: [
+            { id: 'agents', title: 'Agents' },
+            { id: 'tools', title: 'Tools & MCP' },
+            { id: 'files', title: 'Files' },
+            { id: 'skills', title: 'Skills' },
+            { id: 'content', title: 'Content' },
+        ],
+    },
+    {
+        id: 'efficiency',
+        title: 'Efficiency',
+        tabs: [
+            { id: 'models', title: 'Models & effort' },
+            { id: 'cache', title: 'Cache' },
+            { id: 'friction', title: 'Friction' },
+            { id: 'limits', title: 'Limits' },
+        ],
+    },
+    {
+        id: 'setup',
+        title: 'Setup',
+        tabs: [
+            { id: 'settings', title: 'Settings' },
+            { id: 'launch', title: 'Launch' },
+            { id: 'client', title: 'Claude Code' },
+            { id: 'context', title: 'Memory' },
+            { id: 'health', title: 'Health' },
+            { id: 'changelog', title: 'Changelog' },
+        ],
+    },
+    {
+        id: 'machine',
+        title: 'Machine',
+        tabs: [
+            { id: 'live', title: 'Live now' },
+            { id: 'jobs', title: 'Background jobs' },
+            { id: 'tasks', title: 'Task lists' },
+            { id: 'disk', title: 'Disk' },
+        ],
+    },
+];
+
+const sectionAt = (at) => SECTIONS[at.section] || SECTIONS[0];
+
+/** The tab a position names, or the first one when the position is nonsense. */
+function tabAt(at) {
+    const section = sectionAt(at);
+    return section.tabs[at.tab] || section.tabs[0];
+}
+
+/** The row of sections, the one you are in marked as well as highlighted. */
+function sectionBar(active, width, colour = true) {
+    return tabBar(SECTIONS, active, width, colour);
+}
+
+/**
+ * The row of tabs inside a section — and nothing at all for a section holding
+ * one, where a bar of a single entry is a line spent saying nothing.
+ */
+function tabBarFor(section, tab, width, colour = true) {
+    const tabs = (SECTIONS[section] || SECTIONS[0]).tabs;
+    if (tabs.length < 2) return '';
+    return `  ${tabBar(tabs, tab, width - 2, colour)}`;
+}
+
+/** Tab and Shift-Tab walk the sections, wrapping, and start at the first tab. */
+function moveSection(at, dir) {
+    const count = SECTIONS.length;
+    const next = dir === 'prev' ? (at.section - 1 + count) % count : (at.section + 1) % count;
+    return { section: next, tab: 0 };
+}
+
+/** The arrows and the digits walk the tabs of the section you are in. */
+function moveTab(at, key) {
+    const tabs = sectionAt(at).tabs;
+    return { section: at.section, tab: nextTab(at.tab, key, tabs.length) };
+}
+
 // --- what each tab shows --------------------------------------------------
 
-const { shortModel } = require('./pricing');
+const { shortModel, realModels } = require('./pricing');
 
 // A tab with nothing behind it says why, rather than drawing an empty frame:
 // an index that has never been built and a week with no spend look identical
@@ -502,17 +608,149 @@ function topRows(bucket, width, helpers, opts = {}) {
     const entries = Object.entries(bucket || {});
     if (!entries.length) return null;
     const { label = (key) => key, order = 'cost', limit = 12 } = opts;
+    const rank = (v) => {
+        if (order !== 'plain') return v[order] || 0;
+        if (typeof v === 'number') return v;
+        // A bucket broken down by reason ranks by what it adds up to.
+        return v && typeof v === 'object' ? Object.values(v).reduce((a, b) => a + (Number(b) || 0), 0) : 0;
+    };
     const sorted = order === 'key'
         ? entries.sort((a, b) => String(b[0]).localeCompare(String(a[0])))
-        : entries.sort((a, b) => (b[1][order] || 0) - (a[1][order] || 0));
+        : entries.sort((a, b) => rank(b[1]) - rank(a[1]));
+    const figure = opts.figure || ((v, h) => [
+        Number.isFinite(v.cost) ? h.fmtCost(v.cost) : '',
+        Number.isFinite(v.tokens) ? h.tok(v.tokens) : '',
+        Number.isFinite(v.count) ? `×${v.count}` : '',
+    ].filter(Boolean).join('   '));
     return twoColumn(sorted.slice(0, limit).map(([key, v]) => [
         label(key, v),
-        [
-            Number.isFinite(v.cost) ? helpers.fmtCost(v.cost) : '',
-            Number.isFinite(v.tokens) ? helpers.tok(v.tokens) : '',
-            Number.isFinite(v.count) ? `×${v.count}` : '',
-        ].filter(Boolean).join('   '),
+        figure(v, helpers, key),
     ]), width, false);
+}
+
+// A tab the terminal has no business drawing: an editor, a form. Saying where
+// it lives beats leaving it blank, which reads as an index that failed to load.
+const ELSEWHERE = (what) => [
+    '',
+    `  ${what} is an editor rather than a reading.`,
+    '  Open it in the VS Code extension: Claude dashnlines → the same tab.',
+];
+
+// One list per tab, from the bucket `summarize` fills. `order` is what "top"
+// means for that tab, `label` how a key is spelled, `unit` what the count is a
+// count of.
+// One list per tab, over the buckets `summarize` fills. Each names how a key is
+// spelled and what its figure is, because the buckets are not one shape: a tool
+// counts calls and errors, a file counts edits, a project costs money.
+const LISTS = {
+    overview: [
+        ['By day', 'days', { order: 'key', figure: 'money' }],
+        ['By model', 'models', { model: true, figure: 'money' }],
+    ],
+    sessions: [['Sessions', 'sessions', { session: true, figure: 'money' }]],
+    projects: [['Projects', 'projects', { figure: 'money' }]],
+    branches: [['Branches', 'branches', { figure: 'money' }]],
+    agents: [['Agents', 'agents', { figure: 'money' }]],
+    tools: [['Tools & MCP', 'tools', { order: 'calls', figure: 'calls' }]],
+    files: [['Files', 'files', { order: 'edits', figure: 'edits', path: true }]],
+    skills: [['Skills', 'skills', { figure: 'money' }]],
+    content: [['Prompts by length', 'prompts', { order: 'plain', figure: 'plain' }]],
+    models: [
+        ['By model', 'models', { model: true, figure: 'money' }],
+        ['By effort', 'efforts', { figure: 'money' }],
+    ],
+    friction: [['Friction', 'friction', { order: 'plain', figure: 'friction' }]],
+    limits: [['By hour of day', 'hours', { order: 'key', figure: 'money' }]],
+};
+
+// What the right-hand column of a row says, per bucket shape.
+const FIGURES = {
+    money: (v, h) => [
+        Number.isFinite(v.cost) ? h.fmtCost(v.cost) : '',
+        Number.isFinite(v.msgs) ? `${v.msgs} msgs` : '',
+    ].filter(Boolean).join('   '),
+    calls: (v) => [
+        Number.isFinite(v.calls) ? `${v.calls} calls` : '',
+        v.errors ? `${v.errors} errors` : '',
+        v.denials ? `${v.denials} denied` : '',
+    ].filter(Boolean).join('   '),
+    edits: (v) => [
+        Number.isFinite(v.edits) ? `${v.edits} edits` : '',
+        v.added || v.removed ? `+${v.added || 0} / −${v.removed || 0}` : '',
+    ].filter(Boolean).join('   '),
+    // A bucket that is a bare number rather than an object.
+    plain: (v) => (typeof v === 'number' ? String(v) : ''),
+
+    // Friction counts three different kinds of thing under one roof: tokens
+    // thrown away, milliseconds spent compacting, and plain tallies. Printed
+    // raw they read as one scale, and 21128022 reads as nothing at all.
+    friction: (v, h, key) => {
+        // Two of these are broken down by reason rather than counted flat —
+        // denials into rejected and rule-blocked, compactions into manual and
+        // automatic — so they print their parts instead of a bare total.
+        if (v && typeof v === 'object') {
+            return Object.entries(v).map(([k, n]) => `${n} ${k}`).join('   ');
+        }
+        if (typeof v !== 'number') return '';
+        if (/token/i.test(key)) return h.tok(v);
+        if (/ms$/i.test(key)) return h.fmtDuration(v);
+        return String(v);
+    },
+};
+
+/** The body of one tab, as lines. */
+function bodyFor(id, ctx) {
+    const { summary = {}, helpers = {}, width = DEFAULT_WIDTH, colour = true } = ctx;
+    const heading = (text) => ['', `  ${dim(String(text).toUpperCase(), colour)}`, ''];
+
+    if (id === 'now') {
+        return (ctx.sections || []).length
+            ? nowPage({ sections: ctx.sections, d: ctx.d || {}, helpers, width, colour })
+            : EMPTY('no limits have been read on this machine yet');
+    }
+    if (id === 'settings') return ELSEWHERE('Settings');
+    if (id === 'launch') return ELSEWHERE('Launch');
+
+    const lists = LISTS[id];
+    if (lists) {
+        const out = [];
+        for (const [title, key, opts] of lists) {
+            // `<synthetic>` is not a model; the filter lives in pricing.js so
+            // every surface that lists models drops it the same way.
+            const bucket = opts.model ? realModels(summary[key]) : summary[key];
+            const rows = topRows(bucket, width, helpers, {
+                order: opts.order || 'cost',
+                figure: FIGURES[opts.figure] || FIGURES.money,
+                label: opts.model ? shortModel
+                    : opts.session ? ((k, v) => v.title || v.project || String(k).slice(0, 8))
+                        // A path is read from its end: the file, and the folder
+                        // that tells you which of the four `index.js` it is.
+                        : opts.path ? ((k) => String(k).split('/').slice(-2).join('/'))
+                            : undefined,
+            });
+            if (rows) out.push(...heading(title), ...rows);
+        }
+        if (out.length) return out;
+        // An index that is absent and an index that is merely empty look the
+        // same from here, and the fix for both is the same one command.
+        return [
+            '',
+            '  Nothing under this tab yet — the usage index is empty.',
+            '',
+            '  Build it:  dashnlines --reindex',
+            '  It reads every transcript once and takes a few minutes; after that',
+            '  it only reads what has changed.',
+        ];
+    }
+
+    // Cache, Memory, Health, Changelog, and everything under Machine read state
+    // this build does not collect yet. They are listed rather than hidden, so
+    // the map matches the page and the gap is visible.
+    return [
+        '',
+        `  Not read by the terminal build yet.`,
+        '  The VS Code extension has this tab; the reading is on its way here.',
+    ];
 }
 
 /**
@@ -555,6 +793,7 @@ function tabsFor(opts) {
 
 module.exports = {
     row, meter, tiles, panel, pair, nowTiles, nowPage,
+    SECTIONS, sectionBar, tabBarFor, moveSection, moveTab, tabAt, bodyFor,
     renderSections, renderSection, clip, wrap, visibleLength, DEFAULT_WIDTH,
     tabBar, nextTab, screen, tabsFor,
 };

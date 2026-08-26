@@ -113,6 +113,17 @@ function fmtCost(usd) {
 // How a model is named wherever one is shown: the status bar, the page, the
 // terminal. It lives beside `canonicalModel` because it is the same question —
 // which model is this — asked for a reader instead of for a rate table.
+// What the client writes in place of a reply that never came, with an all-zero
+// usage. It reaches counters of messages, which is what it is — but it is not a
+// model, and belongs in no breakdown of them.
+const SYNTHETIC_MODEL = '<synthetic>';
+
+// A models bucket without it. Every surface that lists models filters here
+// rather than remembering to.
+const realModels = (models) => Object.fromEntries(
+    Object.entries(models || {}).filter(([m]) => m !== SYNTHETIC_MODEL),
+);
+
 function shortModel(model) {
     return (canonicalModel(model) || 'unknown')
         .replace(/^claude-/, '')
@@ -131,5 +142,5 @@ function tokenLabel(n) {
 module.exports = {
     RATES, CACHE_WRITE_5M, CACHE_WRITE_1H, CACHE_READ,
     ratesFor, costOf, cacheSplit, cacheSaving, fmtCost, canonicalModel,
-    shortModel, tokenLabel,
+    shortModel, tokenLabel, SYNTHETIC_MODEL, realModels,
 };
