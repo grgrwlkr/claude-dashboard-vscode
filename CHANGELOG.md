@@ -19,6 +19,9 @@ not published yet.
 
 ### Added
 
+- The repository is a Claude Code plugin: `/plugin marketplace add`, then
+  `/plugin install dashnlines@dashnlines`.
+- `/dashnlines:dashboard` prints the dashboard inside a session.
 - A dashboard for the terminal: `bin/dashnlines`, with tabs, arrows to move
   between them and `q` to leave.
 - `--print` draws one frame instead, for a pipe or a screenshot; `--tab` picks

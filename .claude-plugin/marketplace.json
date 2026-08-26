@@ -1,0 +1,14 @@
+{
+  "name": "dashnlines",
+  "owner": {
+    "name": "grgrwlkr"
+  },
+  "plugins": [
+    {
+      "name": "dashnlines",
+      "source": "./",
+      "description": "Status line for Claude Code in the terminal, from the same templates as the VS Code status bar."
+    }
+  ],
+  "description": "Claude dashnlines: a status line and a dashboard for Claude Code in the terminal."
+}
