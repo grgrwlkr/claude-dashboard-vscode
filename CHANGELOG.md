@@ -19,6 +19,8 @@ not published yet.
 
 ### Fixed
 
+- A panel's pills stay beside its title while they fit; they dropped under it
+  on any panel narrower than 360px.
 - Figures keep their monospace font where the editor's font variable is
   missing; they fell back to Courier New.
 
