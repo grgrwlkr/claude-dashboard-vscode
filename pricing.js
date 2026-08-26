@@ -110,7 +110,26 @@ function fmtCost(usd) {
     return `$${usd.toFixed(2)}`;
 }
 
+// How a model is named wherever one is shown: the status bar, the page, the
+// terminal. It lives beside `canonicalModel` because it is the same question —
+// which model is this — asked for a reader instead of for a rate table.
+function shortModel(model) {
+    return (canonicalModel(model) || 'unknown')
+        .replace(/^claude-/, '')
+        .replace(/-(\d)-(\d)$/, ' $1.$2')
+        .replace(/-(\d)$/, ' $1');
+}
+
+// A token count in the width a status line can afford. Whole millions lose the
+// decimal: `2M` rather than `2.0M`.
+function tokenLabel(n) {
+    if (n < 1e6) return `${Math.round(n / 1000)}k`;
+    const m = n / 1e6;
+    return Number.isInteger(m) ? `${m}M` : `${m.toFixed(1)}M`;
+}
+
 module.exports = {
     RATES, CACHE_WRITE_5M, CACHE_WRITE_1H, CACHE_READ,
     ratesFor, costOf, cacheSplit, cacheSaving, fmtCost, canonicalModel,
+    shortModel, tokenLabel,
 };

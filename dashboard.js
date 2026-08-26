@@ -11,7 +11,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { fmtCost, ratesFor, canonicalModel } = require('./pricing');
+const { fmtCost, ratesFor, canonicalModel, shortModel } = require('./pricing');
 const ix = require('./indexer');
 const hist = require('./history');
 const wfm = require('./workflows');
@@ -98,12 +98,6 @@ function modelRows(models) {
 
 // The label and the rate read an id the same way, so a Bedrock or gateway
 // spelling cannot show up as its own model in a legend that already has the row.
-function shortModel(model) {
-    return (canonicalModel(model) || 'unknown')
-        .replace(/^claude-/, '')
-        .replace(/-(\d)-(\d)$/, ' $1.$2')
-        .replace(/-(\d)$/, ' $1');
-}
 
 // A stable colour per position, so a model keeps its colour across every chart
 // and the legend. Hue alone runs out at about six entries — anything further

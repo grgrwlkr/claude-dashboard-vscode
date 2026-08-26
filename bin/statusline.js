@@ -21,9 +21,7 @@ const term = require('../terminal');
 const seg = require('../segments');
 const u = require('../usage');
 const s = require('../session');
-const wfm = require('../workflows');
-const dashboard = require('../dashboard');
-const { fmtCost } = require('../pricing');
+const { fmtCost, shortModel, tokenLabel } = require('../pricing');
 
 // The same helpers the extension hands the registry, from the same modules. A
 // second set of formatters here is how a figure comes to be spelled two ways.
@@ -33,8 +31,8 @@ const registry = seg.fields({
     fmtLeft: u.fmtLeft,
     fmtAbs: (ts) => u.fmtAbs(ts),
     fmtDuration: s.fmtDuration,
-    tok: wfm.tokenLabel,
-    shortModel: (model) => (model ? dashboard.shortModel(model) : ''),
+    tok: tokenLabel,
+    shortModel: (model) => (model ? shortModel(model) : ''),
 });
 
 function templatesFrom(argv) {

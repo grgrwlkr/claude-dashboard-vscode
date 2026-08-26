@@ -10,7 +10,7 @@ const wfm = require('./workflows');
 const status = require('./status');
 const docs = require('./settingsDocs');
 const { clientSettings } = require('./clientSettings');
-const { fmtCost, ratesFor } = require('./pricing');
+const { fmtCost, ratesFor, shortModel, tokenLabel } = require('./pricing');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -162,7 +162,7 @@ function renderSection(section) {
 // way statusline.sh writes it. The formula sits in workflows.js because the tree
 // writes the same numbers and cannot import this file: this is the one module
 // allowed to require vscode, so what both sides share lives on the other side.
-const tok = wfm.tokenLabel;
+const tok = tokenLabel;
 
 // The bar needs the model, not the full id: "claude-opus-5" → "opus 5". The rule
 // itself lives in dashboard.js, which draws the same model ids in its tables and
@@ -170,7 +170,7 @@ const tok = wfm.tokenLabel;
 // of that line and is borrowed from here. Only the empty case differs: a page
 // prints "unknown" where there is no model, while a bar segment with nothing to
 // say has to stay empty so it can hide itself.
-const short = (model) => (model ? dashboard.shortModel(model) : '');
+const short = (model) => (model ? shortModel(model) : '');
 
 // The formatting the sections are written against, shared with the segments so
 // a date or a cost reads the same in the bar, the tooltip and the page.

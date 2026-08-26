@@ -24,7 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { projectName, INTERESTING } = require('./indexer');
-const { costOf } = require('./pricing');
+const { costOf, tokenLabel } = require('./pricing');
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -1063,11 +1063,6 @@ function agentLabel(agent) {
 // may import it: anything two sides share has to sit on the vscode-free side of
 // that line. Most workflow agents land in the millions — what is counted is
 // every cache read they made.
-function tokenLabel(n) {
-    if (n < 1e6) return `${Math.round(n / 1000)}k`;
-    const m = n / 1e6;
-    return Number.isInteger(m) ? `${m}M` : `${m.toFixed(1)}M`;
-}
 
 // A node id has to be unique across the tree and stable between draws: VS Code
 // keys a row's expanded state on it. The run id is not enough — two attempts of
