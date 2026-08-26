@@ -671,7 +671,7 @@ function topRows(bucket, width, helpers, opts = {}) {
 const ELSEWHERE = (what) => [
     '',
     `  ${what} is an editor rather than a reading.`,
-    '  Open it in the VS Code extension: Claude dashnlines → the same tab.',
+    '  Open it in the VS Code extension: Dashnlines for Claude → the same tab.',
 ];
 
 // One list per tab, from the bucket `summarize` fills. `order` is what "top"

@@ -12,8 +12,8 @@ not published yet.
 
 ### Changed
 
-- The extension is named **Claude dashnlines**: the panel, the settings section,
-  the commands and the dashboard heading.
+- The extension is named **Dashnlines for Claude**: the panel, the settings
+  section, the commands and the dashboard heading.
 - The identifier, every `claudeStatusline.*` setting and every keybinding are
   unchanged; nothing to migrate.
 

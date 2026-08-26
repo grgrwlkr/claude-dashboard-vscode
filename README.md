@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="media/icon.png" width="96" alt="Claude dashnlines" />
+  <img src="media/icon.png" width="96" alt="Dashnlines for Claude" />
 </p>
 
-<h1 align="center">Claude dashnlines</h1>
+<h1 align="center">Dashnlines for Claude</h1>
 
 <p align="center">
   <b>Two things in one extension.</b><br/>
@@ -202,7 +202,7 @@ A few worked examples:
 ["$(server) {sessions}[ · {jobs} running][ · {openTasks} open]", "today ~{today}"]
 ```
 
-Outside the dashboard, **Claude dashnlines: List status-bar placeholders** shows
+Outside the dashboard, **Dashnlines for Claude: List status-bar placeholders** shows
 the same list in a quick pick and copies whichever you choose.
 
 </details>
@@ -381,7 +381,7 @@ wrote to disk stays. The extension reads that into three surfaces: a **Workflow
 runs** tree in the Activity Bar (run → phase → agent), the runs table on the
 dashboard, and the placeholders above.
 
-That tree is the last of four sections in the **Claude dashnlines** container.
+That tree is the last of four sections in the **Dashnlines for Claude** container.
 Above it: **Limits** — the week as the figure, the 5-hour and per-model windows
 as rows under it, whether spend is over or under plan, and when the window runs
 out at this rate; **Session** — the model, the context window with a breakdown of
@@ -472,8 +472,8 @@ The status-bar copy sits left of every segment, on whichever side
 `claudeStatusline.alignment` puts them, as `$(terminal)$(sparkle)` — the status
 bar takes codicons and nothing else. It is drawn before anything has been read,
 on a machine that has never run Claude Code included. Right-click the status bar
-and untick **Claude dashnlines: Open** to put it away; the segments are listed
-there as **Claude dashnlines 1**, **2**, and so on.
+and untick **Dashnlines for Claude: Open** to put it away; the segments are listed
+there as **Dashnlines for Claude 1**, **2**, and so on.
 
 **The session can be started on settings of your own**: the model, how hard it
 thinks, whether a second model advises it, and how it answers you. That is the

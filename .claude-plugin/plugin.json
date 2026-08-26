@@ -1,6 +1,6 @@
 {
   "name": "dashnlines",
-  "description": "The Claude dashnlines status line for the terminal: the weekly and 5-hour limits with a pace bar, context, spend and burn rate, written as templates.",
+  "description": "The Dashnlines for Claude status line for the terminal: the weekly and 5-hour limits with a pace bar, context, spend and burn rate, written as templates.",
   "author": {
     "name": "grgrwlkr"
   },

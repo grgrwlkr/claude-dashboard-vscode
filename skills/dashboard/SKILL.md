@@ -1,6 +1,6 @@
 ---
 name: dashboard
-description: Show the Claude dashnlines dashboard for this session — the weekly and 5-hour limits with a pace bar, what fills the context window, and what the session has cost. Use when the user asks "сколько потрачено", "покажи лимиты", "сколько осталось", "show my limits", "how much has this session cost", or asks for the dashboard.
+description: Show the Dashnlines for Claude dashboard for this session — the weekly and 5-hour limits with a pace bar, what fills the context window, and what the session has cost. Use when the user asks "сколько потрачено", "покажи лимиты", "сколько осталось", "show my limits", "how much has this session cost", or asks for the dashboard.
 ---
 
 # The dashboard, in this terminal

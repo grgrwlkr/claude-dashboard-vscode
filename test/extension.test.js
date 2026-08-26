@@ -122,8 +122,8 @@ test('the bar opens with a button left of every segment', () => {
         // The name is what the bar's own context menu offers to hide, beside
         // every other extension's — so it names this one rather than reading as
         // an entry of Claude Code's, which sits in that same list.
-        assert.equal(btn.name, 'Claude dashnlines: Open');
-        assert.deepEqual(segmentItems().map((i) => i.name), ['Claude dashnlines 1', 'Claude dashnlines 2']);
+        assert.equal(btn.name, 'Dashnlines for Claude: Open');
+        assert.deepEqual(segmentItems().map((i) => i.name), ['Dashnlines for Claude 1', 'Dashnlines for Claude 2']);
     } finally { run.dispose(); }
 });
 
@@ -2442,7 +2442,7 @@ test('a message with choices reaches the writer, which takes its own shell', asy
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
-// The rebrand to Claude dashnlines renamed what a user reads, and left the extension id
+// The rebrand renamed what a user reads and left the extension id alone,
 // and every `claudeStatusline.*` setting key alone. A half-applied rename is the
 // failure to catch: one forgotten title and the old product name sits in the
 // command palette next to the new one.
@@ -2457,7 +2457,8 @@ test('no user-facing string still carries the old product name', () => {
         ...Object.values(pkg.contributes.configuration.properties).map((p) => p.markdownDescription || p.description || ''),
     ];
     for (const s of strings) {
-        assert.ok(!/Claude Dashboard|Claude Statusline/.test(s), `old name in: ${String(s).slice(0, 70)}`);
+        assert.ok(!/Claude Dashboard|Claude Statusline|Claude dashnlines/.test(s),
+            `old name in: ${String(s).slice(0, 70)}`);
     }
 });
 

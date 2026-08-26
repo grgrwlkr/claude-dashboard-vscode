@@ -10,5 +10,5 @@
       "description": "Status line for Claude Code in the terminal, from the same templates as the VS Code status bar."
     }
   ],
-  "description": "Claude dashnlines: a status line and a dashboard for Claude Code in the terminal."
+  "description": "Dashnlines for Claude: a status line and a dashboard for Claude Code in the terminal."
 }

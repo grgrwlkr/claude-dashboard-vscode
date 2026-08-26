@@ -1530,7 +1530,7 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
 
     if (!panel) {
         panel = vscode.window.createWebviewPanel(
-            'claudeStatusline.dashboard', 'Claude dashnlines', vscode.ViewColumn.Active,
+            'claudeStatusline.dashboard', 'Dashnlines for Claude', vscode.ViewColumn.Active,
             { enableScripts: true, retainContextWhenHidden: true },
         );
         // A webview tab wears the generic editor glyph otherwise. This is the
@@ -1604,7 +1604,7 @@ function applyConfig(state) {
         // other extension's — so it says which extension, not just "Claude 4",
         // which read as one of Claude Code's own entries sitting right above it.
         // VS Code remembers a hidden item by id, so renaming unhides nothing.
-        bar.name = `Claude dashnlines ${i + 1}`;
+        bar.name = `Dashnlines for Claude ${i + 1}`;
         // Every segment opens the dashboard: each number raises the same question
         // — where did this go — and the answer is one page, not four destinations.
         bar.command = 'claudeStatusline.dashboard';
@@ -1628,7 +1628,7 @@ function applyConfig(state) {
     // and a switch of ours would be a second way to do that — worse, because it
     // would live somewhere the user is not right-clicking.
     const btn = vscode.window.createStatusBarItem('claudeStatusline.open', align, priority + 1);
-    btn.name = 'Claude dashnlines: Open';
+    btn.name = 'Dashnlines for Claude: Open';
     btn.text = '$(terminal)$(sparkle)';
     // The hover says where the session will land, because that is a setting now
     // and a button that says "in a tab" while opening a panel is worse than one
