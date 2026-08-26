@@ -19,6 +19,10 @@ not published yet.
 
 ### Added
 
+- A dashboard for the terminal: `bin/dashnlines`, with tabs, arrows to move
+  between them and `q` to leave.
+- `--print` draws one frame instead, for a pipe or a screenshot; `--tab` picks
+  which one.
 - A status line for the terminal: `node bin/statusline.js` as the `statusLine`
   command in `~/.claude/settings.json`.
 - Segment templates are passed as arguments to it; `--no-color` and `NO_COLOR`

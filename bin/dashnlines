@@ -1,0 +1,176 @@
+#!/usr/bin/env node
+//
+// The dashboard, in the terminal.
+//
+//   dashnlines              tabs, arrows to move between them, q to leave
+//   dashnlines --print      one static frame, for a pipe or a screenshot
+//   dashnlines --no-color   drop the escapes
+//   dashnlines --width 60   draw at a fixed width instead of the terminal's
+//
+// With a terminal attached it takes the alternate screen buffer, the way `vim`
+// and `htop` do, and gives it back on the way out. Without one — piped, or run
+// by something that reads its output — it prints a single frame instead, since
+// there is nobody there to press a key.
+//
+// The sections are the ones `status.js` builds for the status-bar hover and the
+// dashboard's Now tab, so all three say the same thing in the same words. What
+// differs is where the numbers come from: the status line is handed them on
+// stdin by the client, and this reads them off the disk the way the extension's
+// slow tick does.
+
+const path = require('node:path');
+const os = require('node:os');
+const u = require('../usage');
+const s = require('../session');
+const st = require('../status');
+const idx = require('../indexer');
+const tui = require('../tui');
+const term = require('../terminal');
+const { fmtCost, shortModel, tokenLabel } = require('../pricing');
+
+const argv = process.argv.slice(2);
+const flag = (name) => argv.includes(name);
+const value = (name, fallback) => {
+    const i = argv.indexOf(name);
+    return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+};
+
+// The same helpers both other renderers hand to status.js.
+const helpers = {
+    fmtCost,
+    fmtLeft: u.fmtLeft,
+    fmtAbs: (ts) => u.fmtAbs(ts),
+    fmtWhen: (ts) => u.fmtAbs(ts),
+    fmtDry: (ts) => u.fmtDry(ts),
+    fmtDuration: s.fmtDuration,
+    tok: tokenLabel,
+    shortModel,
+};
+
+// Where the extension keeps the index it built. Reading it is optional: the Now
+// tab stands on its own, and the rest say so when it is not there.
+const STORAGE = path.join(
+    os.homedir(), 'Library', 'Application Support', 'Code', 'User',
+    'globalStorage', 'grgrwlkr.claude-dashboard',
+);
+
+function collect() {
+    const now = Math.floor(Date.now() / 1000);
+    const d = term.collectFromDisk({
+        now,
+        sessionId: value('--session', process.env.CLAUDE_CODE_SESSION_ID || null),
+        cwd: value('--cwd', process.cwd()),
+    });
+    let summary = {};
+    try {
+        const index = idx.loadIndex(value('--storage', STORAGE));
+        if (index) summary = idx.summarize(index);
+    } catch { /* the tabs that need it say so */ }
+    return { d, summary, now };
+}
+
+function frames(width, colour) {
+    const { d, summary, now } = collect();
+    const sections = st.statusSections(d, helpers, { cacheStale: !u.readCache(now), cacheAt: null });
+    return tui.tabsFor({ sections, summary, helpers, width, colour, d });
+}
+
+const ALT_ON = '\u001b[?1049h\u001b[?25l';
+const ALT_OFF = '\u001b[?25h\u001b[?1049l';
+const HOME = '\u001b[H';
+const CLEAR_EOL = '\u001b[K';
+
+function printOnce(width, colour) {
+    const tabs = frames(width, colour);
+    const which = value('--tab', 'now');
+    const tab = tabs.find((t) => t.id === which) || tabs[0];
+    for (const line of tab.body) process.stdout.write(`${line}\n`);
+}
+
+function interactive(width, colour) {
+    let tabs = frames(width, colour);
+    let active = 0;
+    let scroll = 0;
+    let alive = true;
+
+    const size = () => ({
+        width: Number(value('--width', 0)) || process.stdout.columns || tui.DEFAULT_WIDTH,
+        height: process.stdout.rows || 24,
+    });
+
+    const draw = () => {
+        const { width: w, height: h } = size();
+        const footer = '←→ or 1-9 tabs · ↑↓ scroll · r reload · q quit';
+        const lines = tui.screen({
+            tabs, active, width: w, height: h, colour,
+            body: tabs[active].body, footer, scroll,
+        });
+        // Repaint in place rather than clearing first: a clear between frames is
+        // what a terminal renders as a flash.
+        process.stdout.write(HOME + lines.map((l) => l + CLEAR_EOL).join('\r\n'));
+    };
+
+    const leave = () => {
+        if (!alive) return;
+        alive = false;
+        // The terminal is not ours to keep. This runs on every path out —
+        // key, signal, or a throw — or the user is left with no cursor and a
+        // screen they cannot scroll.
+        try { process.stdin.setRawMode(false); } catch { /* not a tty any more */ }
+        process.stdin.pause();
+        process.stdout.write(ALT_OFF);
+    };
+
+    process.stdout.write(ALT_ON);
+    draw();
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (key) => {
+        // Ctrl-C by hand: raw mode delivers it as a byte rather than raising
+        // SIGINT, so without this the only way out of the alternate screen is
+        // to kill the process from another terminal.
+        if (key === 'q' || key === '\u0003' || key === '\u001b') { leave(); process.exit(0); }
+        const before = `${active}/${scroll}`;
+        if (key === '\u001b[C') active = tui.nextTab(active, 'right', tabs.length);
+        else if (key === '\u001b[D') active = tui.nextTab(active, 'left', tabs.length);
+        else if (/^[1-9]$/.test(key)) active = tui.nextTab(active, key, tabs.length);
+        else if (key === '\u001b[B' || key === 'j') scroll += 1;
+        else if (key === '\u001b[A' || key === 'k') scroll = Math.max(0, scroll - 1);
+        else if (key === ' ') scroll += (process.stdout.rows || 24) - 4;
+        else if (key === 'g') scroll = 0;
+        else if (key === 'r') { tabs = frames(size().width, colour); }
+        else return;
+        // A tab remembers nothing: moving away and back starts at the top,
+        // which is where the answer to "what is this tab" always is.
+        if (`${active}/${scroll}` !== before && key !== '\u001b[B' && key !== '\u001b[A' && key !== ' ') scroll = 0;
+        draw();
+    });
+
+    process.on('SIGINT', () => { leave(); process.exit(0); });
+    process.on('SIGTERM', () => { leave(); process.exit(0); });
+    process.on('exit', leave);
+    process.stdout.on('resize', draw);
+}
+
+function main() {
+    const width = Number(value('--width', 0)) || process.stdout.columns || tui.DEFAULT_WIDTH;
+    const colour = !flag('--no-color') && !process.env.NO_COLOR;
+    // No terminal, or asked for one frame: print and leave. `--print` is what a
+    // skill, a pipe or a screenshot wants.
+    if (flag('--print') || !process.stdout.isTTY || !process.stdin.isTTY) {
+        printOnce(width, colour);
+        return;
+    }
+    interactive(width, colour);
+}
+
+try {
+    main();
+} catch {
+    // Same contract as every read in this repository: a dash rather than a
+    // wrong number, and never a stack trace where a page was asked for.
+    try { process.stdout.write(ALT_OFF); } catch { /* nothing left to restore */ }
+    process.exitCode = 0;
+}
