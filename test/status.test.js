@@ -375,3 +375,35 @@ test('credits are stated as billed, and as spent when they have run out', () => 
     const off = status.statusSections(none, helpers, {}).find((x) => x.id === 'limits');
     assert.ok(!notes(off).some((n) => n.label === 'Credits'));
 });
+
+// --- the verdict follows the weighted plan --------------------------------
+// `plan` is a fact about the clock and stays one. What spend is judged against
+// is `planW`, the same window read through the hours the person actually works
+// in. Where no profile exists the two are equal and none of this shows.
+test('spend is judged against the weighted plan, not the elapsed share', () => {
+    const weighted = {
+        ...data,
+        pace: { ...data.pace, plan: 61, planW: 48, weighted: true },
+    };
+    const [limits] = status.statusSections(weighted, helpers, {});
+    const pills = limits.blocks.find((b) => b.kind === 'pills');
+    // 52% spent against a plan of 48% is 4% over — against the elapsed 61% it
+    // would have read "9% under", the opposite verdict in the opposite colour.
+    assert.ok(pills.items.some((p) => p.text === '4% over'), JSON.stringify(pills.items));
+    assert.ok(!pills.items.some((p) => /under/.test(p.text)));
+});
+
+test('the pace note names the plan and keeps the clock beside it', () => {
+    const weighted = {
+        ...data,
+        pace: { ...data.pace, plan: 61, planW: 48, weighted: true },
+    };
+    const pace = notes(status.statusSections(weighted, helpers, {})[0]).find((n) => n.label === 'Pace');
+    assert.match(pace.text, /^52% spent, plan 48% \(window 61% elapsed\)$/);
+});
+
+test('without a profile the pace note is word for word what it was', () => {
+    const flat = { ...data, pace: { ...data.pace, planW: 61, weighted: false } };
+    const pace = notes(status.statusSections(flat, helpers, {})[0]).find((n) => n.label === 'Pace');
+    assert.match(pace.text, /^52% spent, 61% of the window elapsed$/);
+});

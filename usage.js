@@ -167,7 +167,47 @@ function creditsOf(payload) {
 // a date past the reset is not a warning about anything. The tooltip uses
 // `dryAt`, because "you will not run out" is far more convincing when it says
 // when you would have.
-function pace(weekly, now) {
+// The share of a window's spend that an evenly-burning week would have used by
+// now is `elapsed / WEEK` — and it is wrong for anyone whose work has a rhythm.
+// The indexer already keeps the one fact that fixes it: how much was spent in
+// each hour of the day. Integrating that profile over the window turns "how much
+// time has passed" into "how much of the way you actually work has passed",
+// which is what a plan is supposed to mean.
+//
+// The profile is the user's own history, never a constant: a night owl and an
+// office day produce opposite curves, and hard-coding either would be shipping
+// one person's schedule to everybody. With no profile — a fresh install, an
+// index that has not run — this is the linear plan, unchanged.
+function hourWeight(from, to, hourly) {
+    let w = 0;
+    for (let t = from; t < to;) {
+        const d = new Date(t * 1000);
+        const hourStart = Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime() / 1000);
+        const next = Math.min(to, hourStart + 3600);
+        w += (hourly[d.getHours()] || 0) * (next - t) / 3600;
+        t = next > t ? next : t + 3600;   // a DST fold must not stall the loop
+    }
+    return w;
+}
+
+/**
+ * Where the plan stands at `now`, as a whole percent, weighted by an hour-of-day
+ * spend profile. `hourly` maps 0..23 to any consistent unit — token counts,
+ * costs, message counts all work, since only the ratios matter.
+ *
+ * Returns null when there is no profile to weight by, rather than quietly
+ * handing back the linear plan: the caller has to know which of the two it got,
+ * and the alternative was computing the same integral twice to find out.
+ */
+function weightedPlan(start, end, now, hourly) {
+    if (!hourly) return null;
+    const total = hourWeight(start, end, hourly);
+    if (!(total > 0)) return null;
+    const at = Math.min(end, Math.max(start, now));
+    return Math.floor(hourWeight(start, at, hourly) * 100 / total);
+}
+
+function pace(weekly, now, hourly) {
     if (!weekly || weekly.reset <= 0) return null;
     const elapsed = Math.min(WEEK, Math.max(0, WEEK - (weekly.reset - now)));
     const plan = Math.floor((elapsed * 100) / WEEK);
@@ -188,7 +228,16 @@ function pace(weekly, now) {
     // percent. One flag rather than three copies of the arithmetic: the bar, the
     // drift field and the week bar all ask this question.
     const settled = elapsed >= DRY_MIN_ELAPSED && weekly.pct >= DRY_MIN_PCT;
-    return { elapsed, plan, dryAt, beforeReset, settled, dry: beforeReset ? dryAt : null };
+    // `plan` stays what it always was — the share of the window behind us, which
+    // is a fact about the clock and is printed as one. `planW` is the same
+    // question asked of the user's own rhythm, and it is what spend should be
+    // judged against. Without a profile the two are the same number, so nothing
+    // downstream has to know which it is looking at.
+    const weighted = weightedPlan(weekly.reset - WEEK, weekly.reset, now, hourly);
+    return {
+        elapsed, plan, planW: weighted === null ? plan : weighted, weighted: weighted !== null,
+        dryAt, beforeReset, settled, dry: beforeReset ? dryAt : null,
+    };
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -271,7 +320,7 @@ function bar(fact, plan) {
 
 function barText(weekly, pc, nowMs = Date.now()) {
     let text = `✻ 7d ${weekly.pct}%`;
-    if (pc) text += ` ${bar(weekly.pct, pc.plan)}`;
+    if (pc) text += ` ${bar(weekly.pct, Number.isFinite(pc.planW) ? pc.planW : pc.plan)}`;
     if (pc?.dry) text += ` dry ${fmtDry(pc.dry, nowMs)}`;
     return text;
 }
@@ -279,5 +328,5 @@ function barText(weekly, pc, nowMs = Date.now()) {
 module.exports = {
     CACHE, STAMP, WEEK, STAMP_TTL, CACHE_TTL, BAR_WIDTH,
     mtime, parseToken, readToken, refreshUsage, touchStamp, stampExpired, readCache,
-    isoToTs, limitsOf, creditsOf, pace, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText, dayLabel, WEEKDAYS,
+    isoToTs, limitsOf, creditsOf, pace, weightedPlan, hourWeight, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText, dayLabel, WEEKDAYS,
 };

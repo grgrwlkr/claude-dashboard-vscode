@@ -587,12 +587,17 @@ function collectSlow(state) {
     d.weekly = lim && lim.weekly ? lim.weekly : null;
     d.session = lim && lim.session ? lim.session : null;
     d.scoped = lim ? lim.scoped : [];
-    d.pace = d.weekly ? u.pace(d.weekly, d.now) : null;
+    // The plan follows the user's own rhythm rather than the clock: the hour-of-
+    // day profile comes off the percentages already on disk, so it costs a read
+    // of a file this function writes to anyway, and it accounts for every
+    // machine on the account rather than only the transcripts on this one.
+    const hourly = state.storageDir ? hist.hourlyProfile(hist.readHistory(state.storageDir)) : null;
+    d.pace = d.weekly ? u.pace(d.weekly, d.now, hourly) : null;
     // Before the window has settled the plan is 0% and every cell of spend is a
     // cell "ahead of schedule": the bar opened a week red over one percent.
     // Comparing spend against itself draws the fill and nothing else.
     d.bar = d.weekly && d.pace
-        ? u.bar(d.weekly.pct, d.pace.settled ? d.pace.plan : d.weekly.pct) : '';
+        ? u.bar(d.weekly.pct, d.pace.settled ? (Number.isFinite(d.pace.planW) ? d.pace.planW : d.pace.plan) : d.weekly.pct) : '';
     // Every window in this VS Code session records the same reading, and only
     // the first one to see a change writes a row — the rest find it unchanged.
     // The endpoint keeps no history, so if nobody writes it down, the shape of

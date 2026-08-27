@@ -130,6 +130,53 @@ const RESET_SLACK_S = 300;
  * two different weeks comparable on one chart: the x axis is "day of window",
  * not a date.
  */
+/**
+ * Spend per hour of the local day, read off the percentages already recorded.
+ *
+ * The status bar's plan used to be the share of the window that had elapsed,
+ * which assumes an even burn — and nobody burns evenly. This is the correction:
+ * how much of the limit actually goes in each hour of the day, so a plan can
+ * follow the rhythm instead of the clock. The percentages are the right source
+ * rather than the transcripts: same unit as the plan, already account-wide (a
+ * second machine's spend shows up here and in no local transcript), and no
+ * indexing pass to pay for.
+ *
+ * Only rises inside one window count. A reset is a fall of ninety-odd points and
+ * would otherwise read as the quietest hour of the day, which is exactly the
+ * hour it tends to happen in. Returns null when nothing has been recorded yet —
+ * the caller keeps the linear plan rather than trusting a profile of noise.
+ */
+function hourlyProfile(rows) {
+    if (!rows || rows.length < 2) return null;
+    const out = {};
+    for (let h = 0; h < 24; h++) out[h] = 0;
+    let total = 0;
+    const sorted = [...rows].sort((a, b) => a.at - b.at);
+    for (let i = 1; i < sorted.length; i++) {
+        const a = sorted[i - 1], b = sorted[i];
+        if (!a.reset || !b.reset || Math.abs(a.reset - b.reset) > RESET_SLACK_S) continue;
+        const rise = b.weekly - a.weekly;
+        if (!(rise > 0)) continue;
+        total += rise;
+        // Two readings can share a timestamp — it happens a dozen times in the
+        // history on this machine. There is no interval to spread across, so the
+        // rise belongs to the hour it was read in, and this returns before the
+        // loop rather than sitting after it as a second path to the same case.
+        if (b.at <= a.at) { out[new Date(b.at).getHours()] += rise; continue; }
+        // A rise is reported at the end of the interval but was earned across
+        // it, so it is spread over the hours the interval actually covered.
+        const span = b.at - a.at;
+        for (let t = a.at; t < b.at;) {
+            const d = new Date(t);
+            const hourStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
+            const next = Math.min(b.at, hourStart + 3600e3);
+            out[d.getHours()] += rise * (next - t) / span;
+            t = next > t ? next : t + 3600e3;
+        }
+    }
+    return total > 0 ? out : null;
+}
+
 function weeklyWindows(rows, limit = 6) {
     const windows = [];
     for (const r of rows) {
@@ -242,6 +289,6 @@ function sessionSeries(rows, sinceMs = 0) {
 
 module.exports = {
     FILE, MARKS, HEARTBEAT_MS, MAX_ROWS, WEEK_MS,
-    historyPath, readHistory, recordLimits, pointOf, weeklyWindows, sessionSeries,
+    historyPath, readHistory, recordLimits, pointOf, weeklyWindows, sessionSeries, hourlyProfile,
     marksPath, readMarks, recordMark, markFor, ranOutAt,
 };

@@ -179,3 +179,60 @@ test('the moment is recovered from the readings, and refused when they start too
     assert.equal(h.ranOutAt(late, RESET), null);
     assert.equal(h.ranOutAt([], RESET), null);
 }));
+
+// --- hour-of-day spend profile -------------------------------------------
+// The plan the status bar compares spend against should follow the rhythm the
+// person actually works to. The percentages already on disk are the cheapest
+// possible source for it: same unit as the plan, already account-wide, and no
+// transcript pass.
+test('hourlyProfile: counts each rise under the local hour it happened in', () => {
+    const at = (h, m = 0) => new Date(2026, 7, 10, h, m, 0).getTime();
+    const reset = Math.floor(new Date(2026, 7, 13, 15, 0, 0).getTime() / 1000);
+    const rows = [
+        { at: at(2), weekly: 10, reset },
+        { at: at(3), weekly: 16, reset },     // +6 in the 02:00 hour
+        { at: at(4), weekly: 20, reset },     // +4 in the 03:00 hour
+        { at: at(14), weekly: 21, reset },    // +1 earned somewhere across ten hours
+    ];
+    const p = h.hourlyProfile(rows);
+    assert.equal(p[2], 6);
+    assert.equal(p[3], 4);
+    // A rise is reported when it is noticed, not when it happened, so a long
+    // gap spreads rather than landing on its first hour. It costs little to get
+    // this wrong either way: measured on the history on this machine, the median
+    // gap between readings is 3 minutes, the 90th percentile 12, and intervals
+    // longer than two hours carry 4.5% of all the rise there is.
+    assert.ok(Math.abs(p[4] - 0.1) < 1e-9);
+    assert.ok(Math.abs(p[13] - 0.1) < 1e-9);
+    assert.equal(p[14], 0);
+});
+
+test('hourlyProfile: a reset is not a spend of minus ninety percent', () => {
+    const at = (d, hh) => new Date(2026, 7, d, hh, 0, 0).getTime();
+    const r1 = Math.floor(new Date(2026, 7, 13, 15, 0, 0).getTime() / 1000);
+    const r2 = r1 + 7 * 86400;
+    const rows = [
+        { at: at(13, 14), weekly: 95, reset: r1 },
+        { at: at(13, 16), weekly: 2, reset: r2 },   // new window: a drop, not a rise
+        { at: at(13, 17), weekly: 5, reset: r2 },   // +3 in the 16:00 hour
+    ];
+    const p = h.hourlyProfile(rows);
+    assert.equal(p[16], 3);
+    assert.ok(Object.values(p).every((v) => v >= 0));
+});
+
+test('hourlyProfile: too little history returns nothing, so the plan stays linear', () => {
+    assert.equal(h.hourlyProfile([]), null);
+    assert.equal(h.hourlyProfile(null), null);
+});
+
+test('hourlyProfile: two readings sharing a timestamp are counted once', () => {
+    const at = new Date(2026, 7, 10, 9, 0, 0).getTime();
+    const reset = Math.floor(new Date(2026, 7, 13, 15, 0, 0).getTime() / 1000);
+    const p = h.hourlyProfile([
+        { at, weekly: 10, reset },
+        { at, weekly: 14, reset },
+    ]);
+    assert.equal(p[9], 4);
+    assert.equal(Object.values(p).reduce((a, b) => a + b, 0), 4);
+});

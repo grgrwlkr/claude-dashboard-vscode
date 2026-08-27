@@ -251,3 +251,83 @@ test('a window too young to judge says so', () => {
     assert.equal(u.pace({ pct: 1, reset: NOW + Math.round(0.5 * WEEK) }, NOW).settled, false, 'under 2% spent');
     assert.equal(u.pace({ pct: 5, reset: NOW + Math.round(0.5 * WEEK) }, NOW).settled, true);
 });
+
+// --- night-weighted plan -------------------------------------------------
+// The linear plan assumes an even burn. Nobody burns evenly: the profile the
+// indexer already keeps (spend per hour of the day) says when the work actually
+// happens, and the plan should follow it. These tests use a deliberately extreme
+// profile — everything at 02:00, nothing anywhere else — because a shape that
+// survives the extreme survives the real one.
+const ALL_AT_2AM = Object.fromEntries(Array.from({ length: 24 }, (_, h) => [h, h === 2 ? 100 : 0]));
+const FLAT = Object.fromEntries(Array.from({ length: 24 }, (_, h) => [h, 10]));
+
+test('weightedPlan: a flat profile is the linear plan', () => {
+    const start = new Date(2026, 7, 1, 0, 0, 0).getTime() / 1000;
+    for (const days of [1, 3, 6]) {
+        const now = start + days * 86400;
+        assert.equal(u.weightedPlan(start, start + WEEK, now, FLAT), Math.floor(days * 100 / 7));
+    }
+    // Whole days are the easy case — floor hides a lot there. Mid-afternoon on
+    // day two is where an integral that drifts would show it.
+    const mid = start + 36 * 3600;
+    assert.equal(u.weightedPlan(start, start + WEEK, mid, FLAT), Math.floor(36 * 100 / 168));
+});
+
+test('weightedPlan: with the spend at night, the plan jumps overnight and idles by day', () => {
+    // Window opens at midnight Sat 01.08. The 02:00 hour is the only one that
+    // spends, so each night moves the plan by exactly one seventh.
+    const start = new Date(2026, 7, 1, 0, 0, 0).getTime() / 1000;
+    const end = start + WEEK;
+    // 01:00 on day one — the night's hour has not happened yet.
+    assert.equal(u.weightedPlan(start, end, start + 3600, ALL_AT_2AM), 0);
+    // 03:00 — one of seven spending hours is behind us.
+    assert.equal(u.weightedPlan(start, end, start + 3 * 3600, ALL_AT_2AM), 14);
+    // Noon of the same day: still one night gone, the plan has not moved.
+    assert.equal(u.weightedPlan(start, end, start + 12 * 3600, ALL_AT_2AM), 14);
+    // Half past two on day one: half of that hour's weight.
+    assert.equal(u.weightedPlan(start, end, start + 2.5 * 3600, ALL_AT_2AM), 7);
+});
+
+test('weightedPlan: with nothing to weight by it says so rather than guessing', () => {
+    const start = new Date(2026, 7, 1, 0, 0, 0).getTime() / 1000;
+    const empty = Object.fromEntries(Array.from({ length: 24 }, (_, h) => [h, 0]));
+    assert.equal(u.weightedPlan(start, start + WEEK, start + 86400, empty), null);
+    assert.equal(u.weightedPlan(start, start + WEEK, start + 86400, null), null);
+    // pace() is where that null turns back into the linear plan.
+    const pc = u.pace({ pct: 10, reset: start + WEEK }, start + 86400, empty);
+    assert.equal(pc.planW, pc.plan);
+    assert.equal(pc.weighted, false);
+});
+
+test('pace: without a profile the plan stays exactly what it was', () => {
+    const pc = u.pace({ pct: 10, reset: NOW + WEEK - 2 * 86400 }, NOW);
+    assert.equal(pc.planW, pc.plan);
+    assert.equal(pc.weighted, false);
+});
+
+test('pace: a night profile moves planW off the linear plan and drift follows it', () => {
+    // Two days into the window, at noon — the linear plan says 28%, but with the
+    // spend at 02:00 only two of seven nights have passed, so the honest plan is
+    // the same 28%: nights and days line up on whole days. Pick a moment inside
+    // the night instead, where the two must differ.
+    const start = new Date(2026, 7, 1, 0, 0, 0).getTime() / 1000;
+    const now = start + 2 * 86400 + 2.5 * 3600;   // 02:30 on day three
+    const pc = u.pace({ pct: 30, reset: start + WEEK }, now, ALL_AT_2AM);
+    assert.equal(pc.weighted, true);
+    assert.equal(pc.plan, Math.floor((now - start) * 100 / WEEK));   // 28% linear
+    assert.equal(pc.planW, 35);                                       // 2.5 of 7 nights
+    assert.notEqual(pc.planW, pc.plan);
+});
+
+test('the glyph bar draws spend against the weighted plan too', () => {
+    // 52% spent. Against the elapsed 61% that is underspend and the bar shows
+    // plan cells the spending has not reached; against the weighted 48% it is
+    // overspend and must be hatched. One number, two opposite pictures — the bar
+    // has to agree with the verdict beside it.
+    const weekly = { pct: 52, reset: NOW + 2 * 86400 };
+    const under = u.barText(weekly, { plan: 61, planW: 61, weighted: false }, NOW * 1000);
+    const over = u.barText(weekly, { plan: 61, planW: 48, weighted: true }, NOW * 1000);
+    assert.ok(!under.includes('▓'), under);
+    assert.ok(over.includes('▓'), over);
+    assert.notEqual(under, over);
+});

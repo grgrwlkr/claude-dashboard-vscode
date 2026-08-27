@@ -107,7 +107,12 @@ function limits(d, h, env) {
     if (pc && pc.settled && lim.weekly) {
         // Pace as a sentence: spend against plan is a comparison, and a
         // comparison squeezed into a row label is what was hard to read.
-        const diff = lim.weekly.pct - pc.plan;
+        // Against `planW`, not `plan`: the clock says how much of the window is
+        // gone, the profile says how much of the WORK is gone, and only the
+        // second one can be overspent. On a night-shaped week the two disagree
+        // by enough to flip the verdict and its colour.
+        const planned = Number.isFinite(pc.planW) ? pc.planW : pc.plan;
+        const diff = lim.weekly.pct - planned;
         // "behind", not "under": the track header says the same thing in the
         // same words, and a verdict assembled in two files may not drift.
         // The same two words the week track uses, and the same colours: spending
@@ -123,7 +128,12 @@ function limits(d, h, env) {
             kind: 'note',
             tone: 'plain',
             label: 'Pace',
-            text: `${lim.weekly.pct}% spent, ${pc.plan}% of the window elapsed`,
+            // Both facts, because they answer different questions: what the
+            // plan expected by now, and how much of the week is behind us.
+            // Identical without a profile, so the sentence stays the old one.
+            text: pc.weighted
+                ? `${lim.weekly.pct}% spent, plan ${planned}% (window ${pc.plan}% elapsed)`
+                : `${lim.weekly.pct}% spent, ${pc.plan}% of the window elapsed`,
         });
 
         // The forecast is stated even when it lands past the reset. "You will
