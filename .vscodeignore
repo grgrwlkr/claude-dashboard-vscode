@@ -40,9 +40,18 @@ media/**
 !media/open-claude-dark.svg
 !media/open-claude-light.svg
 
-# The terminal status line and the module behind it. Claude Code runs the script
-# from the repository clone: the installed path carries the version number, so a
-# `statusLine` command pointing into an installed .vsix breaks on the next
-# update. The editor never loads either file.
+# The terminal half, whole. Claude Code runs these from the plugin, whose path
+# carries its own version, so a `statusLine` command pointing into an installed
+# .vsix breaks on the next update. The editor loads none of them — and shipping
+# `tui.js` without `terminal.js`, which it requires, leaves a module that throws
+# the first time anything asks for it.
 bin/**
 terminal.js
+tui.js
+
+# The plugin manifests and the skill: instructions for Claude Code, addressed to
+# whoever installs the plugin from the repository, not to whoever installs this
+# extension. `.claude/**` above is excluded for the same reason — and once did
+# ship, in 0.30.0.
+.claude-plugin/**
+skills/**

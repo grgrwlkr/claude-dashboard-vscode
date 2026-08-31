@@ -311,3 +311,17 @@ test('every topic a field can declare has a number that colours it', () => {
         assert.equal(typeof seg.COLOUR_BY[topic]({}), 'number', `topic ${topic} answers with a number`);
     }
 });
+
+test('drift is measured against the plan the panel shows, not the clock', () => {
+    // The screenshot that found this: 4% spent, 5% of the week elapsed, plan 7%.
+    // The panel said "3% under" while the status bar said "-1%" — the same
+    // session, two numbers, because the bar was still subtracting the clock.
+    const d = {
+        weekly: { pct: 4, reset: 0 },
+        pace: { plan: 5, planW: 7, weighted: true, settled: true },
+    };
+    assert.equal(seg.fields().drift.get(d), '-3%');
+    // No profile, no change: the clock is the plan and the old number stands.
+    const flat = { weekly: { pct: 4, reset: 0 }, pace: { plan: 5, planW: 5, weighted: false, settled: true } };
+    assert.equal(seg.fields().drift.get(flat), '-1%');
+});

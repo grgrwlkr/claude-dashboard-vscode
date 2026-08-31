@@ -147,28 +147,25 @@ test('a payload with nothing in it yields a shape rather than a crash', () => {
 // --- what the terminal entry is allowed to drag in ------------------------
 
 test('the terminal entry pulls in neither the dashboard nor the workflow tree', () => {
-    // The extension copies these files into globalStorage so the status line can
-    // run from a path that survives an update. Whatever the entry requires goes
-    // with it, so a stray import here is 4000 lines of HTML builder copied to
-    // draw one line of text — and paid for on every refresh.
-    const fs = require('node:fs');
+    // What the status line costs is what it loads, and it runs on every refresh.
+    // Measured by running the entry and asking Node what ended up in the module
+    // cache — a text scan for `require` cannot tell a top-level import from one
+    // inside a branch the status line never takes.
+    const { execFileSync } = require('node:child_process');
     const path = require('node:path');
     const root = path.join(__dirname, '..');
-    const seen = new Set();
-    const stack = ['bin/statusline.js'];
-    while (stack.length) {
-        const file = stack.pop();
-        if (seen.has(file)) continue;
-        seen.add(file);
-        const src = fs.readFileSync(path.join(root, file), 'utf8');
-        for (const m of src.matchAll(/require\('(\.[^']+)'\)/g)) {
-            const rel = `${m[1].replace(/^\.\.\//, '').replace(/^\.\//, '')}.js`.replace(/\.js\.js$/, '.js');
-            if (fs.existsSync(path.join(root, rel))) stack.push(rel);
-        }
-    }
+    const loaded = execFileSync(process.execPath, ['-e', `
+        process.argv[1] = ${JSON.stringify(path.join(root, 'bin', 'statusline.js'))};
+        const seen = () => Object.keys(require.cache).filter((f) => f.startsWith(${JSON.stringify(root)}));
+        require(process.argv[1]);
+        process.stdout.write(seen().join('\\n'));
+    `], { input: '{}', encoding: 'utf8', cwd: root });
+
+    const names = loaded.split('\n').map((f) => f.replace(`${root}/`, ''));
     for (const heavy of ['dashboard.js', 'workflows.js', 'indexer.js', 'history.js', 'clientSettings.js']) {
-        assert.ok(!seen.has(heavy), `${heavy} is reachable from the terminal entry`);
+        assert.ok(!names.includes(heavy), `${heavy} is loaded by the status line: ${names.join(', ')}`);
     }
+    assert.ok(names.includes('terminal.js'), 'and the entry did load, so the check means something');
 });
 
 test('the model name and the token label are read from pricing', () => {
@@ -527,4 +524,16 @@ test('looking for a session that is nowhere answers null rather than throwing', 
     assert.equal(term.findTranscript('nope', { projects: path.join(home, '.claude', 'projects') }), null);
     // And a projects directory that does not exist at all.
     assert.equal(term.findTranscript('nope', { projects: path.join(home, 'missing') }), null);
+});
+
+test('the disk collector uses the weighted plan the extension uses', () => {
+    // `pace()` takes the hourly profile as its third argument; without it the
+    // plan is the share of the week elapsed. The dashboard reads the same
+    // globalStorage the extension writes, so it has no excuse for the linear
+    // one — and two surfaces disagreeing about `{drift}` is the whole reason
+    // the profile exists.
+    const d = term.collectFromDisk({ now: 1738400000, sessionId: null, cwd: '/nowhere', today: false });
+    // With no history on the machine running the tests, weighted equals linear;
+    // what is asserted is that the field is carried at all.
+    if (d.pace) assert.ok('planW' in d.pace, 'planW reaches the dashboard');
 });

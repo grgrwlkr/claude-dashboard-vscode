@@ -30,7 +30,8 @@
   <a href="#user-content-install"><b>Install</b></a> ·
   <a href="#user-content-configuring-the-bar"><b>Configure the bar</b></a> ·
   <a href="#user-content-the-dashboard"><b>Dashboard</b></a> ·
-  <a href="#user-content-workflow-runs"><b>Workflows</b></a>
+  <a href="#user-content-workflow-runs"><b>Workflows</b></a> ·
+  <a href="#user-content-in-the-terminal"><b>Terminal</b></a>
   <br/>
   <a href="#user-content-privacy"><b>Privacy</b></a> ·
   <a href="#user-content-settings-and-commands"><b>Settings</b></a> ·
@@ -51,7 +52,9 @@
 This extension reads Claude Code's own state on this machine — the transcripts,
 sessions and settings under `~/.claude`, plus the OAuth usage endpoint — and
 renders it as a status bar you write yourself and a dashboard of 24 tabs over
-every transcript on the machine.
+every transcript on the machine. The same figures are available outside the
+editor: a Claude Code plugin carries the dashboard and a status line for the
+terminal.
 
 VS Code's Claude Code panel runs no status line: the `statusLine` command in
 `~/.claude/settings.json` is never executed, and the requests for parity with
@@ -73,6 +76,7 @@ workflow-run spend appears in no other view.
 | **💸 Spend** | Session spend with a burn rate, today across every project, and a dashboard that breaks it down by day, model, project, branch, tool and skill. Estimated from public rates; usage credits are real money and are labelled as such. |
 | **🤖 Subagents and workflows** | Subagents and workflow agents write their own transcripts. Each gets a tree, a table and a live row. |
 | **🎛️ A bar you write yourself** | 45 placeholders, optional groups that vanish when empty, 11 ready-made bars, and an editor with a live preview. |
+| **⌨️ Outside the editor** | A Claude Code plugin: the dashboard as a terminal command with all 24 tabs, and a status line built from the same templates. See [In the terminal](#user-content-in-the-terminal). |
 | **🔒 Local by default** | Everything is read from your own disk. One request leaves the machine, the limits, and it has a switch; two further opt-ins are off until you turn them on. No telemetry. See [Privacy](#user-content-privacy). |
 
 <a name="dark-and-light"></a><a name="user-content-dark-and-light"></a>
@@ -405,6 +409,67 @@ on this machine the two are about thirty times apart.
 Right-click a run to open the workflow script it was launched from, or to copy
 its `runId` together with that path, which is what `resumeFromRunId` needs to
 replay a stage that failed. There is deliberately no way to kill a run from here.
+
+<a name="in-the-terminal"></a><a name="user-content-in-the-terminal"></a>
+
+## ⌨️ In the terminal
+
+The same figures outside the editor, as a Claude Code plugin. The repository is
+its own marketplace:
+
+```
+/plugin marketplace add grgrwlkr/claude-dashboard-vscode
+/plugin install dashnlines@dashnlines
+```
+
+**A dashboard with the page's six sections and all 24 tabs.** Run it in a
+terminal of its own:
+
+```bash
+dashnlines
+```
+
+| key | |
+| --- | --- |
+| `←` `→` | the next tab, crossing into the next section |
+| `Tab` `⇧Tab` | the next section |
+| `1`–`9` | a tab of this section |
+| `↑` `↓` `space` | scroll |
+| `r` | re-read |
+| `q` `Ctrl-C` | leave |
+
+Twelve tabs are drawn from the usage index: Overview, Sessions, Projects,
+Branches, Agents, Tools & MCP, Files, Skills, Content, Models & effort, Friction
+and Limits. Build the index with `dashnlines --reindex`. Settings and Launch stay
+in the editor; the rest say so when opened.
+
+| flag | |
+| --- | --- |
+| `--print` | one frame instead of the screen, for a pipe or a screenshot |
+| `--tab <id>` | which tab `--print` draws |
+| `--width N` | a fixed width instead of the terminal's |
+| `--no-color` | drop the ANSI escapes |
+| `--session ID` | describe another session |
+
+**`/dashnlines:dashboard`** prints the same frame inside a Claude Code session.
+
+**A status line for the terminal**, from the same templates as the status bar.
+In `~/.claude/settings.json`:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "S=$(ls -d \"$HOME\"/.claude/plugins/cache/dashnlines/dashnlines/*/bin/statusline.js 2>/dev/null | sort -V | tail -1); if [ -f \"$S\" ] && command -v node >/dev/null 2>&1; then exec node \"$S\"; else exec \"$HOME/.claude/statusline.sh\"; fi"
+}
+```
+
+The plugin cache carries the plugin's version in its path, so the command
+resolves it at run time and falls back to your previous `statusline.sh` when no
+plugin is installed.
+
+Segments are passed as arguments; `NO_COLOR` and `--no-color` drop the escapes.
+The client hands it the context window, both rate limits and the session's cost
+on stdin, so it opens no file and reads no credential.
 
 <a name="privacy"></a><a name="user-content-privacy"></a>
 

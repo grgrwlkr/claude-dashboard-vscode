@@ -513,6 +513,13 @@ ul.log li { margin: 2px 0; opacity: .85; }
   background: var(--vscode-foreground); }
 .wk-dry { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
   background: var(--vscode-charts-red, hsl(0 60% 57%)); }
+/* The plan when it no longer stands on the now line. Both marks keep full
+   weight and are told apart by colour, not by thickness: drawn thin and washed
+   out, the clock read as a seam in the fill — a line you notice only once
+   somebody points at it — which is how it was reported the first time. */
+.wk-now.paired { background: var(--vscode-foreground); }
+.wk-plan { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+  background: var(--vscode-charts-purple, hsl(265 60% 66%)); }
 /* Two facts, one at each end. The middle one — the forecast in words — is a pill
    now, and the rule that centred it was still pointing at whatever sat second,
    which is the right-hand fact: it kept `flex: 1` and only lost the alignment

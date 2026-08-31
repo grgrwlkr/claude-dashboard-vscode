@@ -85,9 +85,12 @@ function limits(d, h, env) {
             value: '7 days',
             sub: `${h.fmtLeft(lim.weekly.reset, now)} left · resets ${h.fmtAbs(lim.weekly.reset)}`,
             pct: lim.weekly.pct,
-            // The plan is where an evenly spent week would be by now, and it is
-            // the only mark on this track that is not the spend itself.
-            plan: pc && pc.settled ? pc.plan : null,
+            // Where the spend was allowed to be by now — the same plan the
+            // verdict below is measured against, weighted by the hours the work
+            // actually happens in. A mark drawn from the clock while the words
+            // beside it judged against the profile put two answers in one
+            // tooltip. The only mark on this track that is not the spend itself.
+            plan: pc && pc.settled ? (Number.isFinite(pc.planW) ? pc.planW : pc.plan) : null,
             chips: [],
         });
     } else if (lim.session) {
@@ -467,6 +470,11 @@ function statusMetrics(d = {}) {
         out.weekly = {
             pct: w.pct,
             plan: d.pace ? d.pace.plan : null,
+            // Both, because they answer different questions and the rail draws
+            // both marks: `plan` is the share of the window behind us, `planW`
+            // is where an evenly-worked week would have the spend by now.
+            planW: d.pace ? d.pace.planW : null,
+            weighted: Boolean(d.pace && d.pace.weighted),
             now: Math.max(0, Math.min(1, (d.now - start) / WEEK_S)),
             dry: d.pace ? pos(d.pace.dryAt) : null,
             beforeReset: Boolean(d.pace && d.pace.beforeReset),

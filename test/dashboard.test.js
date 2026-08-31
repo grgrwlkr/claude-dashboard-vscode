@@ -2294,3 +2294,60 @@ test('every theme font variable carries a fallback of its own', () => {
     const bare = [...css.matchAll(/var\(--vscode-[a-zA-Z-]*font-family\)/g)].map((m) => m[0]);
     assert.deepEqual(bare, [], `${bare.length} font variables have no fallback`);
 });
+
+// --- the plan gets its own mark ------------------------------------------
+// The rail used to carry one mark meaning two things: where the week stands and
+// where the spend was allowed to be. Those are the same number only for someone
+// who burns evenly. With a profile they part, and the rail draws both — the
+// clock thin and grey, the plan in its own colour, owning the zone.
+const weighted = (over = {}) => week({ planW: 68, weighted: true, ...over });
+
+test('the plan mark stands on the weighted plan, not on the now line', () => {
+    const html = db.paceTrack(weighted());
+    // Four days of seven is 57.14% of the rail; the plan is at 68%.
+    assert.equal(Math.round(leftOf(html, 'wk-now')), 57);
+    assert.equal(leftOf(html, 'wk-plan'), 68);
+});
+
+test('the zone is measured to the plan, which flips the verdict', () => {
+    // 62% spent. Against the clock at 57.14% that is 5% over and red; against a
+    // plan of 68% it is 6% under and green. The rail has to agree with the pill.
+    const html = db.paceTrack(weighted());
+    assert.equal(widthOf(html, 'wk-spent'), 62);
+    assert.equal(leftOf(html, 'wk-slack'), 62);
+    assert.equal(widthOf(html, 'wk-slack'), 6);
+    assert.ok(!html.includes('wk-excess'), 'nothing is over the plan here');
+    assert.match(html, /class="pill pill-safe">6% under</);
+});
+
+test('the clock keeps a pill of its own, so the week is still readable', () => {
+    const html = db.paceTrack(weighted());
+    assert.match(html, /class="pill pill-muted">.*now 57%/);
+    assert.match(html, /class="pill">62% spent</);
+});
+
+test('the now line is marked as paired only when a plan mark shares the rail', () => {
+    // Both marks carry full weight — a 1px wash beside a 2px colour read as a
+    // seam in the fill rather than as a mark, which is exactly how it was
+    // reported. They are told apart by colour: the clock is the foreground, the
+    // plan is its own hue, and the pills carry the matching dots.
+    assert.match(db.paceTrack(weighted()), /class="wk-now paired"/);
+    assert.ok(!db.paceTrack(week()).includes('wk-now paired'), 'alone it needs no pairing class');
+    assert.ok(!db.paceTrack(week()).includes('wk-plan'), 'and no second mark appears');
+});
+
+test('without a profile the rail is exactly what it was', () => {
+    const html = db.paceTrack(week());
+    assert.equal(widthOf(html, 'wk-spent'), 57.14);
+    assert.equal(widthOf(html, 'wk-excess'), 4.86);
+    assert.match(html, /class="pill pill-warn">5% over</);
+    assert.ok(!/now \d+%/.test(html), 'no clock pill where the mark is the clock');
+});
+
+test('the clock pill says what the rest of the page says about the clock', () => {
+    // Both are "how much of the window is behind us", and one screen showing
+    // 5% in the header beside 6% on the rail is the rounding, not the truth:
+    // pace() floors that number once so every surface says the same thing.
+    const html = db.paceTrack(week({ plan: 57, planW: 68, weighted: true, at: NOON + 4 * 86400 + 3600 }));
+    assert.match(html, /class="pill pill-muted">.*now 57%/);
+});

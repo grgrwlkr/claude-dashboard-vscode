@@ -60,6 +60,7 @@ function collect() {
         now,
         sessionId: value('--session', process.env.CLAUDE_CODE_SESSION_ID || null),
         cwd: value('--cwd', process.cwd()),
+        storageDir: value('--storage', STORAGE),
     });
     let summary = {};
     try {

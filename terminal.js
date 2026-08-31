@@ -204,7 +204,21 @@ function collectFromDisk(opts = {}) {
     const payload = u.readCache(now);
     const limits = payload ? u.limitsOf(payload) : null;
     const weekly = limits && limits.weekly ? limits.weekly : null;
-    const pace = weekly ? u.pace(weekly, now) : null;
+    // The same hourly profile the extension hands `pace()`. Without it the plan
+    // is the share of the week elapsed, and the page and this would disagree
+    // about whether a night of work is an overspend. The status line stays
+    // linear on purpose: it opens no file, and this reads one.
+    let hourly = null;
+    if (opts.storageDir) {
+        // Required here rather than at the top: `bin/statusline.js` reaches this
+        // module and must not drag `history.js` in with it — a test walks that
+        // graph and fails if it does.
+        try {
+            const hist = require('./history');
+            hourly = hist.hourlyProfile(hist.readHistory(opts.storageDir));
+        } catch { /* linear plan, then */ }
+    }
+    const pace = weekly ? u.pace(weekly, now, hourly) : null;
 
     let ctx = null;
     let stats = null;

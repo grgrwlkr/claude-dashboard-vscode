@@ -1883,6 +1883,9 @@ const meterTone = (pct) => (pct >= 80 ? 'hot' : pct >= 50 ? 'warm' : 'cool');
  */
 // A day cell narrower than this cannot hold the label at its side of the
 // cascade, and a label wider than its cell is one the rail's edge cuts in half.
+// The plan's own colour, so its pill and its mark are found by the same hue.
+const PLAN_COLOUR = 'var(--vscode-charts-purple, hsl(265 60% 66%))';
+
 const DAY_LABELS = [
     { min: 7.5, of: (d) => `${WEEKDAYS[d.getDay()]} ${p2(d.getDate())}.${p2(d.getMonth() + 1)}` },
     { min: 5.0, of: (d) => `${WEEKDAYS[d.getDay()]} ${p2(d.getDate())}` },
@@ -1920,14 +1923,20 @@ function paceTrack(w) {
     const settled = w.settled !== undefined ? w.settled : (at - w.opened >= 1800 && pct >= 2);
     const plan = settled && Number.isFinite(w.plan) ? w.plan : null;
     const nowPos = pos(at);
+    // The clock and the plan are one mark for an even burn and two for everybody
+    // else. `planPos` is whichever the spend is answerable to; where there is no
+    // profile it collapses onto the now line and the rail is what it always was.
+    const weighted = Boolean(w.weighted) && plan !== null && Number.isFinite(w.planW);
+    const planPos = weighted ? w.planW : nowPos;
+    const planned = weighted ? w.planW : plan;
     // The zone between spend and plan is measured to the mark itself, not to the
     // rounded percentage printed under it. `plan` arrives floored to a whole
     // percent — 6.43% of the week elapsed is reported as 6 — so a zone drawn to
     // 6% while the mark stood at 6.43% left a gap of nearly half a percent
     // between the two, which is four pixels of daylight where the whole point is
     // that the fill and the mark meet.
-    const over = plan !== null && pct > nowPos;
-    const under = plan !== null && pct < nowPos;
+    const over = plan !== null && pct > planPos;
+    const under = plan !== null && pct < planPos;
 
     // The quota is gone when the account says 100%, whatever the forecast makes
     // of it. `ranOut` is the recorded moment; without one the mark has no place
@@ -1938,6 +1947,7 @@ function paceTrack(w) {
     const dryInside = dryPos !== null && dryPos <= 100;
 
     const marks = [nowPos];
+    if (weighted) marks.push(planPos);
     if (ranOutPos !== null) marks.push(ranOutPos);
     if (dryInside) marks.push(dryPos);
 
@@ -1954,12 +1964,18 @@ function paceTrack(w) {
     // by its colour rather than by a caption pinned above or below it.
     const pill = (text, tone, colour) => ({ text, tone, colour });
     const pills = [pill(`${pct}% spent`)];
-    // The plan mark IS the now line: the plan is the share of the window that
-    // has elapsed, so it always stands exactly where the current moment does.
-    if (plan !== null) pills.push(pill(`plan ${plan}%`, null, 'var(--vscode-foreground)'));
-    if (plan !== null && pct !== plan) {
-        pills.push(over ? pill(`${pct - plan}% over`, 'warn') : pill(`${plan - pct}% under`, 'safe'));
+    // The plan mark was the now line for as long as the plan was the share of the
+    // window elapsed. It is its own mark now, in its own colour, and the clock
+    // keeps a pill so the week stays readable without it.
+    const planColour = weighted ? PLAN_COLOUR : 'var(--vscode-foreground)';
+    if (plan !== null) pills.push(pill(`plan ${planned}%`, null, planColour));
+    if (plan !== null && pct !== planned) {
+        pills.push(over ? pill(`${pct - planned}% over`, 'warn') : pill(`${planned - pct}% under`, 'safe'));
     }
+    // `plan` is that same share of the window, floored once in pace() for every
+    // surface. Rounding it again here put "now 6%" on the rail beside "5% of the
+    // week gone" in the header — one screen, one quantity, two numbers.
+    if (weighted) pills.push(pill(`now ${plan}%`, 'muted', 'var(--vscode-foreground)'));
     // The forecast is stated in every state, the way the terminal states it —
     // how long until it, then the day and hour. "You will not run out" is worth
     // far more with the date that would have been. A dot only where there is a
@@ -1980,12 +1996,13 @@ function paceTrack(w) {
 
     return panel('This week', `<div class="wk">
         <div class="wk-rail">
-          <div class="wk-spent" style="width:${trackAt(over ? nowPos : pct)}"></div>
-          ${over ? `<div class="wk-excess" style="left:${trackAt(nowPos)};width:${trackAt(pct - nowPos)}"></div>` : ''}
-          ${under ? `<div class="wk-slack" style="left:${trackAt(pct)};width:${trackAt(nowPos - pct)}"></div>` : ''}
+          <div class="wk-spent" style="width:${trackAt(over ? planPos : pct)}"></div>
+          ${over ? `<div class="wk-excess" style="left:${trackAt(planPos)};width:${trackAt(pct - planPos)}"></div>` : ''}
+          ${under ? `<div class="wk-slack" style="left:${trackAt(pct)};width:${trackAt(planPos - pct)}"></div>` : ''}
           ${cells.slice(1).map((c) => c.left).filter((x) => marks.every((m) => Math.abs(m - x) > TICK_CLEARANCE))
         .map((x) => `<div class="wk-day" style="left:${trackAt(x)}"></div>`).join('')}
-          <div class="wk-now" style="left:${trackAt(nowPos)}"></div>
+          <div class="wk-now${weighted ? ' paired' : ''}" style="left:${trackAt(nowPos)}"></div>
+          ${weighted ? `<div class="wk-plan" style="left:${trackAt(planPos)}"></div>` : ''}
           ${dryInside ? `<div class="wk-dry" style="left:${trackAt(dryPos)}"></div>` : ''}
           ${ranOutPos !== null ? `<div class="wk-dry" style="left:${trackAt(ranOutPos)}"></div>` : ''}
           ${cells.map((c) => {

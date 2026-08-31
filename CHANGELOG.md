@@ -8,10 +8,18 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
-## [Unreleased]
+## [0.50.0] — 2026-08-31
 
 ### Changed
 
+- Spend is judged against the rhythm you work to, not against the share of the
+  week elapsed.
+- The plan comes from your own hours: 43% of a week's limit goes between 22:00
+  and 06:00.
+- `{drift}`, the verdict and the glyph bar use it; the chart keeps the linear
+  plan.
+- The terminal dashboard uses it too; the terminal status line stays linear —
+  it opens no file.
 - The extension is named **Dashnlines for Claude**: the panel, the settings
   section, the commands and the dashboard heading.
 - The identifier, every `claudeStatusline.*` setting and every keybinding are

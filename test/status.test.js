@@ -407,3 +407,19 @@ test('without a profile the pace note is word for word what it was', () => {
     const pace = notes(status.statusSections(flat, helpers, {})[0]).find((n) => n.label === 'Pace');
     assert.match(pace.text, /^52% spent, 61% of the window elapsed$/);
 });
+
+test('the drawing half of the payload carries both plans', () => {
+    const weighted = { ...data, pace: { ...data.pace, plan: 61, planW: 48, weighted: true } };
+    const m = status.statusMetrics(weighted).weekly;
+    assert.equal(m.plan, 61);
+    assert.equal(m.planW, 48);
+    assert.equal(m.weighted, true);
+});
+
+test('the gauge mark is the plan the verdict is measured against', () => {
+    // One tooltip may not hold two answers: a mark at 61% beside a verdict that
+    // says 4% over a plan of 48% is the same contradiction the rail just lost.
+    const weighted = { ...data, pace: { ...data.pace, plan: 61, planW: 48, weighted: true } };
+    const [limits] = status.statusSections(weighted, helpers, {});
+    assert.equal(limits.blocks.find((b) => b.kind === 'gauge').plan, 48);
+});

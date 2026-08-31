@@ -79,13 +79,18 @@ function fields(helpers = {}) {
         plan: { topic: 'limits', doc: 'share of the weekly window already elapsed', get: (d) => pct(d.pace?.plan) },
         drift: {
             topic: 'limits',
-            doc: 'distance from an even pace (+ is ahead of plan, − is behind it)',
+            doc: 'distance from the plan (+ is ahead of it, − is behind it)',
             get: (d) => {
                 // Silent until the window can be judged at all: `pace.settled`
                 // is the same half hour and 2% that gate the forecast, and
                 // without it a fresh week reads `+1%` against a plan of zero.
                 if (!d.weekly || !d.pace || !d.pace.settled) return '';
-                const diff = d.weekly.pct - d.pace.plan;
+                // Against `planW`, like every other verdict: the panel, the
+                // rail, the gauge and this line are one session's opinion of
+                // itself, and a bar reading -1% beside a panel reading 3% under
+                // is that opinion contradicting itself in two places at once.
+                const planned = Number.isFinite(d.pace.planW) ? d.pace.planW : d.pace.plan;
+                const diff = d.weekly.pct - planned;
                 return diff === 0 ? '0%' : `${diff > 0 ? '+' : ''}${diff}%`;
             },
         },

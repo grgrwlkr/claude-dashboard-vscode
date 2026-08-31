@@ -78,6 +78,10 @@ call about whether this change was "big enough".
 
 - **patch** when the changelog entry is all `### Fixed`; **minor** when the
   extension does something it did not do before. **`major` is never yours.**
+- **Two files carry the version, and they must agree.** `package.json` is the
+  extension; `.claude-plugin/plugin.json` is the Claude Code plugin, whose
+  version becomes a path segment in the plugin cache. Bump both, or the plugin
+  keeps announcing the number it was released under while the extension moves on.
 - **The channel is the parity of the minor.** "Release" with no qualifier means
   **stable**, which is an **even** minor: 0.34 → **0.36**, never 0.35. A
   pre-release happens only when the user asks for one in words (project memory
