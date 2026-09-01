@@ -91,6 +91,8 @@ test('the rate table matches the published prices', () => {
         'claude-haiku-4-5': { in: 1, out: 5 },
         'claude-fable-5': { in: 10, out: 50 },
         'claude-mythos-5': { in: 10, out: 50 },
+        'claude-fable-5-1': { in: 10, out: 50, cacheRead: 0.025 },
+        'claude-mythos-5-1': { in: 10, out: 50, cacheRead: 0.025 },
     };
     for (const [id, rate] of Object.entries(published)) {
         assert.deepEqual(p.ratesFor(id).rates, rate, `${id} is priced wrong`);
@@ -126,4 +128,94 @@ test('a provider-format id of an unlisted model is still unknown', () => {
     assert.equal(p.ratesFor('us.anthropic.claude-newthing-9-v1:0').known, false);
     assert.equal(p.ratesFor('my-gateway/claude-opus-4-5').known, false);
     assert.deepEqual(p.ratesFor('my-gateway/claude-opus-4-5').rates, p.RATES['claude-opus-5']);
+});
+
+// Fable 5.1 reads its cache at $0.25/M — 0.025x of its $10 input rate, where
+// every other model pays 0.1x. Fable 5 keeps 0.1x: the two share every other
+// price, and this is the one place they differ. Mythos 5.1 is the same model
+// under another access programme and is priced like Fable 5.1 throughout; its
+// read rate was "open at launch" and is taken to match.
+// Checked 2026-09-01 against the claude-api skill.
+test('a cache read is priced at the rate of the model that reads it', () => {
+    assert.equal(p.costOf('claude-fable-5-1', { cache_read_input_tokens: M }), 0.25);
+    assert.equal(p.costOf('claude-fable-5', { cache_read_input_tokens: M }), 1);
+    assert.equal(p.costOf('claude-mythos-5-1', { cache_read_input_tokens: M }), 0.25);
+    assert.equal(p.cacheSaving('claude-fable-5-1', { cache_read_input_tokens: M }), 9.75);
+});
+
+test('Fable 5.1 and Mythos 5.1 have a published rate', () => {
+    assert.equal(p.ratesFor('claude-fable-5-1').known, true);
+    assert.equal(p.ratesFor('claude-mythos-5-1').known, true);
+    assert.equal(p.ratesFor('claude-fable-5-1[1m]').known, true);
+});
+
+// An advisor's consultation is billed to the request that asked for it. The
+// record carries it as an `advisor_message` entry of `usage.iterations`, under
+// the advisor's own model, and the record's top-level counters leave it out —
+// they sum the `message` entries only. The shape below is a live record with
+// its numbers kept: input 4 = 2 + 2, output 5076 = 4803 + 273, and the advisor's
+// 178 522 tokens of input appear nowhere but in its own entry.
+const consulted = {
+    input_tokens: 4, output_tokens: 5076, cache_read_input_tokens: 342760, cache_creation_input_tokens: 8060,
+    cache_creation: { ephemeral_1h_input_tokens: 1850, ephemeral_5m_input_tokens: 0 },
+    iterations: [
+        { type: 'message', input_tokens: 2, output_tokens: 4803, cache_read_input_tokens: 170455, cache_creation_input_tokens: 1850, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 1850 } },
+        { type: 'advisor_message', model: 'claude-fable-5', input_tokens: 178522, output_tokens: 9857, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 } },
+        { type: 'message', input_tokens: 2, output_tokens: 273, cache_read_input_tokens: 172305, cache_creation_input_tokens: 6210, cache_creation: { ephemeral_5m_input_tokens: 6210, ephemeral_1h_input_tokens: 0 } },
+    ],
+};
+
+test('an advisor consultation inside a record is priced at the advisor model', () => {
+    const own = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
+    const consult = (extra) => ({ ...own, iterations: [{ type: 'advisor_message', model: 'claude-fable-5-1', ...own, ...extra }] });
+    assert.equal(p.costOf('claude-opus-5', consult({ input_tokens: M })), 10);
+    assert.equal(p.costOf('claude-opus-5', consult({ output_tokens: M })), 50);
+    // The advisor's cache is priced like anyone's: its own read rate, its own
+    // TTL split on a write.
+    assert.equal(p.costOf('claude-opus-5', consult({ cache_read_input_tokens: M })), 0.25);
+    assert.equal(p.costOf('claude-opus-5', consult({
+        cache_creation_input_tokens: M, cache_creation: { ephemeral_1h_input_tokens: M },
+    })), 20);
+    assert.equal(p.cacheSaving('claude-opus-5', consult({ cache_read_input_tokens: M })), 9.75);
+});
+
+test('the message entries of a record are not charged a second time beside its counters', () => {
+    const { iterations, ...own } = consulted;
+    const advisor = p.costOf('claude-fable-5', iterations[1]);
+    assert.ok(advisor > 1, 'the advisor entry alone is worth dollars');
+    const whole = p.costOf('claude-opus-5', consulted);
+    assert.ok(Math.abs(whole - (p.costOf('claude-opus-5', own) + advisor)) < 1e-9,
+        `whole ${whole} should be the record's own cost plus the advisor's`);
+});
+
+// A record from before advisors, or one with no consultation in it, costs what
+// it always did.
+test('a record without an advisor entry is unchanged', () => {
+    const plain = { ...consulted, iterations: consulted.iterations.filter((it) => it.type === 'message') };
+    const { iterations, ...own } = consulted;
+    assert.equal(p.costOf('claude-opus-5', plain), p.costOf('claude-opus-5', own));
+    assert.equal(p.costOf('claude-opus-5', { ...own, iterations: null }), p.costOf('claude-opus-5', own));
+});
+
+// An advisor entry names its model — every one of the 435 in a week of
+// transcripts here does — and the record's own `advisorModel` is the model that
+// was consulted when the entry does not. With neither it is the fallback, like
+// any unknown model.
+test("an advisor entry with no model is priced at the record's advisor", () => {
+    const own = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
+    const consult = { ...own, iterations: [{ type: 'advisor_message', ...own, input_tokens: M }] };
+    assert.equal(p.costOf('claude-opus-5', consult, 'claude-fable-5-1'), 10);
+    assert.equal(p.costOf('claude-opus-5', consult), 5);
+    const read = { ...own, iterations: [{ type: 'advisor_message', ...own, cache_read_input_tokens: M }] };
+    assert.equal(p.cacheSaving('claude-opus-5', read, 'claude-fable-5-1'), 9.75);
+});
+
+// Which record of a response is charged: the one whose usage totals the most.
+// A record with no request id is a response of its own.
+test('responseKey groups the records of one response and nothing else', () => {
+    assert.equal(p.responseKey({ requestId: 'req-1', uuid: 'a' }), p.responseKey({ requestId: 'req-1', uuid: 'b' }));
+    assert.notEqual(p.responseKey({ uuid: 'a' }), p.responseKey({ uuid: 'b' }));
+    assert.notEqual(p.responseKey({ requestId: 'req-1' }), p.responseKey({ requestId: 'req-2' }));
+    assert.equal(p.usageTotal({ input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 }), 10);
+    assert.equal(p.usageTotal({}), 0);
 });

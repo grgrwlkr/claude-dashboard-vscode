@@ -6,7 +6,26 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { costOf } = require('./pricing');
+const { costOf, usageTotal, responseKey } = require('./pricing');
+
+// The record of each response that is charged: the fullest one, with the model
+// it names and the advisor the record names. See `responseKey`.
+function holdFullest(held, r) {
+    const usage = r.message.usage;
+    const key = responseKey(r, String(held.size));
+    const h = held.get(key);
+    if (!h) held.set(key, { usage, model: r.message.model, advisor: r.advisorModel || '' });
+    else if (usageTotal(usage) > usageTotal(h.usage)) {
+        h.usage = usage;
+        if (r.message.model) h.model = r.message.model;
+    }
+}
+
+function chargeHeld(held) {
+    let total = 0;
+    for (const h of held.values()) total += costOf(h.model, h.usage, h.advisor);
+    return total;
+}
 
 const HOME = os.homedir();
 const SESSIONS = path.join(HOME, '.claude', 'sessions');
@@ -363,8 +382,7 @@ function sessionStats(file) {
     let text;
     try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
 
-    let cost = 0;
-    let messages = 0;
+    const held = new Map();
     let added = 0;
     let removed = 0;
     let first = 0;
@@ -384,8 +402,7 @@ function sessionStats(file) {
         }
 
         if (r.message && r.message.usage) {
-            cost += costOf(r.message.model, r.message.usage);
-            messages++;
+            holdFullest(held, r);
             // The gap before a model reply is the wait for that reply. There is
             // no exact api_duration_ms on disk, so the share is an estimate.
             if (prev && at > prev) waiting += at - prev;
@@ -404,9 +421,10 @@ function sessionStats(file) {
     }
 
     const duration = first && last ? last - first : 0;
+    const cost = chargeHeld(held);
     return {
         cost,
-        messages,
+        messages: held.size,
         added,
         removed,
         durationMs: duration,
@@ -448,16 +466,16 @@ function costToday(nowMs = Date.now()) {
 function costSince(file, since) {
     let text;
     try { text = fs.readFileSync(file, 'utf8'); } catch { return 0; }
-    let total = 0;
+    const held = new Map();
     for (const line of text.split('\n')) {
         if (line.length < 50 || line[0] !== '{') continue;
         let r;
         try { r = JSON.parse(line); } catch { continue; }
         if (!r.message || !r.message.usage) continue;
         if ((Date.parse(r.timestamp) || 0) < since) continue;
-        total += costOf(r.message.model, r.message.usage);
+        holdFullest(held, r);
     }
-    return total;
+    return chargeHeld(held);
 }
 
 // Neighbours in this repository: how many live sessions besides ours, and how

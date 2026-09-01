@@ -239,7 +239,9 @@ test('the model is taken from the record that is charged, the clock from the fir
 
     assert.equal(agg.models['<synthetic>'].out, 1e6);
     assert.equal(agg.models['claude-opus-5'], undefined);
-    assert.deepEqual(agg.sessions[0].models, ['<synthetic>']);
+    // The bucket keeps `<synthetic>` — it is a message, and it is counted — but
+    // the row's list of models does not: it is not a model.
+    assert.deepEqual(agg.sessions[0].models, []);
     // Filed under the hour it started in, not the one it ended in.
     assert.equal(Object.keys(agg.hours)[0], String(new Date(T0).getHours()));
     assert.equal(Object.keys(agg.hours).length, 1);
@@ -593,3 +595,63 @@ test('the word tally counts typed prose, once per prompt', () => {
         fs.rmSync(store, { recursive: true, force: true });
     }
 });
+
+// An advisor's consultation is the advisor's spend. It goes to the advisor's own
+// row of models and of efforts — under a tier of its own, since a consultation
+// has no effort and is not a reply that forgot to send one — while every bucket
+// not keyed by model, the day and the branch among them, keeps the whole reply,
+// consultation included.
+test("an advisor consultation is booked to the advisor's model, not the executor's", () => tree(({ write }) => {
+    const line = JSON.stringify({
+        timestamp: new Date(T0).toISOString(), requestId: 'req-1', type: 'assistant', effort: 'high', gitBranch: 'main',
+        message: {
+            model: 'claude-opus-5',
+            usage: {
+                input_tokens: 1e6, output_tokens: 0,
+                iterations: [
+                    { type: 'message', input_tokens: 1e6, output_tokens: 0 },
+                    { type: 'advisor_message', model: 'claude-fable-5-1', input_tokens: 1e6, output_tokens: 0 },
+                ],
+            },
+        },
+    });
+    const agg = ix.indexFile(write('sess-1.jsonl', [line]));
+
+    assert.equal(agg.models['claude-opus-5'].cost, 5);
+    assert.equal(agg.models['claude-opus-5'].in, 1e6);
+    assert.equal(agg.models['claude-opus-5'].msgs, 1);
+    assert.equal(agg.models['claude-fable-5-1'].cost, 10);
+    assert.equal(agg.models['claude-fable-5-1'].in, 1e6);
+    assert.equal(agg.models['claude-fable-5-1'].msgs, 1);
+    assert.equal(agg.efforts['claude-opus-5|high'].cost, 5);
+    assert.equal(agg.efforts[`claude-fable-5-1|${ix.ADVISOR_TIER}`].cost, 10);
+    assert.equal(ix.ADVISOR_TIER, 'advisor');
+    assert.equal(agg.branches.main.cost, 15);
+    assert.equal(Object.values(agg.days)[0].cost, 15);
+}));
+
+test("an advisor entry without a model is booked to the record's advisor", () => tree(({ write }) => {
+    const line = JSON.stringify({
+        timestamp: new Date(T0).toISOString(), requestId: 'req-1', type: 'assistant', advisorModel: 'claude-fable-5-1',
+        message: { model: 'claude-opus-5', usage: { input_tokens: 0, output_tokens: 0, iterations: [{ type: 'advisor_message', input_tokens: 1e6 }] } },
+    });
+    const agg = ix.indexFile(write('sess-1.jsonl', [line]));
+    assert.equal(agg.models['claude-fable-5-1'].cost, 10);
+    assert.equal(agg.models['claude-opus-5'].cost, 0);
+}));
+
+// The models of a session row are the models that answered in it: the advisor
+// is one of them, and `<synthetic>` — the client's stand-in for a reply that
+// never came — is not a model and belongs in no list of them.
+test("a session row lists the advisor among its models and leaves <synthetic> out", () => tree(({ write }) => {
+    const line = (id, model, usage) => JSON.stringify({
+        timestamp: new Date(T0).toISOString(), requestId: id, type: 'assistant',
+        message: { model, usage },
+    });
+    const agg = ix.indexFile(write('sess-1.jsonl', [
+        line('req-1', 'claude-opus-5', { input_tokens: 10, iterations: [{ type: 'advisor_message', model: 'claude-fable-5-1', input_tokens: 10 }] }),
+        line('req-2', '<synthetic>', { input_tokens: 0, output_tokens: 0 }),
+    ]));
+    assert.deepEqual(agg.sessions[0].models, ['claude-opus-5', 'claude-fable-5-1']);
+    assert.equal(agg.sessions[0].msgs, 2);
+}));

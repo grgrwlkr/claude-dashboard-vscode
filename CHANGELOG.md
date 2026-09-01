@@ -8,6 +8,56 @@ is a pre-release and an **even** one is a stable release.
 Everything below 0.20.0 was built and installed on one machine; the extension was
 not published yet.
 
+## [0.52.0] — 2026-09-02
+
+### Added
+
+- Permission mode and fallback model are choices on the Launch tab and the
+  settings `claudeStatusline.permissionMode` and `claudeStatusline.fallbackModel`,
+  passed as `--permission-mode` and `--fallback-model`. Both are user settings
+  only, like the extra arguments.
+- Each advisor option on the Launch tab says what it buys on the model chosen;
+  on a Fable session the `fable` row says not to turn it on.
+- `claude-fable-5-1` and `claude-mythos-5-1` are priced, at $10 / $50 per million tokens.
+
+### Changed
+
+- A cache read is priced per model; Fable 5.1 and Mythos 5.1 read at $0.25 per
+  million tokens.
+- An advisor's consultation is priced from the reply that made it, at the
+  advisor's own rate.
+- The Advisor tile on the Tools tab counts priced consultations, with the calls
+  beside.
+- The Cache panel's note names Fable 5.1's read rate, a fortieth of input.
+- The Models panel books an advisor's consultation to the advisor's own row; the
+  model × effort matrix shows it in an `advisor` column.
+- The header and the tab rows stay at the top of the page while it scrolls.
+- Switching tab or section opens it at the top of the page.
+- The Launch tab names the `fable` alias Fable 5.1, with a 1M window.
+- The Launch tab's Opus and Sonnet rows read 1M; the Model panel says where Opus
+  is 200k.
+- A session row on the Sessions tab lists the advisor among its models and
+  leaves `<synthetic>` out.
+- `INDEX_VERSION` is bumped.
+- The first run after this re-reads every transcript.
+
+### Removed
+
+- The verdict banner above the Launch options, with its **Apply these** button.
+- `opus[1m]`, `sonnet[1m]` and `fable[1m]` from the Launch tab and the
+  `claudeStatusline.model` setting. A saved `[1m]` value selects its plain card,
+  and saving the tab writes the plain alias; on Pro, put `--model 'opus[1m]'`
+  in the extra arguments and leave the model to the client.
+
+### Fixed
+
+- The session's cost, today's cost and a live workflow's cost charge a response
+  once; a reply written as three records was charged three times.
+- `{requests}` and the requests row of the session hover count responses, not
+  records.
+- The Sessions table fits its panel at every width; the title column gives way
+  and the Spend column stays on the page.
+
 ## [0.50.0] — 2026-08-31
 
 ### Changed

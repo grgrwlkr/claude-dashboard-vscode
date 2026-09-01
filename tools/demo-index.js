@@ -380,13 +380,13 @@ function demo(now = Date.now(), { weeklyPct = 57 } = {}) {
                 presets: seg.PRESETS,
                 alignment: 'right', priority: 100, refreshInterval: 60,
                 // The Launch tab is photographed for the listing, so the demo
-                // makes every choice rather than leaving six panels reading
-                // "not set". `opus[1m]` with `fable` is also the one pairing
-                // that exercises the ranking: Fable is the only tier above
-                // Opus, so Sonnet and Haiku draw as refused with their reason.
-                openLocation: 'activeGroup', model: 'opus[1m]', effort: 'max',
-                advisor: 'fable', outputStyle: 'Explanatory',
-                launchArgs: '--permission-mode acceptEdits',
+                // makes every choice rather than leaving nine panels reading
+                // "not set". `opus` with `fable` is also the one pairing that
+                // exercises the ranking: Fable is the only tier above Opus, so
+                // Sonnet and Haiku draw as refused with their reason.
+                openLocation: 'activeGroup', model: 'opus', effort: 'xhigh',
+                advisor: 'fable', permissionMode: 'acceptEdits', fallbackModel: 'sonnet',
+                outputStyle: 'Explanatory', launchArgs: '--add-dir ../shared',
                 aliasName: 'claude-vs',
                 palette: Object.entries(seg.fields({})).map(([name, f]) => ({
                     name, topic: f.topic, doc: f.doc, value: VALUES[name] ?? '',

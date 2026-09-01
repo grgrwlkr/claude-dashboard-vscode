@@ -272,10 +272,16 @@ test('every output style the client ships can be picked here', () => {
     }
 });
 
-test('a workspace cannot supply the free-text launch arguments', () => {
+// The permission mode is a security gate and the fallback chain names a model
+// that will run: neither is a repository's to set through `.vscode/settings.json`,
+// any more than the free-text arguments are.
+test('a workspace cannot supply the free-text launch arguments, the permission mode or the fallback', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const props = manifest.contributes.configuration.properties;
     assert.equal(props['claudeStatusline.launchArgs'].scope, 'machine');
+    assert.equal(props['claudeStatusline.permissionMode'].scope, 'machine');
+    assert.equal(props['claudeStatusline.fallbackModel'].scope, 'machine');
+    assert.deepEqual(ext.__USER_ONLY, ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel']);
     for (const key of ['claudeStatusline.model', 'claudeStatusline.effort']) {
         assert.ok(Array.isArray(props[key].enum) && props[key].enum.length > 1, `${key} must be a closed list`);
     }
@@ -325,7 +331,7 @@ test('the page shows the launch settings it was saved with', async () => {
     let panel;
     try {
         panel = await openDashboard();
-        assert.match(panel.webview.html, /name="model" value="opus\[1m\]" checked/);
+        assert.match(panel.webview.html, /name="model" value="opus" checked/);
         assert.match(panel.webview.html, /name="effort" value="max" checked/);
         assert.match(panel.webview.html, /id="launchArgs"[^>]*value="--fallback-model sonnet"/);
     } finally { if (panel) panel.dispose(); run.dispose(); }
@@ -2473,5 +2479,27 @@ test('the identifier and the setting keys are untouched by the rebrand', () => {
     }
     for (const c of pkg.contributes.commands) {
         assert.ok(c.command.startsWith('claudeStatusline.'), `${c.command} left the claudeStatusline namespace`);
+    }
+});
+
+// The two new choices travel like the others: read from the settings, written
+// by the page, and quoted onto the line the button runs.
+test('the button passes the permission mode and the fallback chain as flags', async () => {
+    const run = activate({ segments: ['{today}'], settings: { model: 'opus', permissionMode: 'plan', fallbackModel: 'sonnet' } });
+    try {
+        await openClaude();
+        assert.equal(ranIn(lastTerminal()), "claude --model 'opus' --permission-mode 'plan' --fallback-model 'sonnet'");
+    } finally { run.dispose(); }
+});
+
+test('the manifest offers the permission modes and fallback chains the page does', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const props = manifest.contributes.configuration.properties;
+    for (const [key, list] of [['permissionMode', db.PERMISSION_MODES], ['fallbackModel', db.FALLBACKS]]) {
+        const property = props[`claudeStatusline.${key}`];
+        assert.ok(property, `${key} is a setting`);
+        assert.deepEqual(property.enum, list.map(([value]) => value));
+        assert.equal(property.enum.length, property.enumDescriptions.length);
+        assert.equal(property.default, '');
     }
 });

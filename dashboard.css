@@ -21,8 +21,17 @@
 }
 
 body { font-family: var(--dash-text); font-size: 13px; color: var(--vscode-foreground);
-  background: var(--vscode-editor-background); margin: 0; padding: 16px 20px 40px;
+  background: var(--vscode-editor-background); margin: 0; padding: 0 20px 40px;
   overflow-x: hidden; }
+/* The header and both rows of tabs stay at the top while the page scrolls, the
+   way the Save bar stays at the bottom: on a long tab the section you are in
+   is the first thing you want and was the first to leave. The wrapper carries
+   the top padding the body used to, so the sticky edge is the window's edge and
+   nothing peeks above it; the background is the editor's own so the panels
+   passing beneath do not show through. Above the Save bar and the pill tooltips
+   (40), which must not slide over it. */
+.page-top { position: sticky; top: 0; z-index: 50; padding-top: 16px;
+  background: var(--vscode-editor-background); }
 h1 { font-size: 18px; margin: 0 0 2px; font-weight: 600; }
 /* The extension's own mark, inline rather than an <img>: a webview image would
    need asWebviewUri plumbed through and img-src opened in the CSP, for one
@@ -149,47 +158,6 @@ nav.tabs button[aria-selected="true"] { opacity: 1; border-bottom-color: var(--v
    has to be put back in line with the heading above it. */
 .panel-flush > .panel-body > :not(table) { padding-left: 15px; padding-right: 15px; }
 
-/* The verdict above the launch options. Deliberately not a .panel: a panel is a
-   question the page is asking, and this one is an answer it already has, so it
-   carries an accent edge and no border of its own to keep the two apart. Figures
-   sit in a chip because the eye goes to them first and the sentence second. */
-.canon { background: var(--vscode-editorWidget-background);
-  border-left: 3px solid var(--vscode-charts-blue); border-radius: 0 6px 6px 0;
-  padding: 12px 15px 13px; margin: 0 0 16px; }
-.canon-title { font-size: 12px; font-weight: 600; margin: 0 0 9px; opacity: .75;
-  text-transform: uppercase; letter-spacing: .06em; }
-.canon-list { list-style: none; margin: 0; padding: 0; font-size: 12px; }
-.canon-list li { margin: 0 0 8px; line-height: 1.55; opacity: .85; }
-.canon-list li:last-child { margin-bottom: 0; }
-.canon-list b { font-weight: 600; opacity: 1; }
-/* Where the figure came from, dimmer than the finding it belongs to and on its
-   own line: it is read once, when a number is doubted, and never again. The
-   opacity compounds with the li's, landing beside .canon-src on purpose — these
-   are the same register as the footer, moved next to the number they explain. */
-.canon-where { display: block; margin: 3px 0 0; font-size: 11px; opacity: .65;
-  line-height: 1.45; max-width: 104ch; }
-.canon-list li + li { margin-top: 10px; }
-/* An <i> so the figure is one token in the markup rather than a wrapper div —
-   the list stays readable in the source, which is where it gets edited. */
-.canon-list i { font-style: normal; font-family: var(--dash-mono);
-  font-size: 11px; padding: 1px 6px; margin: 0 8px; border-radius: 3px;
-  white-space: nowrap; color: var(--vscode-charts-blue);
-  background: var(--vscode-input-background, var(--vscode-editor-background));
-  border: 1px solid var(--vscode-panel-border); }
-/* The verdict turned into an instruction, with the button that carries it out.
-   The row wraps rather than truncates: the sentence is the point, and a button
-   that has slipped off the edge is a button nobody presses. */
-.canon-set { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px;
-  font-size: 12px; margin: 11px 0 0; padding: 10px 0 0; line-height: 1.55;
-  border-top: 1px solid var(--vscode-panel-border); }
-.canon-set > span { flex: 1 1 22ch; opacity: .85; }
-.canon-set code { font-size: 11px; }
-.canon-apply { flex: 0 0 auto; font: inherit; font-size: 12px; cursor: pointer;
-  padding: 4px 12px; border-radius: 3px; border: 1px solid transparent;
-  color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
-.canon-apply:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
-.canon-apply:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.canon-src { font-size: 11px; opacity: .55; margin: 10px 0 0; line-height: 1.5; max-width: 104ch; }
 .panel-flush th:first-child, .panel-flush td:first-child { padding-left: 15px; }
 .panel-flush th:last-child, .panel-flush td:last-child { padding-right: 15px; }
 /* Two panels side by side where the page is wide enough for it. */
@@ -353,15 +321,21 @@ tr.detail td { padding-top: 0; }
 .cloud { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; max-width: 90ch; line-height: 1.7; }
 .word { opacity: .8; }
 .dim { opacity: .45; }
-td.wrap { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The one column that gives: a max-width of zero takes its text out of the
+   table's minimum width and the full width hands it whatever the other columns
+   leave, so the table is never wider than its panel — the title is cut with an
+   ellipsis instead of the spend being cut off the page. */
+td.wrap { max-width: 0; width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.models { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 /* Columns that carry context rather than the answer. They are the first thing
    to go when the panel is narrow — the row still says what it is without them. */
 @media (max-width: 1000px) {
   .opt { display: none; }
-  body { padding: 12px 12px 32px; }
+  body { padding: 0 12px 32px; }
+  .page-top { padding-top: 12px; }
   th, td { padding: 5px 4px; }
-  td.wrap { max-width: 24ch; }
+  td.models { max-width: 16ch; }
 }
 @media (max-width: 900px) {
   .opt2 { display: none; }
@@ -374,7 +348,6 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 @media (max-width: 720px) {
   .opt3 { display: none; }
   table { font-size: 12px; }
-  td.wrap { max-width: 14ch; }
   .chart.heat { max-width: 100%; }
 }
 .matrix th[scope="row"] { white-space: nowrap; text-transform: none; letter-spacing: 0;

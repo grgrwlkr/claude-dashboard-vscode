@@ -376,3 +376,41 @@ test('both readers answer from the chain they are given', () => {
     // A smaller autoCompactWindow moves the threshold down, not the window.
     assert.equal(s.autoCompactPct('/work', 200000, chainOf(['user', { autoCompactWindow: 100000 }])), 34);
 });
+
+// A reply written as thinking, text and a tool call is three records, and the
+// records of one response carry the same usage — every multi-record response in
+// a week of transcripts here does. Summing each of them billed a session two and
+// a half times over: $8.53 against $3.40 on 34 records of 15 responses.
+test('a response spread over several records is charged once, from its fullest', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
+    const file = path.join(dir, 'session.jsonl');
+    const u = rec().message.usage;
+    const part = (id, usage) => JSON.stringify(rec({ requestId: id, message: { model: 'claude-opus-5', usage } }));
+    fs.writeFileSync(file, [
+        part('req-1', u), part('req-1', u), part('req-1', u),
+        part('req-2', { output_tokens: 10 }), part('req-2', { output_tokens: 1000 }),
+        '',
+    ].join('\n'));
+
+    const both = costOf('claude-opus-5', u) + costOf('claude-opus-5', { output_tokens: 1000 });
+    const stats = s.sessionStats(file);
+    assert.ok(Math.abs(stats.cost - both) < 1e-9, `cost ${stats.cost}, expected ${both}`);
+    assert.equal(stats.messages, 2);
+    assert.ok(Math.abs(s.costSince(file, NOW - 3600 * 1000) - both) < 1e-9);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("sessionStats prices an advisor entry without a model at the record's advisor", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
+    const file = path.join(dir, 'session.jsonl');
+    const u = rec().message.usage;
+    const consulted = rec({
+        requestId: 'req-1', advisorModel: 'claude-fable-5-1',
+        message: { model: 'claude-opus-5', usage: { ...u, iterations: [{ type: 'advisor_message', input_tokens: 1e6 }] } },
+    });
+    fs.writeFileSync(file, `${JSON.stringify(consulted)}\n`);
+    const expected = costOf('claude-opus-5', u) + 10;
+    assert.ok(Math.abs(s.sessionStats(file).cost - expected) < 1e-9);
+    assert.ok(Math.abs(s.costSince(file, NOW - 3600 * 1000) - expected) < 1e-9);
+    fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -24,7 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { projectName, INTERESTING } = require('./indexer');
-const { costOf, tokenLabel } = require('./pricing');
+const { costOf, tokenLabel, usageTotal, responseKey } = require('./pricing');
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -787,7 +787,14 @@ function costIndex(index) {
 // What has been counted in one transcript so far: how far it was read, which
 // file that was, the last stretch of what was counted, and the money and tokens
 // found up to there.
-const NOTHING_READ = { size: 0, mtime: 0, ino: 0, edge: '', cost: 0, tokens: 0 };
+// `settled` is what the responses that are over cost; `open` is the response
+// whose records may still be arriving, charged from its fullest record so far
+// and added on top. The two are kept apart so that a look landing between two
+// records of one response adds up to exactly what one look over both would.
+const NOTHING_READ = {
+    size: 0, mtime: 0, ino: 0, edge: '', cost: 0, tokens: 0,
+    settled: { cost: 0, tokens: 0 }, open: null,
+};
 
 // How much of the counted region is re-read to prove it is still the same text.
 // A file rewritten in place and left longer passes every test `stat` can make —
@@ -858,16 +865,34 @@ function accrue(file, prev = null) {
     if (cut < 0) return carried;
     const whole = text.slice(0, cut);
 
-    let { cost, tokens } = carried;
+    const settled = { ...carried.settled };
+    let open = carried.open;
+    const priceOpen = (o) => costOf(o.model, o.usage, o.advisor);
+    let pos = carried.size;
     for (const line of whole.split('\n')) {
+        const at = pos;
+        pos += Buffer.byteLength(line, 'utf8') + 1;
         if (line.length < 50 || line[0] !== '{' || !INTERESTING.test(line)) continue;
         let r;
         try { r = JSON.parse(line); } catch { continue; }
         const usage = r.message && r.message.usage;
         if (!usage) continue;
-        cost += costOf(r.message.model || '', usage);
-        tokens += (usage.input_tokens || 0) + (usage.output_tokens || 0)
-            + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+        // The records of one response sit together in the file, so only the
+        // latest response can still grow. A record with no id of its own is
+        // keyed by where it sits in the file, which is the same whichever look
+        // reads it — so two looks and one look name it identically.
+        const key = responseKey(r, String(at));
+        if (open && key === open.key) {
+            if (usageTotal(usage) > usageTotal(open.usage)) {
+                open = { ...open, usage, model: r.message.model || open.model };
+            }
+            continue;
+        }
+        if (open) {
+            settled.cost += priceOpen(open);
+            settled.tokens += usageTotal(open.usage);
+        }
+        open = { key, usage, model: r.message.model || '', advisor: r.advisorModel || '' };
     }
     const size = carried.size + Buffer.byteLength(whole, 'utf8') + 1;
     return {
@@ -878,8 +903,10 @@ function accrue(file, prev = null) {
         mtime: st.mtimeMs,
         ino: st.ino,
         edge: edgeOf(file, size),
-        cost,
-        tokens,
+        cost: settled.cost + (open ? priceOpen(open) : 0),
+        tokens: settled.tokens + (open ? usageTotal(open.usage) : 0),
+        settled,
+        open,
     };
 }
 

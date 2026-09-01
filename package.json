@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashnlines for Claude — Dashboard & Statusline",
   "description": "Unofficial. A 24-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.50.0",
+  "version": "0.52.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -237,25 +237,19 @@
           "enum": [
             "",
             "opus",
-            "opus[1m]",
             "sonnet",
-            "sonnet[1m]",
             "fable",
-            "fable[1m]",
             "haiku",
             "best",
             "opusplan"
           ],
           "enumDescriptions": [
             "Whatever the client would start on by itself — no --model flag is passed.",
-            "Latest Opus, on its ordinary context window.",
-            "Latest Opus with the million-token context window — a variant of the same model, not the same thing as the entry above.",
-            "Latest Sonnet, on its ordinary context window.",
-            "Latest Sonnet with the million-token context window.",
-            "Latest Fable, on its ordinary context window.",
-            "Latest Fable with the million-token context window.",
+            "Latest Opus. The 1M window comes with Max, Team and Enterprise plans and the API; on Pro, leave this empty and put --model 'opus[1m]', quotes included, in launchArgs.",
+            "Latest Sonnet, on its native 1M window.",
+            "Latest Fable, on its native 1M window.",
             "Latest Haiku.",
-            "Fable 5 where your organization has access to it, the latest Opus otherwise — a question of access, not of the task.",
+            "The latest Fable where your organization has access to it, the latest Opus otherwise — a question of access, not of the task.",
             "Opus while planning, Sonnet for everything else."
           ],
           "default": "",
@@ -301,6 +295,50 @@
           "default": "",
           "markdownDescription": "Turn on the server-side advisor for the session, as `claude --advisor <model>` — a second model that reads the whole conversation and advises the one doing the work.\n\nThe client hides this flag from its own `--help`, but it is a real option and takes an alias or a full model id; an exact id goes in `claudeStatusline.launchArgs` instead.\n\nEmpty passes no flag, which leaves whatever `advisorModel` the client already has. The advisor must rank at or above the model it advises, and the client refuses the pair if it does not."
         },
+        "claudeStatusline.permissionMode": {
+          "type": "string",
+          "scope": "machine",
+          "enum": [
+            "",
+            "default",
+            "acceptEdits",
+            "plan",
+            "auto",
+            "dontAsk",
+            "bypassPermissions"
+          ],
+          "enumDescriptions": [
+            "No --permission-mode flag — the client's own defaultMode and plan decide.",
+            "Manual: reads only run without asking.",
+            "File edits and common filesystem commands run without asking.",
+            "Reads only, plus classifier-approved commands where auto mode is available.",
+            "Everything runs, a classifier model reviews it in the background.",
+            "Only pre-approved tools run; everything else is refused.",
+            "Everything runs, nothing is checked — isolated containers and VMs only."
+          ],
+          "default": "",
+          "markdownDescription": "Start the session in this permission mode, as `claude --permission-mode <mode>`. The mode can still be switched in the session with Shift+Tab; this is where it starts.\n\nEmpty passes no flag and leaves the client's own `defaultMode` and plan defaults in place. User settings only: a repository cannot set it through `.vscode/settings.json`."
+        },
+        "claudeStatusline.fallbackModel": {
+          "type": "string",
+          "scope": "machine",
+          "enum": [
+            "",
+            "opus",
+            "sonnet",
+            "haiku",
+            "sonnet,haiku"
+          ],
+          "enumDescriptions": [
+            "No --fallback-model flag — the client's fallbackModel setting stands.",
+            "Fall back to the latest Opus.",
+            "Fall back to the latest Sonnet.",
+            "Fall back to the latest Haiku.",
+            "Try Sonnet first, then Haiku."
+          ],
+          "default": "",
+          "markdownDescription": "Where a request goes when the model is overloaded or unavailable, as `claude --fallback-model <chain>`. The chain is tried in order for that turn only. An exact model id or a chain not listed goes in `claudeStatusline.launchArgs`.\n\nEmpty passes no flag and leaves the client's own `fallbackModel` setting in place. User settings only, like the arguments."
+        },
         "claudeStatusline.outputStyle": {
           "type": "string",
           "enum": [
@@ -326,7 +364,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Anything else to put on the command line, after the two flags above — `--permission-mode acceptEdits`, `--fallback-model sonnet`, an exact model id.\n\nWritten into the shell exactly as typed, so quoting is yours: a value with brackets in it, such as a `[1m]` suffix, has to be quoted or the shell will read it as a pattern.\n\nThis one is yours alone — a project cannot set it through `.vscode/settings.json`, because free text going into a shell is not something a repository you opened should be able to choose."
+          "markdownDescription": "Anything else to put on the command line, after the flags above — `--add-dir ../shared`, an exact model id.\n\nWritten into the shell exactly as typed, so quoting is yours: a value with brackets in it, such as a `[1m]` suffix, has to be quoted or the shell will read it as a pattern.\n\nThis one is yours alone — a project cannot set it through `.vscode/settings.json`, because free text going into a shell is not something a repository you opened should be able to choose."
         },
         "claudeStatusline.aliasName": {
           "type": "string",

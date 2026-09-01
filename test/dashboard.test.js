@@ -1415,109 +1415,8 @@ test('what a session starts with is a tab of its own, not a panel in Settings', 
     assert.match(launch, /<section class="tab" data-tab="launch"/);
 });
 
-// The tab opens on a verdict, not on a list of options: what the measured answer
-// is today, before the first choice. Without it every visit re-derives the same
-// three figures from memory, and memory is where the wrong one came from.
-test('the launch tab opens with the measured verdict', () => {
-    const launch = db.launchTab({}, {});
-    const banner = launch.indexOf('class="canon"');
-    assert.ok(banner > -1, 'the launch tab needs its verdict banner');
-    assert.ok(banner < launch.indexOf('>Where it opens</h2>'),
-        'the verdict belongs above the first choice');
-    // The three findings it exists to carry, each with the figure that decides it.
-    assert.match(launch, /85\.7%/);
-    assert.match(launch, /44\.4%/);
-    assert.match(launch, /91\.7%/);
-    // A verdict with no date rots silently.
-    assert.match(launch, /2026-08-24/);
-    // The gap is Fable alone *against the pairing* — the system card does measure
-    // Fable alone at max. A negative absolute here would be false, and the figures
-    // above are exactly what would make a reader believe it.
-    assert.match(launch, /against the pairing/);
-    assert.ok(!/Not measured anywhere/.test(launch), 'no unqualified negative absolute');
-});
-
-// A percentage with no benchmark behind it is a number the reader has to take on
-// faith, and three of them read as one measurement rather than three unrelated
-// ones. Each line names what was run, on how much, and by which method — the
-// three figures come from three different documents and two different harnesses,
-// which is exactly what a shared footer hid.
-test('each figure in the verdict names the benchmark it comes from', () => {
-    // The source lines wrap in the template, so a phrase can be split by a
-    // newline the rendered page never shows. Match what the reader sees.
-    const raw = db.launchTab({}, {});
-    const launch = raw.replace(/\s+/g, ' ');
-    // Line one is Anthropic's own repository-task benchmark, published on the
-    // cost-and-intelligence page — it is not in the system card, and naming the
-    // wrong document is how a reader fails to find the figure.
-    assert.match(launch, /internal agentic-coding benchmark/i);
-    assert.match(launch, /370 repository tasks/);
-    // Line two is the system card's own section, and the number is a mean reward
-    // rather than a pass rate — a distinction the bare "44.4%" loses.
-    assert.match(launch, /FrontierBench v0\.1/);
-    assert.match(launch, /mean reward/i);
-    // Line three is Anthropic's cut of SWE-bench Pro, whose scores are explicitly
-    // not comparable to the public leaderboard — where the ordering is the other
-    // way round. Without that sentence 91.7% contradicts the published 79.2%.
-    assert.match(launch, /SWE-bench Pro/);
-    assert.match(launch, /not comparable|not the public leaderboard/i);
-    // Every source line carries its own class, so the page can dim them as one.
-    assert.ok((launch.match(/class="canon-where"/g) || []).length === 3,
-        'one source line per finding');
-});
-
-// Two claims the banner used to make are refuted by the document it cites, and a
-// verdict that is wrong about its own evidence is worse than no verdict: the
-// button below applies it. Both are asserted as absences, because that is the
-// shape the error took — a negative absolute nobody could check from the page.
-test('the verdict claims nothing the system card refutes', () => {
-    const launch = db.launchTab({}, {});
-    // GDPval-AA v2 (ELO 1861 vs 1827) and AA-Briefcase (1720 vs 1693) both put
-    // max above xhigh. What is true is the price of that win, not its absence.
-    assert.ok(!/No published measurement/i.test(launch),
-        'max above xhigh is measured — GDPval-AA and AA-Briefcase');
-    assert.match(launch, /within noise|inside noise/i);
-    assert.match(launch, /GDPval-AA/);
-    // The system card has Opus 5 ahead of Fable on SWE-bench Multimodal (59.4 vs
-    // 54.1) and compares the multimodal sections against Mythos, not Fable; the
-    // measured place Fable pulls ahead is harder work.
-    assert.ok(!/leads on multimodal/i.test(launch), 'unmeasured multimodal claim');
-    assert.match(launch, /DeepResearch Bench II/);
-});
-
-// A verdict the reader has to translate into three separate clicks is a verdict
-// half delivered. The banner names the settings it implies and carries a button
-// that puts them in the controls below — the same three values, so the sentence
-// and the button cannot drift apart.
-test('the verdict banner applies itself to the choices', () => {
-    const launch = db.launchTab({}, {});
-    // Named in the text, not only implied by a percentage.
-    assert.match(launch, /advisor/i);
-    assert.match(launch, /opus 1M/);
-    assert.match(launch, /xhigh/);
-    // The button carries the values it will set, so the page needs no second copy.
-    assert.match(launch, /class="canon-apply"[^>]*data-model="opus\[1m\]"/);
-    assert.match(launch, /data-effort="xhigh"/);
-    assert.match(launch, /data-advisor="fable"/);
-});
-
-// The button is inert without the handler, and the handler lives in the page
-// script rather than in the tab's markup — a test on the markup alone would pass
-// over a button that does nothing.
-test('the page script wires the verdict button', () => {
-    const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0 });
-    // The handler names the button's class and fires an event the form listens
-    // for; without the event the choice changes on screen and Save stays dark.
-    assert.match(html, /canon-apply/);
-    assert.match(html, /dispatchEvent/);
-    // Order is load-bearing, not cosmetic: rankAdvisors runs off the model's own
-    // change event and clears an advisor the new model would refuse, so setting
-    // the advisor first leaves it cleared a moment later.
-    assert.match(html, /\['model', 'effort', 'advisor'\]/);
-});
-
-// Every option here is a name that does not explain itself — `opus 1M` against
-// `opus`, `xhigh` against `max`, `best` against `opusplan`. The descriptions are
+// Every option here is a name that does not explain itself — `xhigh` against
+// `max`, `best` against `opusplan`, `opus` against `fable`. The descriptions are
 // the client's own words; the rates and windows are what the choice costs.
 test('every launch option says what it is for', () => {
     const launch = db.launchTab({ model: 'opus[1m]' }, {});
@@ -1549,7 +1448,7 @@ test('the advisor list is ranked against the model the session starts on', () =>
     const onOpus = db.launchTab({ model: 'opus[1m]', advisor: 'fable' }, {});
     assert.match(onOpus, /below Opus 5 — the client refuses this pair/);
     assert.match(onOpus, /the only tier above Opus 5/);
-    assert.match(onOpus, /the same tier: a second opinion rather than a stronger one/);
+    assert.match(onOpus, /a second Opus reviews the first/);
     // Struck through, not removed: all five options are still drawn.
     assert.equal((onOpus.match(/name="advisor"/g) || []).length, 5);
     assert.equal((onOpus.match(/card-off/g) || []).length, 2, 'sonnet and haiku rank below opus');
@@ -2350,4 +2249,123 @@ test('the clock pill says what the rest of the page says about the clock', () =>
     // pace() floors that number once so every surface says the same thing.
     const html = db.paceTrack(week({ plan: 57, planW: 68, weighted: true, at: NOON + 4 * 86400 + 3600 }));
     assert.match(html, /class="pill pill-muted">.*now 57%/);
+});
+
+// The advisor's tier sits in the efforts map beside the real levels, and it is
+// the one with the most output behind it — a consultation re-reads the whole
+// conversation. Calibrating the effort cards against it would make every level
+// read as a fraction of an advisor's reply.
+test('effortSpend leaves the advisor tier out of the calibration', () => {
+    const efforts = {
+        'claude-fable-5-1|xhigh': { msgs: 400, out: 400 * 800 },
+        'claude-fable-5-1|high': { msgs: 350, out: 350 * 700 },
+        'claude-fable-5-1|advisor': { msgs: 5000, out: 5000 * 9000 },
+    };
+    const out = db.effortSpend({ efforts }, 'fable');
+    assert.equal(out.advisor, undefined);
+    assert.match(out.high, /vs xhigh$/);
+});
+
+// A call to the advisor and a consultation are not the same count: 90 of 541
+// calls in the transcripts here got no answer back and were billed nothing. The
+// tile shows what was priced, and says how many calls that came from.
+test('the Advisor tile counts priced consultations and names the calls beside them', () => {
+    const index = demoIndex({
+        tools: { advisor: { calls: 5, errors: 0, denials: 0 } },
+        efforts: {
+            [ix.effortKey('claude-opus-5', 'xhigh')]: bucket(5, 1, { out: 50 }),
+            [ix.effortKey('claude-fable-5-1', ix.ADVISOR_TIER)]: bucket(30, 3, { in: 3e6, out: 3e4 }),
+        },
+    });
+    const total = ix.summarize(index);
+    const html = db.render(index, total, { files: 1, lastRun: Date.now(), history: [] });
+    const tile = html.match(/<span class="tile-label">Advisor<\/span><span class="tile-value">([^<]*)<\/span>[\s\S]*?<span class="tile-sub">([^<]*)<\/span>/);
+    assert.ok(tile, 'the Advisor tile is on the page');
+    assert.equal(tile[1], '3');
+    assert.match(tile[2], /^5 calls/);
+});
+
+// The `[1m]` variants are gone from the list: Sonnet 5 and the Fable models
+// carry a 1M window natively, and Opus is upgraded to it on Max, Team and
+// Enterprise plans and on the API, so on the Anthropic API the suffix picked
+// nothing. A value saved before the change still lands on its plain card.
+test('the model list has no [1m] variants and a saved one selects its plain card', () => {
+    assert.deepEqual(db.MODELS.map(([v]) => v), ['', 'opus', 'sonnet', 'fable', 'haiku', 'best', 'opusplan']);
+    const launch = db.launchTab({ model: 'opus[1m]' }, {});
+    assert.match(launch, /name="model" value="opus" checked/);
+    assert.ok(!/value="opus\[1m\]"/.test(launch), 'no [1m] card is drawn');
+    assert.match(launch, /\$5\/\$25 · 1M/);
+    assert.match(launch, /\$2\/\$10 · 1M/);
+    assert.match(launch, /on Pro/, 'the panel says where Opus is not 1M');
+});
+
+// What the advisor buys scales with the tier gap, and its price does not: a
+// consult re-reads the whole conversation at the advisor's rate. So each option
+// says what it is for on the model the session starts on — and on a Fable
+// session, where the only advisor the client accepts is Fable itself, the row
+// says plainly that it is a second opinion at the dearest rate, not a stronger
+// model.
+test('the advisor options carry advice for the model they would advise', () => {
+    const onOpus = db.launchTab({ model: 'opus' }, {});
+    assert.match(onOpus, /the pairing Anthropic measured/, 'fable over opus is the measured pairing');
+    assert.match(onOpus, /a second Opus reviews the first/);
+    const onFable = db.launchTab({ model: 'fable' }, {});
+    assert.match(onFable, /not worth turning on/, 'the fable row warns against itself on a fable session');
+    assert.match(onFable, /same tier/);
+    assert.match(onFable, /pays the whole conversation again/);
+    const onSonnet = db.launchTab({ model: 'sonnet' }, {});
+    assert.match(onSonnet, /Fable guidance at decision points without running Fable throughout/);
+    // The sentence is rebuilt in the page when the model changes, so the page
+    // needs the same advice text per (advisor, tier) without a round trip.
+    const script = onOpus.slice(onOpus.lastIndexOf('<script>'));
+    assert.match(onOpus, /data-advice=/);
+});
+
+// Two more of the client's flags become choices: the permission mode the
+// session starts in and the model it falls back to when the primary is
+// overloaded. Both were free text in the extra arguments until now.
+test('permission mode and fallback model are choices on the launch tab and flags on the line', () => {
+    assert.deepEqual(db.PERMISSION_MODES.map(([v]) => v), ['', 'default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions']);
+    assert.deepEqual(db.FALLBACKS.map(([v]) => v), ['', 'opus', 'sonnet', 'haiku', 'sonnet,haiku']);
+    const launch = db.launchTab({ model: 'opus', permissionMode: 'acceptEdits', fallbackModel: 'sonnet,haiku' }, {});
+    assert.match(launch, /name="permissionMode" value="acceptEdits" checked/);
+    assert.match(launch, /name="fallbackModel" value="sonnet,haiku" checked/);
+    assert.match(launch, /isolated containers and VMs only/, 'bypassPermissions carries the client\'s own warning');
+    assert.equal(db.claudeCommand({ model: 'opus', permissionMode: 'acceptEdits', fallbackModel: 'sonnet,haiku', args: '--verbose' }),
+        "claude --model 'opus' --permission-mode 'acceptEdits' --fallback-model 'sonnet,haiku' --verbose");
+    assert.equal(db.claudeCommand({ model: 'opus' }), "claude --model 'opus'");
+});
+
+
+// The header and both rows of tabs stay put while the page scrolls, the way the
+// Save bar stays at the bottom: on a long tab the section you are in is the
+// first thing you want to see, and it was the first thing to leave. One
+// wrapper, sticky at the top, painted in the editor's own background so the
+// panels passing beneath do not show through.
+test('the header and the tab rows stick to the top of the page', () => {
+    const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0 });
+    const top = html.match(/<div class="page-top">([\s\S]*?)<\/div>\n<section/);
+    assert.ok(top, 'header and navigation sit in one .page-top wrapper ahead of the first tab');
+    assert.match(top[1], /<header class="page-head">/);
+    assert.match(top[1], /<nav class="sections">/);
+    assert.match(top[1], /<nav class="tabs/);
+    const css = db.STYLE;
+    assert.match(css, /\.page-top \{[^}]*position: sticky;[^}]*top: 0;/);
+    assert.match(css, /\.page-top \{[^}]*background: var\(--vscode-editor-background\)/);
+});
+
+// A click on a tab or a section starts at the top of what it opened: the scroll
+// position belongs to the pane that was left, and carrying it over lands the
+// reader in the middle of a different page. The restore after a redraw goes
+// the other way — it reopens the same tab and must keep the position — so the
+// scroll-to-top rides the click, not `openTab`.
+test('switching tab or section by click returns to the top of the page', () => {
+    const html = db.render({ files: {} }, ix.summarize(demoIndex()), { files: 0 });
+    const script = html.slice(html.lastIndexOf('<script>'));
+    assert.match(script, /sections\.forEach\(\(btn\) => btn\.addEventListener\('click', \(\) => \{ openSection\(btn\.dataset\.section\); toTop\(\); \}\)\)/);
+    assert.match(script, /tabs\.forEach\(\(btn\) => btn\.addEventListener\('click', \(\) => \{ openTab\(btn\); toTop\(\); \}\)\)/);
+    assert.match(script, /function toTop\(\) \{[^}]*window\.scrollTo\(0, 0\);[^}]*remember\(\{ scrollY: 0 \}\)/);
+    // And the restore path does not scroll: openTab itself stays free of it.
+    const openTab = script.slice(script.indexOf('function openTab('), script.indexOf('function openSection('));
+    assert.ok(!/scrollTo|toTop/.test(openTab), 'openTab must not scroll, the redraw restores through it');
 });

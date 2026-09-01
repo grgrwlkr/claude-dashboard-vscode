@@ -34,6 +34,8 @@ const launchSettings = () => {
         model: conf.get('model') || '',
         effort: conf.get('effort') || '',
         advisor: conf.get('advisor') || '',
+        permissionMode: conf.get('permissionMode') || '',
+        fallbackModel: conf.get('fallbackModel') || '',
         outputStyle: conf.get('outputStyle') || '',
         args: conf.get('launchArgs') || '',
     };
@@ -1090,6 +1092,8 @@ function configView(state) {
         model: cfg.get('model'),
         effort: cfg.get('effort'),
         advisor: cfg.get('advisor'),
+        permissionMode: cfg.get('permissionMode'),
+        fallbackModel: cfg.get('fallbackModel'),
         outputStyle: cfg.get('outputStyle'),
         launchArgs: cfg.get('launchArgs'),
         aliasName: cfg.get('aliasName'),
@@ -1111,14 +1115,17 @@ function configView(state) {
 // avoid. The list is the gate: a message naming anything else is dropped.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
     'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog',
-    'openLocation', 'model', 'effort', 'advisor', 'outputStyle', 'launchArgs', 'aliasName'];
+    'openLocation', 'model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchArgs', 'aliasName'];
 
-// The keys that ignore the scope the page offers. Both are declared `machine`
-// in the manifest — free text going into a shell is not something a repository
-// gets to set, and neither is the name of an alias in your own terminal — and VS
-// Code rejects a workspace write to such a key with an error that would take the
-// rest of the save down with it.
-const USER_ONLY = ['launchArgs', 'aliasName'];
+// The keys that ignore the scope the page offers. All four are declared
+// `machine` in the manifest — free text going into a shell is not something a
+// repository gets to set, neither is the name of an alias in your own terminal,
+// and a permission mode is a security gate: a cloned repository's
+// `.vscode/settings.json` must not be able to start the button's session in
+// `bypassPermissions`, nor name the model it falls back to — and VS Code rejects
+// a workspace write to such a key with an error that would take the rest of the
+// save down with it.
+const USER_ONLY = ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel'];
 
 // The full changelog, when the user has allowed the fetch. One public file, no
 // credentials, and at most once an hour — kept in the extension's own storage
@@ -1299,6 +1306,7 @@ async function handleMessage(context, msg) {
         const c = msg.settings || {};
         const launch = {
             model: c.model, effort: c.effort, advisor: c.advisor,
+            permissionMode: c.permissionMode, fallbackModel: c.fallbackModel,
             outputStyle: c.outputStyle, args: c.launchArgs,
         };
         panel.webview.postMessage({
@@ -1473,6 +1481,7 @@ function installAlias({ settings, home = os.homedir(), shell = process.env.SHELL
 
     const line = dashboard.aliasLine(c.aliasName, {
         model: c.model, effort: c.effort, advisor: c.advisor,
+        permissionMode: c.permissionMode, fallbackModel: c.fallbackModel,
         outputStyle: c.outputStyle, args: c.launchArgs,
     });
     // `aliasLine` builds it from a name it has already checked and a command it
@@ -1995,7 +2004,7 @@ async function openClaudeWith(context) {
     if (!model) return undefined;
     const effort = await pick(values(dashboard.EFFORTS), settings.effort, 'Effort for this session');
     if (!effort) return undefined;
-    return openClaude(context, { model: model.label, effort: effort.label, args: settings.args });
+    return openClaude(context, { ...settings, model: model.label, effort: effort.label });
 }
 
 async function openClaude(context, launch = launchSettings()) {
@@ -2206,6 +2215,7 @@ module.exports = {
     // The places the button can put a session, exported for the one test that
     // holds them against the enum the manifest offers.
     __PLACES: PLACES,
+    __USER_ONLY: USER_ONLY,
     // The section list behind both the tooltips and the Now tab, exported so a
     // test can hold the two renderings against each other.
     __statusNow: statusNow,

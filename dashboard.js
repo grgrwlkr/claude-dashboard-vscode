@@ -657,7 +657,7 @@ function sessionsTab(total) {
         <td class="wrap" title="${esc(s.id)}">${esc(sessionLabel(s))}</td>
         <td class="nowrap opt3"><span class="kind k-${esc(s.kind)}">${esc(s.kind)}</span></td>
         <td class="nowrap opt">${s.entrypoint ? `<span class="kind">${esc(s.entrypoint)}</span>` : '<span class="dim">—</span>'}</td>
-        <td class="nowrap opt3">${esc(s.models.map(shortModel).join(', ') || '—')}</td>
+        <td class="models opt3" title="${esc(s.models.map(shortModel).join(', '))}">${esc(s.models.map(shortModel).join(', ') || '—')}</td>
         <td class="nowrap dim opt">${s.efforts && s.efforts.length ? esc(s.efforts.join(' / ')) : '—'}</td>
         <td class="num opt2">${esc(fmtDur(s.end - s.start))}</td>
         <td class="num opt3">${esc(fmtDur(s.activeMs))}</td>
@@ -1002,7 +1002,7 @@ function modelsTab(total) {
     return `<section class="tab" data-tab="models" hidden>
         ${panel('Spend by model and effort', matrixTable(m.models, m.tiers,
         (model, tier) => (m.get(model, tier) || {}).cost, { rowLabel: shortModel }), {
-        note: "Which model did the work, at which reasoning effort, from which client. A dispatch that forgot to name a model or an effort inherits the session's — and that inheritance is only visible here.",
+        note: "Which model did the work, at which reasoning effort, from which client. A dispatch that forgot to name a model or an effort inherits the session's — and that inheritance is only visible here. The advisor column is its consultations, at the advisor's own rate.",
     })}
         <div class="pair">
           ${panel('Where the requests came from',
@@ -1033,6 +1033,12 @@ function toolsTab(total) {
     const errors = tools.reduce((a, [, t]) => a + t.errors, 0);
     const denials = tools.reduce((a, [, t]) => a + t.denials, 0);
     const advisor = (total.tools.advisor || {}).calls || 0;
+    // A call and a consultation are not the same count: 90 of 541 calls in the
+    // transcripts here came back with no answer and were billed nothing. What
+    // was priced sits on the advisor's own effort rows.
+    const consulted = Object.entries(total.efforts || {})
+        .filter(([key]) => ix.splitEffort(key).effort === ix.ADVISOR_TIER)
+        .reduce((sum, [, b]) => sum + b.msgs, 0);
 
     const servers = {};
     for (const [name, t] of tools) {
@@ -1058,7 +1064,7 @@ function toolsTab(total) {
         tile('Tool calls', String(calls), `${plural(tools.length, 'distinct tool')}`),
         tile('Failed', String(errors), `${pct(errors, calls)} of calls`, rate(errors), 'hot'),
         tile('Denied', String(denials), 'refused by you or by a rule', rate(denials), 'warm'),
-        tile('Advisor', String(advisor), 'consultations — priced server-side, not here'),
+        tile('Advisor', String(consulted), `${advisor} calls · priced at the advisor's own rate`),
     )}
         <div class="pair">
           ${panel('Most used', barList(byCalls, { limit: 16, value: (t) => t.calls, label: (v, t) => (t.errors ? `${v} · ${t.errors} failed` : String(v)) }), {
@@ -1121,7 +1127,7 @@ function cacheTab(total) {
         stackedTokens(total.days, BILLED_PARTS, { height: 150 })
         + `<div class="legend">${BILLED_PARTS.map((p) =>
         `<span class="chip"><i style="background:${p.color}"></i>${esc(p.label)}</span>`).join('')}</div>`, {
-        note: 'A cached token is read at a tenth of the input rate; putting it there costs 1.25x at the five-minute TTL and 2x at the hourly one. Which TTL a request used is recorded per reply, so both sides are exact.',
+        note: 'A cached token is read at a tenth of the input rate, a fortieth on Fable 5.1; putting it there costs 1.25x at the five-minute TTL and 2x at the hourly one. Which TTL a request used is recorded per reply, so both sides are exact.',
     })}
         ${panel('Cache reads, by day', stackedTokens(total.days, READ_PARTS, { height: 110 }), {
         note: 'The same days on their own scale — reads run an order of magnitude above everything above, which is the point of them.',
@@ -1141,7 +1147,7 @@ function cacheTab(total) {
 function breaksPanel(breaks) {
     if (!breaks || !breaks.count) return '';
     const rows = (breaks.top || []).map((b) => `<tr>
-        <td>${b.at ? esc(fmtDateTime(b.at)) : '<span class="dim">—</span>'}</td>
+        <td class="nowrap">${b.at ? esc(fmtDateTime(b.at)) : '<span class="dim">—</span>'}</td>
         <td class="wrap">${esc(b.project || '')}</td>
         <td class="dim opt">${esc(sessionLabel({ id: b.session }))}</td>
         <td class="opt2"><span class="kind">${esc(b.kind || 'main')}</span></td>
@@ -1170,7 +1176,7 @@ function frictionTab(total) {
 
     const mostFailures = worst.length ? `<table><thead><tr><th>Last activity</th><th>Project</th><th>Session</th>
           <th class="num">Failed</th><th class="num opt2">Requests</th><th class="num">Spend</th></tr></thead>
-          <tbody>${worst.map((s) => `<tr><td>${esc(fmtDateTime(s.end))}</td><td>${esc(s.project)}</td>
+          <tbody>${worst.map((s) => `<tr><td class="nowrap">${esc(fmtDateTime(s.end))}</td><td>${esc(s.project)}</td>
             <td class="wrap">${esc(s.title || s.id)}</td><td class="num">${s.errors}</td>
             <td class="num opt2">${s.msgs}</td><td class="num">${esc(fmtCost(s.cost))}</td></tr>`).join('')}
           </tbody></table>` : '<p class="empty">No failed tool calls recorded.</p>';
@@ -2343,15 +2349,19 @@ const SCOPES = [['global', 'my settings'], ['workspace', 'this workspace']];
 // pick behind **Open Claude Code with…** and this page all read from here, and a
 // test holds the manifest to it. The empty value is a real option — it passes no
 // flag and leaves the choice to the client.
-// The `[1m]` entries are not duplicates of the plain ones: the suffix picks the
-// million-token variant of the same model, which the client offers as its own
-// choice — "Opus (1M context)" — and has a `prefer1m` setting for. Without it the
-// session starts on that model's ordinary window.
+// The `[1m]` variants are not offered. Sonnet 5 and the Fable models carry the
+// million-token window natively, so the suffix picks nothing on them, and Opus
+// is upgraded to it on Max, Team and Enterprise plans and on the API; only Pro,
+// with usage credits, and the third-party providers still need `opus[1m]`, and
+// that goes in the extra arguments, quoted, with the model left to the client —
+// `launchArgs` is appended as typed, and an unquoted `opus[1m]` is a zsh glob.
+// A value saved with the suffix before this still lands on its plain card —
+// `plainModel` below strips it for the page.
 const MODELS = [
     ['', 'client decides'],
-    ['opus', 'opus'], ['opus[1m]', 'opus 1M'],
-    ['sonnet', 'sonnet'], ['sonnet[1m]', 'sonnet 1M'],
-    ['fable', 'fable'], ['fable[1m]', 'fable 1M'],
+    ['opus', 'opus'],
+    ['sonnet', 'sonnet'],
+    ['fable', 'fable'],
     ['haiku', 'haiku'],
     ['best', 'best'], ['opusplan', 'opus in plan mode'],
 ];
@@ -2366,14 +2376,11 @@ const MODELS = [
  */
 const MODEL_ABOUT = {
     '': ['', 'No --model flag — whatever the client starts on by itself', ''],
-    opus: ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 200k'],
-    'opus[1m]': ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 1M'],
-    sonnet: ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 200k'],
-    'sonnet[1m]': ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 1M'],
-    fable: ['Fable 5', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 200k'],
-    'fable[1m]': ['Fable 5', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 1M'],
+    opus: ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 1M'],
+    sonnet: ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 1M'],
+    fable: ['Fable 5.1', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 1M'],
     haiku: ['Haiku 4.5', 'Fastest for quick answers', '$1/$5 · 200k'],
-    best: ['Fable 5 or Opus 5', 'Fable where your organization has access to it, latest Opus otherwise', ''],
+    best: ['Fable 5.1 or Opus 5', 'The latest Fable where your organization has access to it, the latest Opus otherwise', ''],
     opusplan: ['Opus 5 → Sonnet 5', 'Opus while planning, Sonnet for execution — the switch also drops the prompt cache', '$5/$25 → $2/$10'],
 };
 const EFFORTS = [
@@ -2409,7 +2416,7 @@ const STYLE_ABOUT = {
 const TIERS = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
 const ADVISOR_ABOUT = {
     opus: ['Opus 5', '$5/$25'], sonnet: ['Sonnet 5', '$2/$10'],
-    fable: ['Fable 5', '$10/$50'], haiku: ['Haiku 4.5', '$1/$5'],
+    fable: ['Fable 5.1', '$10/$50'], haiku: ['Haiku 4.5', '$1/$5'],
 };
 /**
  * The tier a `--model` value resolves to, or '' when it does not name one.
@@ -2433,6 +2440,56 @@ const tierOf = (alias) => {
 const ADVISORS = [
     ['', 'off'],
     ['opus', 'opus'], ['sonnet', 'sonnet'], ['fable', 'fable'], ['haiku', 'haiku'],
+];
+/**
+ * What an advisor buys on each model it may advise, keyed advisor → session
+ * tier. The docs' own pairing table where it has a sentence, and the measured
+ * economics where it does not: a consult re-reads the whole conversation at the
+ * advisor's rate with nothing cached, so what it buys is the tier gap and only
+ * that. Fable over Fable is the one pairing the client accepts for a Fable
+ * session, and it is a second opinion at the dearest rate on the menu — the row
+ * says so rather than letting the pill read like a recommendation.
+ */
+const ADVISOR_ADVICE = {
+    fable: {
+        opus: 'the pairing Anthropic measured: 85.7% against 84.4% for Opus alone, inside run-to-run noise',
+        sonnet: 'Fable guidance at decision points without running Fable throughout',
+        haiku: 'the cheapest session with the strongest planning',
+        fable: 'not worth turning on: the same tier, so a second opinion rather than a stronger model — and every consult pays the whole conversation again at $10/M. Switch it on for one expensive decision with /advisor fable, then off',
+    },
+    opus: {
+        opus: 'a second Opus reviews the first — for high-stakes work where an independent check matters more than cost',
+        sonnet: 'a stronger model at decision points, for less than running Opus throughout',
+        haiku: 'the lowest-cost session with strong planning — dearer than Haiku alone, cheaper than a Sonnet or Opus session',
+    },
+    sonnet: {
+        sonnet: 'a lower-cost second opinion for catching routine oversights',
+        haiku: 'a step up at decision points for very little',
+    },
+    haiku: {},
+};
+// The permission mode the session starts in, as `--permission-mode`. The
+// client's own list and its own one-line verdicts (docs, permission-modes),
+// with `manual` left out: it is an alias of `default`, and one row per mode.
+const PERMISSION_MODES = [
+    ['', 'client decides', 'No --permission-mode flag — the client\'s own defaultMode and plan decide'],
+    ['default', 'manual', 'Reads only run without asking — reviewing every action yourself, sensitive work'],
+    ['acceptEdits', 'accept edits', 'File edits and common filesystem commands run without asking — iterating on code you are reviewing'],
+    ['plan', 'plan', 'Reads only, plus classifier-approved commands where auto mode is available — exploring before changing'],
+    ['auto', 'auto', 'Everything runs, a classifier model reviews it in the background — long tasks, fewer prompts'],
+    ['dontAsk', 'don\'t ask', 'Only pre-approved tools run, everything else is refused — locked-down CI and scripts'],
+    ['bypassPermissions', 'bypass', 'Everything runs, nothing is checked — isolated containers and VMs only'],
+];
+// Where the session goes when its model is overloaded or unavailable, as
+// `--fallback-model`: a comma-separated chain tried in order, for the current
+// turn only, capped at three. The chains offered are the ones that step down;
+// a chain that steps up, or an exact id, goes in the extra arguments.
+const FALLBACKS = [
+    ['', 'client decides', 'No --fallback-model flag — the fallbackModel setting stands, or a failed request is an error'],
+    ['opus', 'opus', 'Fall back to the latest Opus — for a Fable session'],
+    ['sonnet', 'sonnet', 'Fall back to the latest Sonnet'],
+    ['haiku', 'haiku', 'Fall back to the latest Haiku'],
+    ['sonnet,haiku', 'sonnet, then haiku', 'Try Sonnet first, then Haiku — the chain the client\'s own docs show'],
 ];
 // The client's built-in output styles, spelled as the client spells them: the
 // value travels verbatim into `--settings`, and one it does not recognise is
@@ -2608,7 +2665,7 @@ function settingsTab(config) {
  * that was never about the extension at all.
  *
  * Every choice here carries what it is for, because the names alone do not say:
- * `opus 1M` against `opus`, `xhigh` against `max`, `best` against `opusplan`.
+ * `xhigh` against `max`, `best` against `opusplan`, `opus` against `fable`.
  * Two of them carry more than a sentence — the model, where a rate and a window
  * make the options comparable, and the advisor, where the client's own ranking
  * rule decides which options are live at all.
@@ -2643,11 +2700,13 @@ const quoted = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
  * text goes in as typed, because quoting it would break the moment it holds more
  * than one argument.
  */
-function claudeCommand({ model, effort, advisor, outputStyle, args } = {}) {
+function claudeCommand({ model, effort, advisor, permissionMode, fallbackModel, outputStyle, args } = {}) {
     const parts = [CLAUDE_COMMAND];
     if (model) parts.push('--model', quoted(model));
     if (effort) parts.push('--effort', quoted(effort));
     if (advisor) parts.push('--advisor', quoted(advisor));
+    if (permissionMode) parts.push('--permission-mode', quoted(permissionMode));
+    if (fallbackModel) parts.push('--fallback-model', quoted(fallbackModel));
     // The client has no `--output-style` flag; `outputStyle` is an ordinary
     // setting, and `--settings` takes JSON that merges with the settings files —
     // "a key you set here overrides the same key in local, project, or user
@@ -2731,63 +2790,6 @@ function shellRcFor(shell, home = os.homedir()) {
     return '';
 }
 
-/**
- * The one thing the page can say before any choice is made: which settings buy
- * the most for what they cost. The measurements are the evidence, not the
- * subject — the banner exists because the choice below it is otherwise made from
- * a price list and a memory of which name sounds strongest, which is exactly how
- * `max` and Fable ended up being carried for weeks against the numbers.
- *
- * Figures are quoted with the date they were checked. A verdict with no date
- * rots silently, and this one is one system card away from being wrong.
- *
- * Each figure also names the benchmark under it rather than sharing the footer's
- * two document names, because the three come from three different measurements
- * and are not commensurable: 85.7% is a solve rate on Anthropic's own repository
- * tasks, 44.4% is a mean reward on FrontierBench, and 91.7% is a subset of
- * SWE-bench Pro whose scores contradict the public leaderboard by design. A
- * reader who cannot tell which is which reads them as one measurement.
- */
-const launchCanon = () => `<aside class="canon">
-    <h2 class="canon-title">The most you can get for the price</h2>
-    <ul class="canon-list">
-        <li><b>Opus 5 with a Fable advisor</b><i>85.7%</i>
-            the most accurate configuration Anthropic has published &mdash; against Opus alone at
-            84.4% and Fable alone at <code>medium</code> 83.4%. One run does not separate them.
-            <span class="canon-where">Anthropic&rsquo;s internal agentic-coding benchmark, from its
-            cost-and-intelligence page: 370 repository tasks graded by the repositories&rsquo; own
-            tests, run through a plain API agent at the default effort, August 2026. The pairing averaged about two consultations
-            per attempt and cost $8.40 an attempt, against $8.50 and $8.20 for the models alone; an
-            earlier run through Claude Code&rsquo;s own advisor mode put the three in the same
-            order.</span></li>
-        <li><b><code>xhigh</code>, not <code>max</code></b><i>44.4% vs 43%</i>
-            Opus 5 on FrontierBench v0.1, where the system card calls <code>max</code> similar and
-            within noise. Where <code>max</code> does win, <code>xhigh</code> trails it cheaply
-            &mdash; ELO 1827 against 1861 on GDPval-AA v2 with 25% fewer output tokens, 1693 against
-            1720 on AA-Briefcase with 15% fewer.
-            <span class="canon-where">FrontierBench v0.1: 74 terminal and command-line tasks,
-            successor to Terminal-Bench 2.1, scored as mean reward over five attempts each on the
-            mini-SWE-agent harness. Claude Opus 5 system card, sections 8.5, 8.13.4 and 8.13.5.
-            </span></li>
-        <li><b>Opus 5 matches Fable 5</b><i>91.7% vs 91.3%</i>
-            on a coding subset both models largely saturate, at about 60% of the cost &mdash;
-            inside run-to-run noise. On harder work, such as DeepResearch Bench II, Fable&rsquo;s
-            advantage reappears.
-            <span class="canon-where">Anthropic&rsquo;s 482-problem subset of SWE-bench Pro, from
-            the cost-and-intelligence page: cut for its own evaluation harness and not comparable
-            to the public leaderboard &mdash; where the ordering reverses, Fable at 80 against
-            79.2.</span></li>
-    </ul>
-    <p class="canon-set"><span>In the controls below that is
-        <b>model</b> <code>opus 1M</code> &middot; <b>effort</b> <code>xhigh</code> &middot;
-        <b>advisor</b> <code>fable</code> &mdash; Opus does the work, Fable reads the whole
-        conversation and advises it.</span>
-        <button type="button" class="canon-apply" data-model="opus[1m]" data-effort="xhigh"
-            data-advisor="fable">Apply these</button></p>
-    <p class="canon-src">Checked 2026-08-24 against the Claude Opus 5 system card of 2026-07-24 and
-        Anthropic&rsquo;s cost-and-intelligence page. The gap in the evidence: Fable alone above <code>medium</code>
-        against the pairing &mdash; every published comparison uses Fable at <code>medium</code>.</p>
-</aside>`;
 
 function launchTab(config, total, styles) {
     const cfg = config || {};
@@ -2809,6 +2811,7 @@ function launchTab(config, total, styles) {
     // alias built from it, and the command the button runs.
     const launch = {
         model: cfg.model, effort: cfg.effort, advisor: cfg.advisor,
+        permissionMode: cfg.permissionMode, fallbackModel: cfg.fallbackModel,
         outputStyle: cfg.outputStyle, args: cfg.launchArgs,
     };
     const alias = aliasLine(cfg.aliasName, launch);
@@ -2826,6 +2829,8 @@ function launchTab(config, total, styles) {
     // Each model carries the tier it resolves to, so the advisor list below can
     // be re-ranked in the page when this choice changes rather than only when
     // the page is next drawn.
+    // A `[1m]` value saved before the variants left the list selects its plain card.
+    const plainModel = String(cfg.model || '').replace(/\[1m\]$/, '');
     const modelOpts = MODELS.map(([value, label]) => {
         const [real, about, meta] = MODEL_ABOUT[value] || ['', '', ''];
         return [value, label, real ? `${real} — ${about}` : about, meta, '',
@@ -2845,14 +2850,17 @@ function launchTab(config, total, styles) {
         // The sentence without its ranking clause, kept so the page can rewrite
         // the clause when the model changes without losing the sentence.
         const base = `${real} reads the whole conversation and advises`;
+        const advice = session ? (ADVISOR_ADVICE[value] || {})[session] || '' : '';
         const about = base
             + (sole ? ` — the only tier above ${MODEL_ABOUT[session][0]}` : '')
-            + (same ? ' — the same tier: a second opinion rather than a stronger one' : '');
+            + (same && !advice ? ' — the same tier: a second opinion rather than a stronger one' : '')
+            + (advice ? ` — ${advice}` : '');
         return [value, label, about, rate,
             ok ? '' : `below ${MODEL_ABOUT[session][0]} — the client refuses this pair`,
             // The page re-ranks this list when the model changes; these are the
-            // pieces it needs to rebuild a row's sentence without a round trip.
-            { tier: value, rank: String(TIERS[value]), real, base }];
+            // pieces it needs to rebuild a row's sentence without a round trip:
+            // the advice per tier travels as JSON on the row.
+            { tier: value, rank: String(TIERS[value]), real, base, advice: JSON.stringify(ADVISOR_ADVICE[value] || {}) }];
     });
 
     // Effort is billed as output tokens and its scale is calibrated per model, so
@@ -2867,14 +2875,13 @@ function launchTab(config, total, styles) {
     const flags = args ? args.split(/\s+/).filter((a) => a.startsWith('-')).length : 0;
 
     return `<section class="tab" data-tab="launch" hidden>
-        ${launchCanon()}
         ${panel('Where it opens', cards('openLocation', PLACES, cfg.openLocation || 'activeGroup'), {
         note: 'What <b>Open Claude Code</b> runs, and where the session lands. <b>Claude: Open Claude Code with…</b> asks for a model and an effort instead, for a single run.',
         aside: statePills(['opens', named(cfg.openLocation || 'activeGroup', PLACES)]),
     })}
-        ${panel('Model', cards('model', modelOpts, cfg.model || ''), {
-        note: 'The session starts on it, as <code>claude --model</code>. Rates are per million tokens, in and out; the window is what the model is given to remember. Left alone, no flag is passed at all.',
-        aside: statePills(['model', named(cfg.model || '', MODELS), !cfg.model],
+        ${panel('Model', cards('model', modelOpts, plainModel), {
+        note: 'The session starts on it, as <code>claude --model</code>. Rates are per million tokens, in and out; the window is what the model is given to remember. Opus runs with the 1M window on Max, Team and Enterprise plans and on the API; on Pro it is 200k, and 1M is bought with usage credits by leaving the model to the client and putting <code>--model &#39;opus[1m]&#39;</code>, quotes included, in the extra arguments. Left alone, no flag is passed at all.',
+        aside: statePills(['model', named(plainModel, MODELS), !cfg.model],
             modelMeta ? ['', modelMeta] : null),
     })}
         ${panel('Effort', cards('effort', effortOpts, cfg.effort || ''), {
@@ -2882,9 +2889,17 @@ function launchTab(config, total, styles) {
         aside: statePills(['effort', named(cfg.effort || '', EFFORTS), !cfg.effort]),
     })}
         ${panel('Advisor', cards('advisor', advisorOpts, cfg.advisor || ''), {
-        note: 'A second model reads the whole conversation and advises the one doing the work, as <code>claude --advisor</code>. It must rank at or above the model it advises — pairings the client would refuse are dimmed here, with the reason, rather than rejected later. The advisor is billed for re-reading the conversation on every call.',
+        note: 'A second model reads the whole conversation and advises the one doing the work, as <code>claude --advisor</code>. It must rank at or above the model it advises — pairings the client would refuse are dimmed here, with the reason, rather than rejected later. Every consult sends the whole conversation again at the advisor\'s input rate, nothing cached: on this machine a Fable consult runs $3–4, a dozen Opus replies. What it buys is the tier gap, so each row says what it is for on the model chosen above.',
         aside: statePills(['advisor', named(cfg.advisor || '', ADVISORS), !cfg.advisor],
             cfg.advisor ? ['', ADVISOR_ABOUT[cfg.advisor][1]] : null),
+    })}
+        ${panel('Permission mode', cards('permissionMode', PERMISSION_MODES, cfg.permissionMode || ''), {
+        note: 'Which actions run without asking, as <code>claude --permission-mode</code>. The mode can still be switched in the session with Shift+Tab; this is where it starts. Writes to protected paths are never auto-approved outside bypass.',
+        aside: statePills(['mode', named(cfg.permissionMode || '', PERMISSION_MODES), !cfg.permissionMode]),
+    })}
+        ${panel('Fallback model', cards('fallbackModel', FALLBACKS, cfg.fallbackModel || ''), {
+        note: 'Where a request goes when the model is overloaded or unavailable, as <code>claude --fallback-model</code>. The chain is tried in order for that turn only; the next message tries the primary model again. Not the classifier fallback — a refused request on Fable or Opus 5 re-runs on the Opus the client picks, whatever is set here.',
+        aside: statePills(['fallback', named(cfg.fallbackModel || '', FALLBACKS), !cfg.fallbackModel]),
     })}
         ${panel('Output style',
         cards('outputStyle', STYLES.map(([v, l]) => [v, l, STYLE_ABOUT[v]]), cfg.outputStyle || '')
@@ -2903,7 +2918,7 @@ function launchTab(config, total, styles) {
     })}
         ${panel('Extra arguments',
         `<input id="launchArgs" class="wide" type="text" spellcheck="false"
-                placeholder="--permission-mode acceptEdits --fallback-model sonnet"
+                placeholder="--add-dir ../shared --model claude-opus-5-20260101"
                 value="${esc(cfg.launchArgs || '')}">`, {
         note: 'Anything else for that command line, written as typed — user settings only.',
         aside: statePills(flags ? ['', `${flags} extra flag${flags === 1 ? '' : 's'}`] : ['', 'none', true]),
@@ -2953,7 +2968,10 @@ function effortSpend(total, modelAlias) {
     const rows = [];
     for (const [key, bucket] of Object.entries(efforts)) {
         const [model, effort] = key.split('|');
-        if (!effort || !bucket.msgs) continue;
+        // The advisor's tier has the most output behind any row — a
+        // consultation re-reads the whole conversation — and calibrating the
+        // levels against it would make each read as a fraction of that.
+        if (!effort || effort === ix.ADVISOR_TIER || !bucket.msgs) continue;
         // Matched on the tier's name inside the model id. For `opusplan` that
         // means the Opus half only, so its figures are the Opus phase rather
         // than the mixture the session would actually run — approximate, and
@@ -3069,8 +3087,17 @@ function openSection(id) {
   if (mine[0]) openTab(mine[0]);
 }
 
-sections.forEach((btn) => btn.addEventListener('click', () => openSection(btn.dataset.section)));
-tabs.forEach((btn) => btn.addEventListener('click', () => openTab(btn)));
+// A click starts at the top of what it opened: the scroll position belongs to
+// the pane that was left, and carried over it lands the reader mid-way down a
+// different page. The saved position is cleared with it, or the next redraw
+// would put the old offset back. The restore after a redraw reopens the same
+// tab through openTab and keeps its position, so this rides the click alone.
+function toTop() {
+  window.scrollTo(0, 0);
+  remember({ scrollY: 0 });
+}
+sections.forEach((btn) => btn.addEventListener('click', () => { openSection(btn.dataset.section); toTop(); }));
+tabs.forEach((btn) => btn.addEventListener('click', () => { openTab(btn); toTop(); }));
 
 // Restore where the reader was before the last redraw. What to restore is read
 // out first: opening a section opens its first tab, which writes over the very
@@ -3331,9 +3358,12 @@ if (list && api) {
       if (about && about.dataset.base) {
         const sole = ok && above.length === 1 && above[0] === rank;
         const same = ok && tier && rank === mine;
+        let advice = '';
+        try { advice = tier ? (JSON.parse(r.dataset.advice || '{}')[tier] || '') : ''; } catch { advice = ''; }
         about.textContent = about.dataset.base
           + (sole ? ' — the only tier above ' + real : '')
-          + (same ? ' — the same tier: a second opinion rather than a stronger one' : '');
+          + (same && !advice ? ' — the same tier: a second opinion rather than a stronger one' : '')
+          + (advice ? ' — ' + advice : '');
       }
     }
   };
@@ -3389,30 +3419,6 @@ if (list && api) {
     form.addEventListener('change', () => { settleSave(); askCommand(); });
   }
 
-  // The banner states a verdict; this puts that verdict into the controls it is
-  // about, so reading it and acting on it are not two separate jobs.
-  //
-  // Model goes first on purpose: rankAdvisors runs off the model's own change
-  // event and clears the advisor when the pair would be refused, so setting the
-  // advisor before the model would hand it a model it no longer has.
-  // Assigning the checked property fires nothing by itself, so each input is
-  // told to announce the change: that is what lights Save and re-ranks the
-  // advisor rows.
-  for (const btn of document.querySelectorAll('.canon-apply')) {
-    btn.addEventListener('click', () => {
-      for (const name of ['model', 'effort', 'advisor']) {
-        const want = btn.dataset[name];
-        if (want == null) continue;
-        const input = document.querySelector('input[name="' + name + '"][value="' + want + '"]');
-        // A value this client no longer offers leaves the row alone rather than
-        // clearing it: a stale button must not silently unset a live choice.
-        if (!input || input.disabled) continue;
-        input.checked = true;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
-  }
-
   // Through the editor: a webview's own clipboard write is not guaranteed, and
   // handing this line over is the whole reason it is drawn.
   document.addEventListener('click', (e) => {
@@ -3458,6 +3464,8 @@ if (list && api) {
         model: picked('model', ''),
         effort: picked('effort', ''),
         advisor: picked('advisor', ''),
+        permissionMode: picked('permissionMode', ''),
+        fallbackModel: picked('fallbackModel', ''),
         outputStyle: picked('outputStyle', ''),
         launchArgs: document.getElementById('launchArgs').value.trim(),
         aliasName: document.getElementById('aliasName').value.trim(),
@@ -3770,6 +3778,7 @@ function render(index, total, meta) {
     return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <title>Dashnlines for Claude</title><style>${STYLE}</style></head><body>
+<div class="page-top">
 <header class="page-head">
   <div class="mark">${MARK}<h1>Dashnlines for Claude</h1><span class="pill" data-version>v${esc(VERSION)}</span></div>
   <div class="pills">
@@ -3782,6 +3791,7 @@ function render(index, total, meta) {
   </div>
 </header>
 ${navHtml()}
+</div>
 ${nowTab(meta.now, meta.workflows, meta.metrics)}
 ${overviewTab(total, dayModels, modelOrder, meta.config || {})}
 ${sessionsTab(total)}
@@ -3812,7 +3822,7 @@ ${changelogTab(meta.system || {}, meta.config || {})}
 
 module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
-    lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, mcpServer,
+    lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, effortSpend, mcpServer,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab, launchTab,
     claudeCommand, aliasLine, withAliasBlock, shellRcFor,
@@ -3823,7 +3833,7 @@ module.exports = {
     PLACES,
     // The launch vocabularies, read by the manifest's test, by the Settings tab
     // above and by the quick pick behind **Open Claude Code with…**.
-    MODELS, EFFORTS, ADVISORS, STYLES,
+    MODELS, EFFORTS, ADVISORS, STYLES, PERMISSION_MODES, FALLBACKS, ADVISOR_ADVICE,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

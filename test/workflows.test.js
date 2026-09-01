@@ -1312,3 +1312,47 @@ test('an agent row shows the effort it ran on beside its model', () => {
     // inventing the session's rung.
     assert.ok(!/medium|high|low/.test(without.description), without.description);
 });
+
+// The records of one response repeat one usage, and a look can land between
+// them: the first look counts the opening record and the next one the rest, and
+// the response still costs what it costs once, from its fullest record.
+test('accrue charges a response once however many records and looks it spans', () => tree((t) => {
+    const { costOf } = require('../pricing');
+    const part = (id, usage) => JSON.stringify({
+        type: 'assistant', requestId: id, timestamp: '2026-08-09T10:00:00Z',
+        message: { model: 'claude-opus-5', usage, content: [{ type: 'text', text: 'x' }] },
+    });
+    const file = path.join(t.root, 'agent-split.jsonl');
+    fs.writeFileSync(file, `${part('req-1', { input_tokens: 5, output_tokens: 100 })}\n`);
+    const one = wf.accrue(file, null);
+    assert.equal(one.tokens, 105);
+
+    fs.appendFileSync(file, [
+        part('req-1', { input_tokens: 5, output_tokens: 100 }),
+        part('req-1', { input_tokens: 5, output_tokens: 300 }),
+        part('req-2', { input_tokens: 5, output_tokens: 100 }),
+        '',
+    ].join('\n'));
+    const all = wf.accrue(file, one);
+    assert.deepEqual(all, wf.accrue(file, null), 'two looks add up to exactly what one look sees');
+    assert.equal(all.tokens, 305 + 105);
+    const expected = costOf('claude-opus-5', { input_tokens: 5, output_tokens: 300 })
+        + costOf('claude-opus-5', { input_tokens: 5, output_tokens: 100 });
+    assert.ok(Math.abs(all.cost - expected) < 1e-9, `cost ${all.cost}, expected ${expected}`);
+}));
+
+// A record names the advisor it consulted, and an entry without a model of its
+// own is priced at that. Written after the code, as a guard rather than a
+// red-first test: the path existed already, this pins it.
+test("accrue prices an advisor entry without a model at the record's advisor", () => tree((t) => {
+    const { costOf } = require('../pricing');
+    const file = path.join(t.root, 'agent-advised.jsonl');
+    const usage = { input_tokens: 5, output_tokens: 100, iterations: [{ type: 'advisor_message', input_tokens: 1e6 }] };
+    fs.writeFileSync(file, `${JSON.stringify({
+        type: 'assistant', requestId: 'req-1', timestamp: '2026-08-09T10:00:00Z', advisorModel: 'claude-fable-5-1',
+        message: { model: 'claude-opus-5', usage, content: [{ type: 'text', text: 'x' }] },
+    })}\n`);
+    const got = wf.accrue(file, null);
+    const expected = costOf('claude-opus-5', { input_tokens: 5, output_tokens: 100 }) + 10;
+    assert.ok(Math.abs(got.cost - expected) < 1e-9, `cost ${got.cost}, expected ${expected}`);
+}));

@@ -11,7 +11,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { costOf, cacheSplit, cacheSaving } = require('./pricing');
+const { costOf, cacheSplit, cacheSaving, advisorUsages, usageTotal, responseKey, SYNTHETIC_MODEL } = require('./pricing');
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -32,7 +32,15 @@ const PROJECTS = path.join(HOME, '.claude', 'projects');
 // 8: Bedrock, Vertex and gateway model ids canonicalise to the model they name,
 // so what was billed at the Opus fallback is billed at its own rate — a rate fix
 // again, and stored aggregates keep the old money without a bump.
-const INDEX_VERSION = 8;
+// 9: Fable 5.1 and Mythos 5.1 get a rate, a cache read is priced per model, and
+// an advisor's consultation — an `advisor_message` entry of `usage.iterations`,
+// left out of the record's own counters — is priced at the advisor's rate. All
+// three are money, and money is baked in.
+// 10: the consultation moves to the advisor's own row of `models` and
+// `efforts`; an index of 9 holds it on the executor's row.
+// 11: a session row lists the advisor among its models and drops `<synthetic>`
+// from them; an index of 10 has the list the other way round.
+const INDEX_VERSION = 11;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only
@@ -178,7 +186,7 @@ function bucket() {
 
 const BUCKET_FIELDS = ['in', 'out', 'cacheRead', 'cacheWrite', 'cw1h', 'cw5m', 'saved', 'cost', 'msgs'];
 
-function add(map, key, usage, model) {
+function add(map, key, usage, model, advisor = '') {
     if (!key) return null;
     const b = map[key] || (map[key] = bucket());
     const cache = cacheSplit(usage);
@@ -188,8 +196,8 @@ function add(map, key, usage, model) {
     b.cacheWrite += cache.total;
     b.cw1h += cache.hour;
     b.cw5m += cache.min5;
-    b.saved += cacheSaving(model, usage);
-    b.cost += costOf(model, usage);
+    b.saved += cacheSaving(model, usage, advisor);
+    b.cost += costOf(model, usage, advisor);
     b.msgs++;
     return b;
 }
@@ -457,20 +465,15 @@ function indexFile(file, root = PROJECTS) {
  * record that closes a response, while the skill and effort are on the opening
  * one, and the charged record is neither by construction.
  */
-function usageTotal(u) {
-    return (u.input_tokens || 0) + (u.output_tokens || 0)
-        + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-}
-
 function holdResponse(pending, r, usage, at) {
     // A record with no request id belongs to no group and is charged alone.
-    const key = r.requestId || `solo:${r.uuid || pending.size}`;
+    const key = responseKey(r, String(pending.size));
     const held = pending.get(key);
     if (!held) {
         pending.set(key, {
             usage, at, model: r.message.model || '', skill: r.attributionSkill || '',
             branch: r.gitBranch || '', effort: r.effort || '', entrypoint: r.entrypoint || '',
-            speed: usage.speed || '',
+            speed: usage.speed || '', advisor: r.advisorModel || '',
         });
         return;
     }
@@ -490,6 +493,7 @@ function holdResponse(pending, r, usage, at) {
     if (!held.branch) held.branch = r.gitBranch || '';
     if (!held.effort) held.effort = r.effort || '';
     if (!held.entrypoint) held.entrypoint = r.entrypoint || '';
+    if (!held.advisor) held.advisor = r.advisorModel || '';
     // Beside the usage rather than inside it. `speed` rides on the record that
     // closes a response, and the charged record is whichever is fullest —
     // nothing makes those the same one, so a field kept inside `usage` would be
@@ -499,13 +503,20 @@ function holdResponse(pending, r, usage, at) {
 
 /** One held response, into every bucket that counts it. */
 function charge(agg, row, held, meta, models, efforts) {
-    const { usage, at, model } = held;
-    const tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0)
-        + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+    const { usage, at, model, advisor } = held;
+    const tokens = usageTotal(usage);
+
+    // A consultation is the advisor's spend. The buckets keyed by model — models
+    // and efforts — book it to the advisor's own row, under no effort, and the
+    // reply to the executor's without it; every other bucket keeps the whole
+    // reply, consultation included, because the day, the branch and the skill
+    // paid for both.
+    const { iterations, ...own } = usage;
+    const consults = advisorUsages(usage, advisor);
 
     if (at) {
-        add(agg.days, dayKey(at), usage, model);
-        add(agg.hours, String(new Date(at).getHours()), usage, model);
+        add(agg.days, dayKey(at), usage, model, advisor);
+        add(agg.hours, String(new Date(at).getHours()), usage, model, advisor);
     }
 
     const uncached = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
@@ -516,10 +527,14 @@ function charge(agg, row, held, meta, models, efforts) {
             at, uncached, session: meta.sessionId, project: row.project, kind: meta.kind,
         }, BREAKS_PER_FILE);
     }
-    add(agg.models, model, usage, model);
-    if (held.branch) { add(agg.branches, held.branch, usage, model); row.branch = held.branch; }
+    add(agg.models, model, own, model);
+    for (const it of consults) {
+        add(agg.models, it.model || 'advisor', it, it.model);
+        add(agg.efforts, effortKey(it.model || 'advisor', ADVISOR_TIER), it, it.model);
+    }
+    if (held.branch) { add(agg.branches, held.branch, usage, model, advisor); row.branch = held.branch; }
     if (held.skill) {
-        const b = add(agg.skills, held.skill, usage, model);
+        const b = add(agg.skills, held.skill, usage, model, advisor);
         // When it last ran, which is the difference between "installed and idle"
         // and "was useful in June". A max rather than a sum, so it travels
         // beside BUCKET_FIELDS rather than in it.
@@ -528,15 +543,19 @@ function charge(agg, row, held, meta, models, efforts) {
     // The reasoning tier is recorded per reply, so a session that switched effort
     // mid-way is counted honestly on both sides of the switch. Model and effort
     // share a key because neither is meaningful without the other.
-    add(agg.efforts, effortKey(model, held.effort), usage, model);
-    if (row.agentType) add(agg.agents, row.agentType, usage, model);
-    if (held.entrypoint) add(agg.entrypoints, held.entrypoint, usage, model);
-    if (held.speed) add(agg.speeds, held.speed, usage, model);
+    add(agg.efforts, effortKey(model, held.effort), own, model);
+    if (row.agentType) add(agg.agents, row.agentType, usage, model, advisor);
+    if (held.entrypoint) add(agg.entrypoints, held.entrypoint, usage, model, advisor);
+    if (held.speed) add(agg.speeds, held.speed, usage, model, advisor);
 
-    models.add(model);
+    // The models that answered in this session: the executor and whichever
+    // advisor it consulted. `<synthetic>` is the client's stand-in for a reply
+    // that never came, a message but not a model — it stays out of the list.
+    if (model !== SYNTHETIC_MODEL) models.add(model);
+    for (const it of consults) if (it.model) models.add(it.model);
     efforts.add(held.effort || '');
     row.msgs++;
-    row.cost += costOf(model, usage);
+    row.cost += costOf(model, usage, advisor);
     row.tokens += tokens;
     row.out += usage.output_tokens || 0;
     row.cacheRead += usage.cache_read_input_tokens || 0;
@@ -544,7 +563,10 @@ function charge(agg, row, held, meta, models, efforts) {
 }
 
 // Model and effort in one key, with a separator that cannot occur in either.
+// A consultation has no effort and is not a reply that forgot to send one, so
+// the advisor's row carries a tier of its own rather than the empty one.
 const EFFORT_SEP = '|';
+const ADVISOR_TIER = 'advisor';
 const effortKey = (model, effort) => `${model}${EFFORT_SEP}${effort || ''}`;
 const splitEffort = (key) => {
     const at = key.indexOf(EFFORT_SEP);
@@ -922,7 +944,7 @@ module.exports = {
     monthToDate, peakParallel, exportJson, exportCsv,
     PROJECTS, INDEX_VERSION, SUBAGENT_RE, INTERESTING,
     describeFile, projectName, indexFile, walk, loadIndex, freshIndex, saveIndex, refreshIndex,
-    summarize, dayKey, bucket, emptyAgg, emptyFriction, emptyBreaks, effortKey, splitEffort,
+    summarize, dayKey, bucket, emptyAgg, emptyFriction, emptyBreaks, effortKey, splitEffort, ADVISOR_TIER,
     CACHE_BREAK_TOKENS, readAgentMeta,
     promptText, tallyWords, trimWords, lenBucket, LEN_BUCKETS,
 };

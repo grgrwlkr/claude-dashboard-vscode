@@ -331,7 +331,7 @@ tooltips.
 
 | Tab | What it answers |
 | --- | --- |
-| Models & effort | spend as a model × effort matrix, which client the requests came from (`cli`, `claude-vscode`, `sdk-py`), output per request per tier |
+| Models & effort | spend as a model × effort matrix with an `advisor` column for consultations, which client the requests came from (`cli`, `claude-vscode`, `sdk-py`), output per request per tier |
 | Cache | share served from cache, what the reads saved, reads per token written, the 1h/5m TTL split, and the replies the cache could not answer — calls that sent more than 100k of input at the full rate, largest first |
 | Friction | failed tool calls, denials, compactions and the context they dropped, sessions with the most failures |
 | Limits | the weekly window over time, one line per week, overlaid against the even-spend diagonal |
@@ -507,10 +507,12 @@ All of these apply the moment they change; none needs a window reload.
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
 | `claudeStatusline.openLocation` | `activeGroup` | Where **Open Claude Code** puts the session: `activeGroup` a tab in the group you are looking at, `beside` a tab in a new group to the right, `panel` the terminal panel at the bottom, `newWindow` a tab moved out into its own window |
-| `claudeStatusline.model` | `""` | Start the session on this model, as `claude --model <alias>`, from the aliases the client accepts: `opus`, `opus[1m]`, `sonnet`, `sonnet[1m]`, `fable`, `fable[1m]`, `haiku`, `best`, `opusplan`. A `[1m]` entry is the million-token variant of that model, not a duplicate of it. Empty passes no flag and leaves the choice to the client |
+| `claudeStatusline.model` | `""` | Start the session on this model, as `claude --model <alias>`, from the aliases the client accepts: `opus`, `sonnet`, `fable`, `haiku`, `best`, `opusplan`. Opus runs with the 1M window on Max, Team and Enterprise plans and on the API; on Pro, leave this empty and put `--model 'opus[1m]'`, quotes included, in `claudeStatusline.launchArgs`. Empty passes no flag and leaves the choice to the client |
 | `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>`: `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
 | `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>`: `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |
 | `claudeStatusline.outputStyle` | `""` | Ask for an output style for the session: `default`, `Proactive`, `Explanatory`, `Learning`, `Concise`. There is no flag for it, so it travels as `--settings '{"outputStyle":"…"}'`, which merges with your settings files rather than replacing them. A style of your own is a markdown file in `~/.claude/output-styles`; the **Setup → Launch** tab lists what is there and writes the name here for you |
+| `claudeStatusline.permissionMode` | `""` | Start the session in this permission mode, as `claude --permission-mode <mode>`: `default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`. Shift+Tab still switches it in the session. Empty passes no flag. User settings only |
+| `claudeStatusline.fallbackModel` | `""` | Where a request goes when the model is overloaded or unavailable, as `claude --fallback-model <chain>`: `opus`, `sonnet`, `haiku`, `sonnet,haiku`. Tried in order, for that turn only. Empty passes no flag. User settings only |
 | `claudeStatusline.aliasName` | `""` | A name for the same session started from a terminal. The **Setup → Launch** tab writes out `alias <name>='claude …'` carrying every choice above it, copies it on a click, and can write it into `~/.zshrc` on the **Write to ~/.zshrc** button. A name is what a shell accepts for one, or no line is offered. User settings only |
 | `claudeStatusline.launchArgs` | `""` | Anything else for the command line, after those: `--permission-mode acceptEdits`, an exact model id. Written as typed, so quoting is yours. User settings only, so a project cannot set it through `.vscode/settings.json` |
 | `claudeStatusline.renameTabs` | `true` | Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title. Only terminals this extension opened, and only while one of them is the active terminal — VS Code's rename acts on the active terminal |
@@ -541,30 +543,25 @@ and untick **Dashnlines for Claude: Open** to put it away; the segments are list
 there as **Dashnlines for Claude 1**, **2**, and so on.
 
 **The session can be started on settings of your own**: the model, how hard it
-thinks, whether a second model advises it, and how it answers you. That is the
-**Setup → Launch** tab, one panel per choice, each option carrying what it is for
-and what it costs:
+thinks, whether a second model advises it, which actions run without asking,
+where a request goes when the model is overloaded, and how it answers you. That
+is the **Setup → Launch** tab, one panel per choice, each option carrying what it
+is for and what it costs:
 
-![Starting a session: the verdict banner over seven panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the output style with the client's five above the ones you wrote yourself, any extra arguments, and the command the button runs with a shell alias for it](media/screenshots/launch-dark.png)
-
-The tab opens on a banner of what the published measurements say: the Opus 5 +
-Fable advisor pairing at 85.7%, `xhigh` at 44.4% against `max` at 43%, and Opus 5
-at 91.7% against Fable 5 at 91.3% for about 60% of the cost. Each figure names
-the benchmark behind it, its size and its method, and the footer carries the date
-the three were checked. An **Apply these** button sets the settings the verdict
-implies — model `opus 1M`, effort `xhigh`, advisor `fable` — in the controls
-below; the write is still yours to save.
+![Starting a session: nine panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the permission mode, the fallback model, the output style with the client's five above the ones you wrote yourself, any extra arguments, and the command the button runs with a shell alias for it](media/screenshots/launch-dark.png)
 
 Each choice becomes one flag on the command line the button runs, and each one
 left alone passes no flag, so the client decides exactly as it did before. A
 fully configured button runs:
 
 ```bash
-claude --model 'opus[1m]' --effort 'max' --advisor 'fable' --settings '{"outputStyle":"Explanatory"}' --permission-mode acceptEdits
+claude --model 'opus' --effort 'max' --advisor 'fable' --settings '{"outputStyle":"Explanatory"}' --permission-mode acceptEdits
 ```
 
-Values are quoted on the way in: unquoted, `opus[1m]` is a shell pattern and zsh
-answers `no matches found` without running anything.
+The extension quotes its own flags on the way in; the extra arguments are
+appended as typed, so a bracketed value there is written quoted, as
+`--model 'opus[1m]'` — unquoted, zsh reads it as a pattern and answers
+`no matches found` without running anything.
 
 The tab writes that line out under the choices with a button that copies it, and
 under it the same command as a shell alias, named in
