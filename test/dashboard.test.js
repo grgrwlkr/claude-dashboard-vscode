@@ -2285,18 +2285,20 @@ test('the Advisor tile counts priced consultations and names the calls beside th
     assert.match(tile[2], /^5 calls/);
 });
 
-// The `[1m]` variants are gone from the list: Sonnet 5 and the Fable models
-// carry a 1M window natively, and Opus is upgraded to it on Max, Team and
-// Enterprise plans and on the API, so on the Anthropic API the suffix picked
-// nothing. A value saved before the change still lands on its plain card.
-test('the model list has no [1m] variants and a saved one selects its plain card', () => {
-    assert.deepEqual(db.MODELS.map(([v]) => v), ['', 'opus', 'sonnet', 'fable', 'haiku', 'best', 'opusplan']);
+// The `[1m]` variants are offered again. Behind a gateway (`ANTHROPIC_BASE_URL`),
+// on Pro and on the third-party providers the client cannot verify a 1M window
+// and gives the model 200k unless the suffix is on the id — 0.52.0 dropped the
+// cards on the Anthropic-API reading alone. A value saved with the suffix
+// selects its own card, not the plain one.
+test('the model list offers the [1m] variants and a saved one selects its own card', () => {
+    assert.deepEqual(db.MODELS.map(([v]) => v),
+        ['', 'opus', 'opus[1m]', 'sonnet', 'sonnet[1m]', 'fable', 'fable[1m]', 'haiku', 'best', 'opusplan']);
     const launch = db.launchTab({ model: 'opus[1m]' }, {});
-    assert.match(launch, /name="model" value="opus" checked/);
-    assert.ok(!/value="opus\[1m\]"/.test(launch), 'no [1m] card is drawn');
+    assert.match(launch, /name="model" value="opus\[1m\]" checked/);
+    assert.ok(!/name="model" value="opus" checked/.test(launch), 'the plain card is not the one checked');
     assert.match(launch, /\$5\/\$25 · 1M/);
-    assert.match(launch, /\$2\/\$10 · 1M/);
-    assert.match(launch, /on Pro/, 'the panel says where Opus is not 1M');
+    assert.match(launch, /\$10\/\$50 · 1M/);
+    assert.match(launch, /gateway/, 'the panel says where the suffix is needed');
 });
 
 // What the advisor buys scales with the tier gap, and its price does not: a

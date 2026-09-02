@@ -2349,19 +2349,21 @@ const SCOPES = [['global', 'my settings'], ['workspace', 'this workspace']];
 // pick behind **Open Claude Code with…** and this page all read from here, and a
 // test holds the manifest to it. The empty value is a real option — it passes no
 // flag and leaves the choice to the client.
-// The `[1m]` variants are not offered. Sonnet 5 and the Fable models carry the
-// million-token window natively, so the suffix picks nothing on them, and Opus
-// is upgraded to it on Max, Team and Enterprise plans and on the API; only Pro,
-// with usage credits, and the third-party providers still need `opus[1m]`, and
-// that goes in the extra arguments, quoted, with the model left to the client —
-// `launchArgs` is appended as typed, and an unquoted `opus[1m]` is a zsh glob.
-// A value saved with the suffix before this still lands on its plain card —
-// `plainModel` below strips it for the page.
+// The `[1m]` entries are not duplicates of the plain ones: the suffix asks for
+// the million-token window explicitly. On the Anthropic API the plain alias
+// already gets it — Sonnet 5 and the Fable models natively, Opus on Max, Team
+// and Enterprise plans — which is what 0.52.0 read when it dropped the
+// variants. It is the wrong reading everywhere else: behind a gateway
+// (`ANTHROPIC_BASE_URL`), on Pro and on the third-party providers the client
+// cannot verify a 1M window and gives the model 200k unless the id carries the
+// suffix (`bL()` in the client, 2.1.258: the suffix returns 1M before any other
+// check; the native-1M path runs only first-party). A corporate proxy is a
+// gateway, and a launcher that pins the model there has no other way to 1M.
 const MODELS = [
     ['', 'client decides'],
-    ['opus', 'opus'],
-    ['sonnet', 'sonnet'],
-    ['fable', 'fable'],
+    ['opus', 'opus'], ['opus[1m]', 'opus 1M'],
+    ['sonnet', 'sonnet'], ['sonnet[1m]', 'sonnet 1M'],
+    ['fable', 'fable'], ['fable[1m]', 'fable 1M'],
     ['haiku', 'haiku'],
     ['best', 'best'], ['opusplan', 'opus in plan mode'],
 ];
@@ -2376,9 +2378,12 @@ const MODELS = [
  */
 const MODEL_ABOUT = {
     '': ['', 'No --model flag — whatever the client starts on by itself', ''],
-    opus: ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 1M'],
-    sonnet: ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 1M'],
-    fable: ['Fable 5.1', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 1M'],
+    opus: ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 1M on Max+, else 200k'],
+    'opus[1m]': ['Opus 5', 'Best for everyday, complex tasks', '$5/$25 · 1M, explicit'],
+    sonnet: ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 1M native, 200k via gateway'],
+    'sonnet[1m]': ['Sonnet 5', 'Efficient for routine tasks', '$2/$10 · 1M, explicit'],
+    fable: ['Fable 5.1', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 1M native, 200k via gateway'],
+    'fable[1m]': ['Fable 5.1', 'Most capable for your hardest and longest-running tasks', '$10/$50 · 1M, explicit'],
     haiku: ['Haiku 4.5', 'Fastest for quick answers', '$1/$5 · 200k'],
     best: ['Fable 5.1 or Opus 5', 'The latest Fable where your organization has access to it, the latest Opus otherwise', ''],
     opusplan: ['Opus 5 → Sonnet 5', 'Opus while planning, Sonnet for execution — the switch also drops the prompt cache', '$5/$25 → $2/$10'],
@@ -2829,8 +2834,6 @@ function launchTab(config, total, styles) {
     // Each model carries the tier it resolves to, so the advisor list below can
     // be re-ranked in the page when this choice changes rather than only when
     // the page is next drawn.
-    // A `[1m]` value saved before the variants left the list selects its plain card.
-    const plainModel = String(cfg.model || '').replace(/\[1m\]$/, '');
     const modelOpts = MODELS.map(([value, label]) => {
         const [real, about, meta] = MODEL_ABOUT[value] || ['', '', ''];
         return [value, label, real ? `${real} — ${about}` : about, meta, '',
@@ -2879,9 +2882,9 @@ function launchTab(config, total, styles) {
         note: 'What <b>Open Claude Code</b> runs, and where the session lands. <b>Claude: Open Claude Code with…</b> asks for a model and an effort instead, for a single run.',
         aside: statePills(['opens', named(cfg.openLocation || 'activeGroup', PLACES)]),
     })}
-        ${panel('Model', cards('model', modelOpts, plainModel), {
-        note: 'The session starts on it, as <code>claude --model</code>. Rates are per million tokens, in and out; the window is what the model is given to remember. Opus runs with the 1M window on Max, Team and Enterprise plans and on the API; on Pro it is 200k, and 1M is bought with usage credits by leaving the model to the client and putting <code>--model &#39;opus[1m]&#39;</code>, quotes included, in the extra arguments. Left alone, no flag is passed at all.',
-        aside: statePills(['model', named(plainModel, MODELS), !cfg.model],
+        ${panel('Model', cards('model', modelOpts, cfg.model || ''), {
+        note: 'The session starts on it, as <code>claude --model</code>. Rates are per million tokens, in and out; the window is what the model is given to remember. The plain alias leaves the window to the client: Opus is 1M on Max, Team and Enterprise plans and on the API, 200k on Pro; Sonnet 5 and Fable are 1M natively. Behind a gateway (<code>ANTHROPIC_BASE_URL</code>), on Pro and on third-party providers the client cannot verify 1M and gives 200k unless the <code>[1m]</code> variant is chosen. Left alone, no flag is passed at all.',
+        aside: statePills(['model', named(cfg.model || '', MODELS), !cfg.model],
             modelMeta ? ['', modelMeta] : null),
     })}
         ${panel('Effort', cards('effort', effortOpts, cfg.effort || ''), {

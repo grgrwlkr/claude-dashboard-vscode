@@ -331,7 +331,7 @@ test('the page shows the launch settings it was saved with', async () => {
     let panel;
     try {
         panel = await openDashboard();
-        assert.match(panel.webview.html, /name="model" value="opus" checked/);
+        assert.match(panel.webview.html, /name="model" value="opus\[1m\]" checked/);
         assert.match(panel.webview.html, /name="effort" value="max" checked/);
         assert.match(panel.webview.html, /id="launchArgs"[^>]*value="--fallback-model sonnet"/);
     } finally { if (panel) panel.dispose(); run.dispose(); }

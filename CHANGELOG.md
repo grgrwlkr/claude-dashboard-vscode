@@ -7,6 +7,14 @@ is a pre-release and an **even** one is a stable release.
 
 ## [Unreleased]
 
+## [0.52.1] — 2026-09-02
+
+### Fixed
+
+- `opus[1m]`, `sonnet[1m]` and `fable[1m]` are back on the Launch tab and in `claudeStatusline.model`.
+- A saved `[1m]` value selects its own card on the Launch tab.
+- The Model panel's note says where the plain alias runs on 200k: behind a gateway, on Pro, on third-party providers.
+
 ## [0.52.0] — 2026-09-02
 
 ### Added
