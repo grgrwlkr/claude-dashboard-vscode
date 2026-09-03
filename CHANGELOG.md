@@ -5,7 +5,15 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
-## [Unreleased]
+## [0.54.0] — 2026-09-03
+
+### Changed
+
+- The Limits tab shows the four newest weekly windows; the rest open with **Show N older windows**.
+- Lines and legend entries on the Limits chart fade with the window's age; hovering a line or its legend entry lifts both.
+- The limit history keeps 52 weeks of readings instead of 20 000 rows.
+- Opening the dashboard keeps one **Claude: opening the dashboard** notification up through indexing, fetching, the machine snapshot and rendering.
+- The changelog, docs and marketplace requests run in parallel on open, each with a 10-second timeout.
 
 ## [0.52.1] — 2026-09-02
 

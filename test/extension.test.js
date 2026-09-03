@@ -1124,6 +1124,54 @@ test('the Now tab and the tooltips are cut from the same sections', async () => 
 
 // The page is rebuilt on the same interval as the bar, and a rebuild throws away
 // whatever the document held — which is fine for a table and fatal for a form.
+// Opening the dashboard is the index, three network fetches, the machine
+// snapshot and the render; the notification used to cover the index alone,
+// and the fetches ran one after another with no timeout on two of them.
+test('opening the dashboard keeps one notification up through every phase and fetches in parallel', async () => {
+    const run = activate({ segments: ['{weekly}'], settings: { fetchChangelog: true, checkPluginUpdates: true } });
+    const seen = { titles: [], messages: [] };
+    const origProgress = vscode.window.withProgress;
+    vscode.window.withProgress = async (opts, task) => {
+        seen.titles.push(opts.title);
+        return task({ report: (r) => { if (r.message) seen.messages.push(r.message); } });
+    };
+    // Every request waits on one gate that opens once three are in flight —
+    // or after a moment, so sequential code fails the count instead of hanging.
+    const started = [];
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let inFlight = 0;
+    const settle = () => { inFlight = started.length; release(); };
+    const timer = setTimeout(settle, 1500);
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async (url, opts = {}) => {
+        started.push({ url: String(url), signal: opts.signal });
+        if (started.length >= 3) settle();
+        await gate;
+        return { ok: false, status: 503, text: async () => '', json: async () => [] };
+    };
+    try {
+        await ext.__showDashboard(run.context);
+    } finally {
+        clearTimeout(timer);
+        vscode.window.withProgress = origProgress;
+        globalThis.fetch = origFetch;
+        // The panel outlives activate(); closed here or the next test finds it.
+        const panel = vscode.__panels[vscode.__panels.length - 1];
+        if (panel) panel.dispose();
+        run.dispose();
+    }
+    assert.deepEqual(seen.titles, ['Claude: opening the dashboard'], 'one notification for the whole open');
+    let at = -1;
+    for (const phase of ['indexing', 'fetching', 'reading the machine', 'rendering']) {
+        const i = seen.messages.findIndex((m, j) => j > at && m.startsWith(phase));
+        assert.ok(i > at, `phase "${phase}" is reported in order; saw ${JSON.stringify(seen.messages)}`);
+        at = i;
+    }
+    assert.ok(inFlight >= 3, `the changelog and both docs pages are requested together, not one after another (${inFlight} in flight)`);
+    for (const r of started) assert.ok(r.signal instanceof AbortSignal, `${r.url} carries a timeout`);
+});
+
 test('the open dashboard is rebuilt on the tick, except while settings are open', async () => {
     const run = activate({ segments: ['{weekly}'] });
     let panel;

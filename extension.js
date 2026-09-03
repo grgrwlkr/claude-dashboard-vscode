@@ -950,31 +950,30 @@ const indexRoot = () => process.env.CLAUDE_STATUSLINE_PROJECTS || ix.PROJECTS;
 
 // Indexing a gigabyte of transcripts takes seconds on the first run, so it
 // happens inside a progress notification the user can watch — and reuses the
-// stored fingerprints on every run after that.
-async function buildIndex(storageDir, { force = false, silent = false } = {}) {
+// stored fingerprints on every run after that. Opening the dashboard hands in
+// the notification it already holds, so the index reports into that one rather
+// than raising a second.
+async function buildIndex(storageDir, { force = false, silent = false, progress = null } = {}) {
     // A refresh nobody asked for does not get a notification: the page is
     // already on screen, and a toast every minute is the opposite of ambient.
     if (silent) return ix.refreshIndex(storageDir, { root: indexRoot() });
-    return vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: 'Claude: indexing transcripts',
-        cancellable: false,
-    }, async (progress) => {
+    const run = (p) => {
         if (force) ix.saveIndex(storageDir, { version: ix.INDEX_VERSION, files: {} });
-        let lastPct = 0;
-        const result = await new Promise((resolve) => {
+        return new Promise((resolve) => {
             // setImmediate lets the notification paint before the synchronous
             // read begins; without it the first run looks like a frozen window.
             setImmediate(() => resolve(ix.refreshIndex(storageDir, {
                 root: indexRoot(),
-                onProgress: (done, total) => {
-                    const p = Math.floor((done / total) * 100);
-                    if (p > lastPct) { progress.report({ increment: p - lastPct, message: `${done}/${total}` }); lastPct = p; }
-                },
+                onProgress: (done, total) => p.report({ message: `indexing ${done}/${total}` }),
             })));
         });
-        return result;
-    });
+    };
+    if (progress) return run(progress);
+    return vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Claude: indexing transcripts',
+        cancellable: false,
+    }, run);
 }
 
 // The installation snapshot without the disk walk takes milliseconds; with it,
@@ -1150,6 +1149,12 @@ let clientCache = null;
  * packaged one is never discarded — an offline machine still gets defaults and
  * descriptions, just dated ones.
  */
+// The longest any request the dashboard open waits on may take. Two of them
+// had no bound at all, and through a tunnel a stalled raw.githubusercontent.com
+// held the open for half a minute with nothing on screen; the docs pages had
+// fifteen seconds. Past this the cache answers and the page opens.
+const FETCH_TIMEOUT_MS = 10000;
+
 async function loadRegistry(storageDir) {
     const packaged = () => {
         try { return require('./claude-settings-registry.json'); } catch { return {}; }
@@ -1165,7 +1170,7 @@ async function loadRegistry(storageDir) {
     try {
         const [settingsMd, envMd] = await Promise.all(
             [DOCS_URL.settings, DOCS_URL.env].map(async (url) => {
-                const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+                const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
                 return res.ok ? res.text() : '';
             }),
         );
@@ -1203,6 +1208,7 @@ async function fetchMarketHeads(updates) {
         try {
             const res = await fetch(`https://api.github.com/repos/${repo}/commits?per_page=1`, {
                 headers: { Accept: 'application/vnd.github+json' },
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
             });
             if (!res.ok) return;
             const body = await res.json();
@@ -1223,7 +1229,7 @@ async function fetchChangelog(storageDir) {
     }
     if (changelogCache.text && Date.now() - changelogCache.at < CHANGELOG_TTL) return changelogCache.text;
     try {
-        const res = await fetch(CHANGELOG_URL);
+        const res = await fetch(CHANGELOG_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
         if (!res.ok) return changelogCache.text;
         const text = await res.text();
         // A body that is not a changelog is not written over the good copy: a
@@ -1515,32 +1521,55 @@ async function showDashboard(context, { force = false, silent = false } = {}) {
     // page stale and start a second build of the same reading.
     lastRender = Date.now();
     const storageDir = context.globalStorageUri.fsPath;
-    const { index, stats } = await buildIndex(storageDir, { force, silent });
-    const total = ix.summarize(index);
-    checkBudget(context, total);
-    const changelogText = await fetchChangelog(storageDir);
-    clientCache = clientSettings({
-        chain: s.settingsChain((barState && barState.workspace) || ''),
-        registry: await loadRegistry(storageDir),
-        hostEnv: process.env,
-    });
-    const marketHeads = await fetchMarketHeads(sys.pluginUpdates());
-    const html = dashboard.render(index, total, {
-        files: stats.total,
-        lastRun: Date.now(),
-        history: hist.readHistory(storageDir),
-        system: { ...systemSnapshot(barState, index, { force, changelogText }), marketHeads },
-        config: configView(barState),
-        client: clientCache,
-        // The same sections the tooltips are cut from, so the Now tab and the
-        // hover cannot disagree about a number.
-        now: statusNow(barState),
-        metrics: statusMetrics(barState, storageDir),
-        // Read from the state the ticks fill rather than scanned here: the panel
-        // and the tree then show one reading of the machine, and opening the
-        // dashboard does not pay for a second walk of every project directory.
-        workflows: (barState && barState.workflows) || [],
-    });
+    // Everything up to the markup runs under one notification, named for what
+    // is being waited on. It used to cover the index alone: on a warm index
+    // that is a fifth of a second, after which the three fetches and the disk
+    // walk ran in silence — up to half a minute of it through a slow tunnel,
+    // with nothing on screen to say the open was still in progress.
+    const build = async (progress) => {
+        const step = (message) => { if (progress) progress.report({ message }); };
+        step('indexing');
+        const { index, stats } = await buildIndex(storageDir, { force, silent, progress });
+        const total = ix.summarize(index);
+        checkBudget(context, total);
+        // Together rather than in turn: each is bounded by FETCH_TIMEOUT_MS,
+        // so the worst case is one timeout, not three.
+        step('fetching changelog, docs and marketplaces');
+        const [changelogText, registry, marketHeads] = await Promise.all([
+            fetchChangelog(storageDir),
+            loadRegistry(storageDir),
+            fetchMarketHeads(sys.pluginUpdates()),
+        ]);
+        clientCache = clientSettings({
+            chain: s.settingsChain((barState && barState.workspace) || ''),
+            registry,
+            hostEnv: process.env,
+        });
+        step('reading the machine');
+        const system = { ...systemSnapshot(barState, index, { force, changelogText }), marketHeads };
+        step('rendering');
+        return dashboard.render(index, total, {
+            files: stats.total,
+            lastRun: Date.now(),
+            history: hist.readHistory(storageDir),
+            system,
+            config: configView(barState),
+            client: clientCache,
+            // The same sections the tooltips are cut from, so the Now tab and the
+            // hover cannot disagree about a number.
+            now: statusNow(barState),
+            metrics: statusMetrics(barState, storageDir),
+            // Read from the state the ticks fill rather than scanned here: the panel
+            // and the tree then show one reading of the machine, and opening the
+            // dashboard does not pay for a second walk of every project directory.
+            workflows: (barState && barState.workflows) || [],
+        });
+    };
+    const html = silent ? await build(null) : await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Claude: opening the dashboard',
+        cancellable: false,
+    }, build);
 
     if (!panel) {
         panel = vscode.window.createWebviewPanel(
@@ -2225,6 +2254,7 @@ module.exports = {
     // The tick's own redraw, exported so a test can fire it without waiting a
     // minute for the interval.
     __refreshDashboard: refreshDashboard,
+    __showDashboard: showDashboard,
     // The hover's own outcome table, exported for the one test that holds the
     // three of them — this, OUTCOME_ICONS and the stylesheet's `.o-*` rules —
     // against each other. They are three legitimate representations of one

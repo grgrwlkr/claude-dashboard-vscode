@@ -226,7 +226,10 @@ td.share.wide i { left: 0; right: auto; }
 .hm { fill: currentColor; opacity: .07; }
 .hm.l1 { opacity: .25; } .hm.l2 { opacity: .45; } .hm.l3 { opacity: .68; } .hm.l4 { opacity: .92; }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 14px; }
-.chip { display: inline-flex; align-items: center; gap: 5px; opacity: .75; font-size: 11px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; opacity: var(--fade, .75); font-size: 11px; }
+/* The window legend: a chip fades with its window's age and comes up whole under
+   the pointer, along with the line it names (`lit`, set by the page script). */
+.chip[data-w]:hover, .chip.lit { opacity: 1; }
 .chip i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 /* .dim inside an already-faded chip would multiply down to a third of the text
    colour, which is past legible for something that carries a date. */
@@ -360,6 +363,14 @@ td.nowrap, th.nowrap { white-space: nowrap; overflow-wrap: normal; }
 .grid { stroke: currentColor; opacity: .12; }
 .plan { stroke: currentColor; opacity: .35; stroke-dasharray: 4 4; }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+/* Windows past the shown set are in the SVG and the legend, folded until the
+   button under the legend opens the panel. Hovering a line lifts it out of the
+   fade, which is how a revealed window at the floor is told from its neighbours;
+   a CSS rule outranks the presentation attribute that set the fade. */
+.line.folded, .dot.folded, .chip.folded { display: none; }
+.more-open .line.folded, .more-open .dot.folded { display: inline; }
+.more-open .chip.folded { display: inline-flex; }
+.line:hover, .line.lit, .dot.lit { opacity: 1; }
 code { font-family: var(--dash-mono); font-size: 11.5px; opacity: .85; }
 .kv { width: 100%; }
 /* The key column stays as narrow as its content allows but may wrap: an env

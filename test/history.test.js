@@ -116,28 +116,52 @@ test('sessionSeries ignores readings that carried no session limit', () => {
 });
 
 // The one path that rewrites the file whole, and the only one with nothing
-// covering it. On this machine's own data it first runs somewhere past day 94,
-// which is a bad moment for its first execution to be in production: it replaces
-// a history nobody can get back.
-test('past the threshold the file is rewritten to the newest MAX_ROWS', () => store((dir) => {
-    const over = Math.ceil(h.MAX_ROWS * 1.2) + 1;
-    // Written straight to disk: going through recordLimits would need one call
-    // per row, and what is under test is the trim, not the appending.
-    const rows = Array.from({ length: over }, (_, i) => (
-        { at: T0 + i * 60000, weekly: 10, session: 10, reset: RESET, models: {} }
+// covering it. On this machine's own data it first runs about a year in, which
+// is a bad moment for its first execution to be in production: it replaces a
+// history nobody can get back.
+test('a reading older than KEEP_MS is dropped when the file is rewritten', () => store((dir) => {
+    // Fifty-four weeks of readings, one every six hours; the oldest fortnight
+    // is past the year plus the slack that lets the file grow between rewrites.
+    const step = 6 * 3600 * 1000;
+    const n = Math.ceil((54 * h.WEEK_MS) / step);
+    const now = T0 + n * step;
+    const rows = Array.from({ length: n }, (_, i) => (
+        { at: T0 + i * step, weekly: 10, session: 10, reset: RESET, models: {} }
     ));
     fs.writeFileSync(h.historyPath(dir), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
 
     // A reading that differs, so it is recorded and the trim is reached.
-    assert.equal(h.recordLimits(dir, limits(99), T0 + over * 60000).written, true);
+    assert.equal(h.recordLimits(dir, limits(99), now).written, true);
 
     const kept = h.readHistory(dir);
-    assert.equal(kept.length, h.MAX_ROWS, 'the file is cut to MAX_ROWS, not left to grow');
+    assert.ok(kept.length < rows.length, 'the file is cut, not left to grow');
+    assert.ok(kept[0].at >= now - h.KEEP_MS, 'nothing older than a year survives');
+    assert.ok(kept[0].at - step < now - h.KEEP_MS, 'the cut is at the year, not deeper');
     assert.equal(kept[kept.length - 1].weekly, 99, 'the newest reading survives');
-    assert.equal(kept[0].at, T0 + (over + 1 - h.MAX_ROWS) * 60000, 'the oldest rows are the ones dropped');
     // Rewritten via tmp+rename, so nothing of the temporary file is left behind.
     assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
 }));
+
+test('the file is left alone while its oldest reading is within the year', () => store((dir) => {
+    const step = 6 * 3600 * 1000;
+    const n = Math.ceil((52 * h.WEEK_MS) / step);
+    const now = T0 + n * step;
+    const rows = Array.from({ length: n }, (_, i) => (
+        { at: T0 + i * step, weekly: 10, session: 10, reset: RESET, models: {} }
+    ));
+    fs.writeFileSync(h.historyPath(dir), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    assert.equal(h.recordLimits(dir, limits(99), now).written, true);
+    assert.equal(h.readHistory(dir).length, n + 1, 'a year of readings is kept whole');
+}));
+
+test('weeklyWindows keeps every window unless told a limit', () => {
+    const rows = [];
+    for (let i = 0; i < 10; i++) {
+        const reset = RESET + i * 604800;
+        rows.push({ at: reset * 1000 - h.WEEK_MS / 2, weekly: i, reset });
+    }
+    assert.equal(h.weeklyWindows(rows).length, 10);
+});
 
 // The mark: the one fact about a week that cannot be recomputed afterwards.
 test('a window that ran out is marked once, with the plan of that moment', () => store((dir) => {

@@ -242,7 +242,7 @@ addEventListener('load', () => {
       // Anything behind a "show the rest" button is still content of this tab —
       // and on the Changelog tab it is 346 of the 361 rows. Unopened, the probe
       // measures fifteen and calls the tab clean.
-      for (const more of pane.querySelectorAll('[data-more]')) more.click();
+      for (const more of pane.querySelectorAll('[data-more], [data-fold]')) more.click();
       for (const el of pane.querySelectorAll('*')) {
         const r = el.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) continue;

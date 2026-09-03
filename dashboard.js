@@ -364,6 +364,11 @@ function hourChart(hours, { width = 420, height = 132 } = {}) {
  * this week's slope can be read against the ones before it. The dashed diagonal
  * is the linear plan — spending the window evenly.
  */
+// Opacity by rank from the newest window; anything older than the table sits at
+// its last entry. The floor is faint on purpose — a folded window revealed is
+// there to be found under the pointer, not to compete with this week.
+const FADE = [1, 0.7, 0.5, 0.35, 0.2].map((v) => String(v).replace(/^0/, ''));
+
 function lineChart(series, { width = 760, height = 200, xMax = 7, xLabel = (v) => `${v}d` } = {}) {
     if (!series.length || series.every((s) => s.points.length === 0)) {
         return '<p class="empty">Nothing recorded yet.</p>';
@@ -391,10 +396,19 @@ function lineChart(series, { width = 760, height = 200, xMax = 7, xLabel = (v) =
         const last = pts[pts.length - 1];
         const color = modelColor(s.label, i);
         // The newest window is the one being asked about; the older ones are
-        // context and fade back so the eye lands on the right line first.
-        const faded = s.current ? '' : ' opacity=".45"';
-        return `<path class="line" d="${d}" stroke="${color}"${faded}><title>${esc(s.label)}</title></path>`
-            + `<circle cx="${X(last.x).toFixed(1)}" cy="${Y(last.y).toFixed(1)}" r="${s.current ? 3.5 : 2.5}" fill="${color}"${faded}/>`;
+        // context and step back with age so the eye lands on the right line
+        // first and reads the rest as a receding stack. `age` is the window's
+        // rank from the newest, not its calendar distance: a fortnight away
+        // would otherwise draw the second-newest line at the floor while its
+        // chip sits second in the legend, which reads as a line gone missing.
+        const age = typeof s.age === 'number' ? s.age : (s.current ? 0 : 1);
+        const fade = age === 0 ? '' : ` opacity="${FADE[Math.min(age, FADE.length - 1)]}"`;
+        const folded = s.folded ? ' folded' : '';
+        // `data-w` pairs the line with its legend chip, so hovering the chip
+        // can light the line: the chip is the easier target, and a faint line
+        // in a braid of ten is found by its name before it is found by eye.
+        return `<path class="line${folded}" d="${d}" stroke="${color}"${fade} data-w="${i}"><title>${esc(s.label)}</title></path>`
+            + `<circle class="dot${folded}" cx="${X(last.x).toFixed(1)}" cy="${Y(last.y).toFixed(1)}" r="${age === 0 ? 3.5 : 2.5}" fill="${color}"${fade} data-w="${i}"/>`;
     }).join('');
 
     return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img">${grid}${lines}</svg>`;
@@ -1212,17 +1226,24 @@ function weekLabel(reset, nowMs) {
     return back === 1 ? 'last week' : `${back} weeks ago`;
 }
 
+const SHOWN_WINDOWS = 4;
+
 function limitsTab(history, nowMs = Date.now()) {
     // Sorted here rather than trusted: the caller reads a file that several
     // windows append to, and "the last row" has to mean the latest reading.
     const rows = (history || []).slice().sort((a, b) => a.at - b.at);
     const windows = hist.weeklyWindows(rows);
-    const series = windows.map((w) => ({
+    const series = windows.map((w, i) => ({
         label: weekLabel(w.reset, nowMs),
         // Still running, rather than last in the list: after a week away the
         // newest window on file is history too, and nothing is "now".
         current: w.reset * 1000 > nowMs,
         reset: w.reset,
+        age: windows.length - 1 - i,
+        // The log holds a year, the chart shows the newest few: past four the
+        // lines cross into one braid and the legend runs to a second row. The
+        // rest are in the page, faint, one button away.
+        folded: windows.length - 1 - i >= SHOWN_WINDOWS,
         points: w.points.map((p) => ({ x: p.day, y: p.pct })),
     }));
     const last = rows[rows.length - 1];
@@ -1236,9 +1257,18 @@ function limitsTab(history, nowMs = Date.now()) {
 
     const models = last && last.models ? Object.entries(last.models).sort((a, b) => b[1] - a[1]) : [];
 
+    const hidden = series.filter((s) => s.folded).length;
+    const chip = (s, i) => {
+        // A variable rather than an inline opacity, so the hover rule in the
+        // stylesheet can override it; an inline style outranks any selector.
+        const fade = s.age === 0 ? ' style="--fade:1"' : ` style="--fade:${FADE[Math.min(s.age, FADE.length - 1)]}"`;
+        return `<span class="chip${s.folded ? ' folded' : ''}"${fade} data-w="${i}"><i style="background:${modelColor(s.label, i)}"></i>${esc(s.label)}`
+            + `<span class="dim">· ${s.current ? 'resets' : 'ended'} ${esc(fmtDateTime(s.reset * 1000))}</span></span>`;
+    };
+    const older = plural(hidden, 'older window');
     const overlaid = lineChart(series)
-        + `<div class="legend">${series.map((s, i) =>
-        `<span class="chip"><i style="background:${modelColor(s.label, i)}"></i>${esc(s.label)}<span class="dim">· ${s.current ? 'resets' : 'ended'} ${esc(fmtDateTime(s.reset * 1000))}</span></span>`).join('')}</div>`
+        + `<div class="legend">${series.map(chip).join('')}</div>`
+        + (hidden ? `<button class="btn" data-fold data-show="Show ${older}" data-hide="Hide ${older}">Show ${older}</button>` : '')
         + (series.length === 1 ? '<p class="note">Only one window has been recorded so far, so there is nothing to compare it against yet — the older lines appear as resets go by.</p>' : '');
 
     return `<section class="tab" data-tab="limits" hidden>
@@ -3182,6 +3212,28 @@ document.addEventListener('click', (e) => {
     more.remove();
     return;
   }
+  // Same fold, but the button stays and turns back into "Hide": the older
+  // windows are context to glance at, not a backlog to read once.
+  const fold = e.target.closest('[data-fold]');
+  if (fold) {
+    const open = fold.closest('.panel-body').classList.toggle('more-open');
+    fold.textContent = open ? fold.dataset.hide : fold.dataset.show;
+    return;
+  }
+});
+
+// A legend chip lights its line while the pointer is on it. The pair is found
+// by key inside the same panel, so two charts on one page cannot cross-light.
+const litLine = (e, on) => {
+  const chip = e.target.closest('.chip[data-w]');
+  if (!chip) return;
+  const body = chip.closest('.panel-body');
+  if (!body) return;
+  for (const el of body.querySelectorAll('[data-w="' + chip.dataset.w + '"]')) el.classList.toggle('lit', on);
+};
+document.addEventListener('mouseover', (e) => litLine(e, true));
+document.addEventListener('mouseout', (e) => litLine(e, false));
+document.addEventListener('click', (e) => {
   // A directory: shown in the OS file manager rather than opened as a document.
   const show = e.target.closest('[data-reveal]');
   if (show && api) {
@@ -3826,6 +3878,7 @@ ${changelogTab(meta.system || {}, meta.config || {})}
 module.exports = {
     render, stackedDays, heatmap, barList, hourChart, dayModelMatrix,
     lineChart, stackedTokens, matrixTable, quantiles, effortMatrix, effortSpend, mcpServer,
+    SCRIPT,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab, launchTab,
     claudeCommand, aliasLine, withAliasBlock, shellRcFor,

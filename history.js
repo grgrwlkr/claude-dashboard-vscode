@@ -18,18 +18,21 @@ const FILE = 'limits-history.jsonl';
 // stretch and a closed laptop look identical on the chart.
 const HEARTBEAT_MS = 6 * 3600 * 1000;
 
-// Three to five months of ordinary use, measured rather than guessed (checked
-// 2026-08-12): full days in the two histories on this machine carry 139, 162,
-// 253 and 255 rows, so 20000 rows is 78–144 days and the trim first fires,
-// at 1.2x, somewhere between day 94 and day 173. The comment here used to say
-// "about two years", which would need 27 rows a day — below every day observed,
-// including a partial one. The file is trimmed from the front when it grows past
-// this, so the chart loses its oldest weeks rather than the disk filling up
-// unattended.
-const MAX_ROWS = 20000;
-const TRIM_SLACK = 1.2;
-
 const WEEK_MS = 604800 * 1000;
+
+// A year of readings, cut by age rather than by count. The chart thinks in
+// windows, so the promise worth making is "this many weeks", and a cap on rows
+// kept a quiet month longer than a busy one: the previous 20000-row cap was
+// worth three to five months when it was measured (2026-08-12, 139–255 rows a
+// day) and twelve weeks at the 240 a day seen since. At ~85 bytes a row a year
+// is 90 000 rows and ~7.5 MB, a size the disk does not notice; what a bigger
+// file costs is the parse on every dashboard redraw, which is why the year is
+// not "keep everything". The file is trimmed from the front once its oldest
+// reading is a week past the year — the slack keeps the rewrite from running
+// on every append after the first — so the chart loses its oldest windows
+// rather than the file growing unattended.
+const KEEP_MS = 52 * WEEK_MS;
+const TRIM_SLACK_MS = WEEK_MS;
 
 function historyPath(dir) {
     return path.join(dir, FILE);
@@ -101,14 +104,14 @@ function recordLimits(dir, lim, nowMs = Date.now()) {
         fs.appendFileSync(historyPath(dir), JSON.stringify(point) + '\n');
     } catch { return { written: false, reason: 'write-failed' }; }
 
-    if (rows.length + 1 > MAX_ROWS * TRIM_SLACK) trim(dir, [...rows, point]);
+    if (rows.length && rows[0].at < nowMs - KEEP_MS - TRIM_SLACK_MS) trim(dir, [...rows, point], nowMs);
     return { written: true, reason: last ? 'changed' : 'first' };
 }
 
 // Rewritten whole rather than truncated in place: a partial write here would
 // corrupt the file the extension reads on every dashboard open.
-function trim(dir, rows) {
-    const keep = rows.slice(-MAX_ROWS);
+function trim(dir, rows, nowMs) {
+    const keep = rows.filter((r) => r.at >= nowMs - KEEP_MS);
     const tmp = `${historyPath(dir)}.${process.pid}.tmp`;
     try {
         fs.writeFileSync(tmp, keep.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -177,7 +180,7 @@ function hourlyProfile(rows) {
     return total > 0 ? out : null;
 }
 
-function weeklyWindows(rows, limit = 6) {
+function weeklyWindows(rows, limit = Infinity) {
     const windows = [];
     for (const r of rows) {
         if (!r.reset) continue;
@@ -212,7 +215,7 @@ function weeklyWindows(rows, limit = 6) {
 // runs on `(100 - pct) / pct`, so at 100% it collapses onto the present and says
 // "now" forever after: the moment the quota actually ended is only knowable to
 // whoever wrote it down at the time. The reading history above would answer it —
-// but it is trimmed at MAX_ROWS, and a window that ran out is exactly the window
+// but it is trimmed at a year, and a window that ran out is exactly the window
 // worth remembering after the readings behind it are gone.
 //
 // Kept apart from the readings for that reason: a handful of lines that no trim
@@ -288,7 +291,7 @@ function sessionSeries(rows, sinceMs = 0) {
 }
 
 module.exports = {
-    FILE, MARKS, HEARTBEAT_MS, MAX_ROWS, WEEK_MS,
+    FILE, MARKS, HEARTBEAT_MS, KEEP_MS, WEEK_MS,
     historyPath, readHistory, recordLimits, pointOf, weeklyWindows, sessionSeries, hourlyProfile,
     marksPath, readMarks, recordMark, markFor, ranOutAt,
 };

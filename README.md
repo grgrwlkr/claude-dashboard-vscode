@@ -334,7 +334,7 @@ tooltips.
 | Models & effort | spend as a model × effort matrix with an `advisor` column for consultations, which client the requests came from (`cli`, `claude-vscode`, `sdk-py`), output per request per tier |
 | Cache | share served from cache, what the reads saved, reads per token written, the 1h/5m TTL split, and the replies the cache could not answer — calls that sent more than 100k of input at the full rate, largest first |
 | Friction | failed tool calls, denials, compactions and the context they dropped, sessions with the most failures |
-| Limits | the weekly window over time, one line per week, overlaid against the even-spend diagonal |
+| Limits | the weekly window over time, one line per week, overlaid against the even-spend diagonal; the four newest windows are shown, older ones fade with age and open with **Show N older windows** |
 
 ![Models and effort: spend as a matrix, which client the requests came from, output per request per tier](media/screenshots/models-dark.png)
 
@@ -370,7 +370,8 @@ anywhere in it.
 </details>
 
 **Indexing.** The first run reads every transcript — about 1.1 GB and 4–5 s on
-the machine this was built on — behind a progress notification. After that a file
+the machine this was built on — behind a progress notification that stays up until
+the page is drawn. After that a file
 whose size and mtime are unchanged is reused as-is, and a refresh costs tens of
 milliseconds. A line is JSON-decoded only if it carries a marker that matters.
 The index lives in the extension's own storage, holds only aggregates, and never
@@ -615,7 +616,7 @@ Nothing is asked of the CLI; it has no channel to ask.
   unrecognised model is priced at Opus rates and flagged as such.
 - **Limit history** — nowhere: the usage endpoint answers only for the present
   moment. The extension appends a row to its own storage whenever a percentage
-  moves, plus a heartbeat every six hours.
+  moves, plus a heartbeat every six hours, and keeps 52 weeks of rows.
 
 <a name="known-issues-and-limits"></a><a name="user-content-known-issues-and-limits"></a>
 

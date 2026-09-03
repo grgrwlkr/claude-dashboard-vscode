@@ -454,6 +454,62 @@ test('lineChart draws one path per window and marks the plan', () => {
     assert.match(db.lineChart([]), /Nothing recorded/);
 });
 
+test('lineChart fades a window by its age and folds the ones past the shown set', () => {
+    const pts = [{ x: 0, y: 0 }, { x: 7, y: 80 }];
+    const svg = db.lineChart([
+        { label: 'a', age: 5, folded: true, points: pts },
+        { label: 'b', age: 4, folded: true, points: pts },
+        { label: 'c', age: 3, points: pts },
+        { label: 'd', age: 2, points: pts },
+        { label: 'e', age: 1, points: pts },
+        { label: 'f', age: 0, current: true, points: pts },
+    ]);
+    const lines = svg.match(/<path class="line[^>]*>/g);
+    assert.equal(lines.length, 6);
+    // Newest first in the DOM order the series arrive in: oldest is drawn
+    // first, so the current line lands on top.
+    const opacity = (tag) => (tag.match(/opacity="([^"]+)"/) || [])[1];
+    assert.deepEqual(lines.map(opacity), ['.2', '.2', '.35', '.5', '.7', undefined]);
+    assert.equal((svg.match(/class="line folded"/g) || []).length, 2);
+    assert.equal((svg.match(/class="dot folded"/g) || []).length, 2);
+});
+
+test('the limits tab shows four windows and folds the rest behind a button', () => {
+    const now = Date.parse('2026-08-09T20:00:00Z');
+    const week = 604800 * 1000;
+    const rows = [];
+    for (let w = 5; w >= 0; w--) {
+        const reset = Math.floor((now + 3 * 86400000 - w * week) / 1000);
+        rows.push({ at: reset * 1000 - week / 2, weekly: 40 + w, reset });
+    }
+    const html = db.limitsTab(rows, now);
+    assert.equal((html.match(/class="chip"/g) || []).length, 4);
+    assert.equal((html.match(/class="chip folded"/g) || []).length, 2);
+    assert.match(html, /data-fold[^>]*>Show 2 older windows</);
+    assert.match(html, /data-hide="Hide 2 older windows"/);
+    // Four windows: nothing to fold, no button.
+    assert.doesNotMatch(db.limitsTab(rows.slice(2), now), /data-fold/);
+});
+
+test('a legend chip and its line share a key, so hovering one can light the other', () => {
+    const now = Date.parse('2026-08-09T20:00:00Z');
+    const week = 604800 * 1000;
+    const rows = [];
+    for (let w = 2; w >= 0; w--) {
+        const reset = Math.floor((now + 3 * 86400000 - w * week) / 1000);
+        rows.push({ at: reset * 1000 - week / 2, weekly: 40 + w, reset });
+    }
+    const html = db.limitsTab(rows, now);
+    for (const w of [0, 1, 2]) {
+        assert.match(html, new RegExp(`<path class="line[^>]* data-w="${w}"`), `line ${w} carries its key`);
+        assert.match(html, new RegExp(`<circle class="dot[^>]* data-w="${w}"`), `dot ${w} carries its key`);
+        assert.match(html, new RegExp(`<span class="chip[^>]* data-w="${w}"`), `chip ${w} carries its key`);
+    }
+    // The page script lights the line from the chip; the markup alone is inert.
+    assert.match(db.SCRIPT, /data-w/);
+    assert.match(db.SCRIPT, /'lit'/);
+});
+
 // A window is named by how long ago it ran, not by where it sits in the list:
 // the log only grows while the editor runs, so a fortnight away leaves a hole
 // and index arithmetic would call a month-old window "last week".
