@@ -283,7 +283,7 @@ test('a workspace cannot supply the free-text launch arguments, the permission m
     assert.equal(props['claudeStatusline.permissionMode'].scope, 'machine');
     assert.equal(props['claudeStatusline.fallbackModel'].scope, 'machine');
     assert.equal(props['claudeStatusline.launchSaveTo'].scope, 'machine');
-    assert.deepEqual(ext.__USER_ONLY, ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel', 'launchSaveTo']);
+    assert.deepEqual(ext.__USER_ONLY, ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel', 'launchSaveTo', 'launchMode']);
     for (const key of ['claudeStatusline.model', 'claudeStatusline.effort']) {
         assert.ok(Array.isArray(props[key].enum) && props[key].enum.length > 1, `${key} must be a closed list`);
     }
@@ -2699,4 +2699,41 @@ test('every module extension.js requires ships in the package', () => {
     for (const file of required) {
         assert.ok(!ignored.includes(file), `${file} is required by extension.js but excluded by .vscodeignore`);
     }
+});
+
+// The mode is a launch setting like the others — the user's alone, a closed
+// list in the manifest — and the button runs what it says.
+test('launchMode is a user-only closed choice and the button runs the agent view', async () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const prop = manifest.contributes.configuration.properties['claudeStatusline.launchMode'];
+    assert.equal(prop.scope, 'machine');
+    assert.deepEqual(prop.enum, db.MODES.map(([v]) => v));
+    assert.equal(prop.default, 'session');
+    assert.ok(ext.__USER_ONLY.includes('launchMode'));
+    const run = activate({ segments: ['{today}'], settings: { launchMode: 'agents', model: 'fable[1m]', advisor: 'opus' } });
+    try {
+        await openClaude();
+        const terminal = lastTerminal();
+        vscode.__shellIntegrationArrives(terminal);
+        assert.deepEqual(terminal.executed, ["claude agents --model 'fable[1m]'"]);
+        assert.equal(terminal.options.name, 'Claude agents');
+    } finally { run.dispose(); }
+});
+
+test('the launch preview and the pin follow the mode', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({ type: 'launchPreview', settings: { launchMode: 'agents', model: 'opus', advisor: 'fable', aliasName: 'cx' } });
+        const reply = lastPost(panel);
+        assert.equal(reply.command, "claude agents --model 'opus'");
+        assert.equal(reply.alias, "alias cx='claude agents --model '\\''opus'\\'''");
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+    await withPinHome(({ home, workspace }) => {
+        ext.pinLaunchSettings({ settings: { launchMode: 'agents', model: 'opus', advisor: 'fable', launchSaveTo: 'user' }, home, workspace });
+        const read = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
+        assert.equal(read.model, 'opus');
+        assert.equal(read.advisorModel, undefined, 'the agent view takes no advisor, so none is pinned for it');
+    });
 });

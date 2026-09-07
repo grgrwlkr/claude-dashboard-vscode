@@ -2475,3 +2475,49 @@ test('the save bar says it is the extension\'s own settings, apart from the Clau
     const settings = db.settingsTab({}, {}, {});
     assert.match(settings.slice(settings.indexOf('class="save-bar"')), /the extension's own settings/i);
 });
+
+// The button can start the agent view instead of a session. It is the same
+// builder with `agents` after the command; the two flags the agent view does
+// not take — `--advisor`, `--fallback-model` — are left off the line, and off
+// the pin, which describes that line.
+test('the launch mode puts agents after the command and drops what the agent view refuses', () => {
+    assert.deepEqual(db.MODES.map(([v]) => v), ['session', 'agents']);
+    const all = {
+        model: 'fable[1m]', effort: 'high', advisor: 'opus', permissionMode: 'bypassPermissions',
+        fallbackModel: 'sonnet,haiku', outputStyle: 'Proactive', args: '--add-dir ../x',
+    };
+    assert.equal(db.claudeCommand({ mode: 'agents', ...all }),
+        "claude agents --model 'fable[1m]' --effort 'high' --permission-mode 'bypassPermissions' --settings '{\"outputStyle\":\"Proactive\"}' --add-dir ../x");
+    assert.equal(db.claudeCommand({ mode: 'session', ...all }), db.claudeCommand(all), 'session is the line the builder always made');
+    assert.match(db.aliasLine('cx', { mode: 'agents', model: 'opus' }), /^alias cx='claude agents --model /);
+    const { values } = db.clientSettingsFor({ mode: 'agents', ...all });
+    assert.deepEqual(Object.keys(values).sort(), ['effortLevel', 'model', 'outputStyle', 'permissions.defaultMode']);
+});
+
+// The mode is the first choice on the tab, because it decides which of the
+// others apply. The panels the agent view does not take stay on the page with
+// their choice kept and their options off, and say which command refuses them.
+test('the launch tab offers the mode first and dims the panels the agent view does not take', () => {
+    const agents = db.launchTab({ launchMode: 'agents', advisor: 'opus' }, {}, []);
+    assert.ok(agents.indexOf('name="launchMode"') < agents.indexOf('name="openLocation"'), 'what opens comes before where');
+    assert.match(agents, /name="launchMode" value="agents" checked/);
+    // From the panel's own tag, where its state class sits, to the next heading.
+    const from = (h) => agents.lastIndexOf('<section class="panel', agents.indexOf(h));
+    const advisor = agents.slice(from('>Advisor</h2>'), agents.indexOf('>Permission mode</h2>'));
+    const fallback = agents.slice(from('>Fallback model</h2>'), agents.indexOf('>Output style</h2>'));
+    for (const [name, part] of [['advisor', advisor], ['fallback', fallback]]) {
+        const radios = part.match(/<input type="radio"[^>]*>/g) || [];
+        assert.ok(radios.length > 1, `${name} keeps its options`);
+        assert.ok(radios.every((r) => / disabled/.test(r)), `${name}: every option is off in the agent view`);
+        assert.match(part, /panel-off/, `${name}: the panel says so`);
+        assert.match(part, /claude agents/, `${name}: the reason names the command`);
+    }
+    assert.match(advisor, /name="advisor" value="opus" checked disabled/, 'the choice is kept for the session mode');
+    const session = db.launchTab({ advisor: 'opus' }, {}, []);
+    assert.match(session, /name="launchMode" value="session" checked/, 'session is the default');
+    assert.doesNotMatch(session, /panel-off/);
+    assert.match(session, /name="advisor" value="opus" checked>/);
+    assert.match(db.SCRIPT, /launchMode: picked\('launchMode', 'session'\)/);
+    assert.match(db.SCRIPT, /input\[name="launchMode"\]/, 'the page keeps the rule while the mode is being changed');
+    assert.match(db.SCRIPT, /data-mode-only/);
+});

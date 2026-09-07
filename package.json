@@ -232,6 +232,20 @@
           "default": "activeGroup",
           "markdownDescription": "Where **Open Claude Code** puts the session — the button in the status bar, the one in the editor's title bar, and the command, all three.\n\nThe session is the same everywhere: a terminal running `claude` from the shell's `PATH`. Only the place differs, and it is read at the moment you press the button, so changing it needs no reload."
         },
+        "claudeStatusline.launchMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "agents"
+          ],
+          "enumDescriptions": [
+            "One interactive session in the tab, as `claude`.",
+            "The agent view, as `claude agents` — dispatches background sessions and watches them. The model, effort, permission mode and output style become the defaults for the sessions it starts; the advisor and the fallback model are not passed."
+          ],
+          "default": "session",
+          "scope": "machine",
+          "markdownDescription": "What **Open Claude Code** starts: one session, or the agent view (`claude agents`).\n\nThe agent view takes the model, effort, permission mode, output style and extra arguments as defaults for the sessions it dispatches. It does not take `--advisor` or `--fallback-model`: those choices are kept but not passed while this says `agents`.\n\nUser settings only."
+        },
         "claudeStatusline.model": {
           "type": "string",
           "enum": [

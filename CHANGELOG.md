@@ -9,6 +9,10 @@ is a pre-release and an **even** one is a stable release.
 
 ### Added
 
+- **What it starts** on the Launch tab: a session, or the agent view as `claude agents`.
+- `claudeStatusline.launchMode`: `session`, `agents`. User settings only.
+- In the agent view the Advisor and Fallback model panels are off; their choices are kept and not passed.
+- The command, the alias, the pin and **Open Claude Code with…** follow the mode; the tab is named **Claude agents**.
 - **Saved to** on the Launch tab writes the model, effort, advisor, permission mode, fallback and style into `~/.claude/settings.json` or the workspace's `.claude/settings.local.json`.
 - `claudeStatusline.launchSaveTo`: `""`, `user`, `local`. User settings only.
 - A warning names the settings file that wins when a nearer one sets another value, and names `max` effort as not written.

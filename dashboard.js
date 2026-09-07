@@ -569,7 +569,9 @@ const tiles = (...items) => `<div class="tiles">${items.filter(Boolean).join('')
 // `aside` is markup the caller has already escaped — the state of the thing the
 // panel is about, drawn on the title's own line. Without it the title stays
 // exactly as it was, because most panels on this page have no state to show.
-const panel = (title, body, { note, flush, id, aside } = {}) => `<section class="panel${flush ? ' panel-flush' : ''}"${id ? ` data-panel="${esc(id)}"` : ''}>
+// `cls` and `data` are for a panel the page will change after it is drawn — a
+// state class and the attributes the page's script finds it by.
+const panel = (title, body, { note, flush, id, aside, cls, data } = {}) => `<section class="panel${flush ? ' panel-flush' : ''}${cls ? ` ${esc(cls)}` : ''}"${id ? ` data-panel="${esc(id)}"` : ''}${Object.entries(data || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('')}>
     ${title && aside
         ? `<div class="panel-head"><h2 class="panel-title">${esc(title)}</h2>${aside}</div>`
         : title ? `<h2 class="panel-title">${esc(title)}</h2>` : ''}
@@ -2548,6 +2550,19 @@ const STYLES = [
 // reaches the sidebar's and a bare `claude` too. The client reads the
 // workspace's local file before the user's, which the second card says in its
 // own words.
+// What the button starts: one interactive session, or the agent view that
+// dispatches background sessions and watches them. The agent view is `claude
+// agents` with the same flags after it — after, not before: the root command
+// accepts them there too, but whether a flag given ahead of the subcommand
+// reaches the view is unmeasured, and the alias in daily use puts them after.
+// Two flags it does not take at all: `--advisor` and `--fallback-model` are
+// answered with `error: unknown option` (2.1.263), so the panels for those are
+// switched off with the mode rather than sent and refused.
+const MODES = [
+    ['session', 'a session', 'One interactive session in the tab, as claude'],
+    ['agents', 'the agent view', 'Dispatch background sessions and watch them, as claude agents; the choices below become the defaults for the sessions it starts'],
+];
+
 const SAVE_TARGETS = [
     ['', 'command line only', 'The choices travel as flags with the session this extension starts; no file is written'],
     ['user', '~/.claude/settings.json', 'Every session on this account, in every project; the file your client settings live in'],
@@ -2576,9 +2591,11 @@ const field = (label, hint, control, forId) => `<div class="field"${forId ? '' :
  * dims the row rather than hiding it. A vanished option is a puzzle; a struck
  * one explains itself.
  */
-const cards = (name, options, chosen) => `<div class="cards">${options.map(([value, label, about, meta, why, data]) => `
+// `off` switches every option of the group off at once — a whole choice the
+// current mode does not take — while `why` on a row refuses that row alone.
+const cards = (name, options, chosen, { off } = {}) => `<div class="cards">${options.map(([value, label, about, meta, why, data]) => `
         <label class="card-opt${why ? ' card-off' : ''}"${Object.entries(data || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('')}>
-          <input type="radio" name="${name}" value="${esc(value)}"${value === chosen ? ' checked' : ''}${why ? ' disabled' : ''}>
+          <input type="radio" name="${name}" value="${esc(value)}"${value === chosen ? ' checked' : ''}${why || off ? ' disabled' : ''}>
           <span class="card-body"><span class="card-name">${esc(label)}</span><span class="card-about"${
     (data || {}).base ? ` data-base="${esc(data.base)}"` : ''}>${esc(about)}</span></span>
           <span class="card-why">${esc(why || '')}</span>
@@ -2746,13 +2763,15 @@ const quoted = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
  * text goes in as typed, because quoting it would break the moment it holds more
  * than one argument.
  */
-function claudeCommand({ model, effort, advisor, permissionMode, fallbackModel, outputStyle, args } = {}) {
+function claudeCommand({ mode, model, effort, advisor, permissionMode, fallbackModel, outputStyle, args } = {}) {
+    const agents = mode === 'agents';
     const parts = [CLAUDE_COMMAND];
+    if (agents) parts.push('agents');
     if (model) parts.push('--model', quoted(model));
     if (effort) parts.push('--effort', quoted(effort));
-    if (advisor) parts.push('--advisor', quoted(advisor));
+    if (advisor && !agents) parts.push('--advisor', quoted(advisor));
     if (permissionMode) parts.push('--permission-mode', quoted(permissionMode));
-    if (fallbackModel) parts.push('--fallback-model', quoted(fallbackModel));
+    if (fallbackModel && !agents) parts.push('--fallback-model', quoted(fallbackModel));
     // The client has no `--output-style` flag; `outputStyle` is an ordinary
     // setting, and `--settings` takes JSON that merges with the settings files —
     // "a key you set here overrides the same key in local, project, or user
@@ -2773,15 +2792,18 @@ function claudeCommand({ model, effort, advisor, permissionMode, fallbackModel, 
  * the client's schema stops at `xhigh` and drops it without a word — so it is
  * returned under `skipped` rather than written and lost.
  */
-function clientSettingsFor({ model, effort, advisor, permissionMode, fallbackModel, outputStyle } = {}) {
+function clientSettingsFor({ mode, model, effort, advisor, permissionMode, fallbackModel, outputStyle } = {}) {
+    // The file describes the command line, so a choice the agent view does not
+    // take is not written on its behalf either.
+    const agents = mode === 'agents';
     const values = {};
     const skipped = [];
     if (model) values.model = model;
     if (effort === 'max') skipped.push('effortLevel');
     else if (effort) values.effortLevel = effort;
-    if (advisor) values.advisorModel = advisor;
+    if (advisor && !agents) values.advisorModel = advisor;
     if (permissionMode) values['permissions.defaultMode'] = permissionMode;
-    if (fallbackModel) values.fallbackModel = String(fallbackModel).split(',').map((m) => m.trim()).filter(Boolean);
+    if (fallbackModel && !agents) values.fallbackModel = String(fallbackModel).split(',').map((m) => m.trim()).filter(Boolean);
     if (outputStyle) values.outputStyle = outputStyle;
     return { values, skipped };
 }
@@ -2878,12 +2900,22 @@ function launchTab(config, total, styles) {
     // otherwise announces itself only after the session has started answering.
     // One reading of the choices, used three times: the line that is shown, the
     // alias built from it, and the command the button runs.
+    const mode = cfg.launchMode === 'agents' ? 'agents' : 'session';
+    const agents = mode === 'agents';
     const launch = {
-        model: cfg.model, effort: cfg.effort, advisor: cfg.advisor,
+        mode, model: cfg.model, effort: cfg.effort, advisor: cfg.advisor,
         permissionMode: cfg.permissionMode, fallbackModel: cfg.fallbackModel,
         outputStyle: cfg.outputStyle, args: cfg.launchArgs,
     };
     const alias = aliasLine(cfg.aliasName, launch);
+    // A panel the agent view does not use stays on the page with its choice
+    // kept and its options off, and says which command refuses it. Drawn for
+    // both modes and hidden for one, so the page can show it on a click.
+    const offNote = `<p class="mode-note" data-mode-note${agents ? '' : ' hidden'}>Not for the agent view — <code>claude agents</code> does not take this flag. The choice is kept for a session.</p>`;
+    const sessionOnly = (pills) => ({
+        aside: agents ? statePills(['', 'off in the agent view', true]) : pills,
+        cls: agents ? 'panel-off' : '', data: { 'mode-only': 'session' },
+    });
     // Named on the button so nobody has to guess which file is about to change.
     // The page cannot see the shell, so the extension's own is the answer, and
     // the fallback is what this project is developed and used on.
@@ -2942,6 +2974,10 @@ function launchTab(config, total, styles) {
     const flags = args ? args.split(/\s+/).filter((a) => a.startsWith('-')).length : 0;
 
     return `<section class="tab" data-tab="launch" hidden>
+        ${panel('What it starts', cards('launchMode', MODES, mode), {
+        note: 'One session, or the agent view — <code>claude agents</code>, which dispatches background sessions and watches them. The choices below travel with either as flags; the advisor and the fallback model are not taken by the agent view and are switched off with it.',
+        aside: statePills(['starts', named(mode, MODES)]),
+    })}
         ${panel('Where it opens', cards('openLocation', PLACES, cfg.openLocation || 'activeGroup'), {
         note: 'What <b>Open Claude Code</b> runs, and where the session lands. <b>Claude: Open Claude Code with…</b> asks for a model and an effort instead, for a single run.',
         aside: statePills(['opens', named(cfg.openLocation || 'activeGroup', PLACES)]),
@@ -2955,18 +2991,18 @@ function launchTab(config, total, styles) {
         note: 'How hard the model thinks, as <code>claude --effort</code>. Effort is billed as output tokens, and its scale is calibrated per model — so the figures beside each level are measured from your own replies, not quoted from a table.',
         aside: statePills(['effort', named(cfg.effort || '', EFFORTS), !cfg.effort]),
     })}
-        ${panel('Advisor', cards('advisor', advisorOpts, cfg.advisor || ''), {
+        ${panel('Advisor', offNote + cards('advisor', advisorOpts, cfg.advisor || '', { off: agents }), {
         note: 'A second model reads the whole conversation and advises the one doing the work, as <code>claude --advisor</code>. It must rank at or above the model it advises — pairings the client would refuse are dimmed here, with the reason, rather than rejected later. Every consult sends the whole conversation again at the advisor\'s input rate, nothing cached: on this machine a Fable consult runs $3–4, a dozen Opus replies. What it buys is the tier gap, so each row says what it is for on the model chosen above.',
-        aside: statePills(['advisor', named(cfg.advisor || '', ADVISORS), !cfg.advisor],
-            cfg.advisor ? ['', ADVISOR_ABOUT[cfg.advisor][1]] : null),
+        ...sessionOnly(statePills(['advisor', named(cfg.advisor || '', ADVISORS), !cfg.advisor],
+            cfg.advisor ? ['', ADVISOR_ABOUT[cfg.advisor][1]] : null)),
     })}
         ${panel('Permission mode', cards('permissionMode', PERMISSION_MODES, cfg.permissionMode || ''), {
         note: 'Which actions run without asking, as <code>claude --permission-mode</code>. The mode can still be switched in the session with Shift+Tab; this is where it starts. Writes to protected paths are never auto-approved outside bypass.',
         aside: statePills(['mode', named(cfg.permissionMode || '', PERMISSION_MODES), !cfg.permissionMode]),
     })}
-        ${panel('Fallback model', cards('fallbackModel', FALLBACKS, cfg.fallbackModel || ''), {
+        ${panel('Fallback model', offNote + cards('fallbackModel', FALLBACKS, cfg.fallbackModel || '', { off: agents }), {
         note: 'Where a request goes when the model is overloaded or unavailable, as <code>claude --fallback-model</code>. The chain is tried in order for that turn only; the next message tries the primary model again. Not the classifier fallback — a refused request on Fable or Opus 5 re-runs on the Opus the client picks, whatever is set here.',
-        aside: statePills(['fallback', named(cfg.fallbackModel || '', FALLBACKS), !cfg.fallbackModel]),
+        ...sessionOnly(statePills(['fallback', named(cfg.fallbackModel || '', FALLBACKS), !cfg.fallbackModel])),
     })}
         ${panel('Output style',
         cards('outputStyle', STYLES.map(([v, l]) => [v, l, STYLE_ABOUT[v]]), cfg.outputStyle || '')
@@ -3461,8 +3497,29 @@ if (list && api) {
       }
     }
   };
+  // The agent view takes no advisor and no fallback model. Their panels are
+  // switched off with the mode and back on with it, keeping whatever was
+  // chosen — held here as well as at render, because the mode is a radio like
+  // the rest and the page is not redrawn on a click. A row the advisor ranking
+  // refused stays refused whichever way the mode goes.
+  const applyMode = () => {
+    const chosen = document.querySelector('input[name="launchMode"]:checked');
+    const off = !!chosen && chosen.value === 'agents';
+    for (const box of document.querySelectorAll('[data-mode-only="session"]')) {
+      box.classList.toggle('panel-off', off);
+      const note = box.querySelector('[data-mode-note]');
+      if (note) note.hidden = !off;
+      for (const input of box.querySelectorAll('input[type="radio"]')) {
+        const row = input.closest('.card-opt');
+        input.disabled = off || !!(row && row.classList.contains('card-off'));
+      }
+    }
+  };
   for (const input of document.querySelectorAll('input[name="model"]')) {
-    input.addEventListener('change', rankAdvisors);
+    input.addEventListener('change', () => { rankAdvisors(); applyMode(); });
+  }
+  for (const input of document.querySelectorAll('input[name="launchMode"]')) {
+    input.addEventListener('change', applyMode);
   }
 
   // Every choice on the tab is a radio group now, so the value is whichever of
@@ -3561,6 +3618,7 @@ if (list && api) {
         permissionMode: picked('permissionMode', ''),
         fallbackModel: picked('fallbackModel', ''),
         outputStyle: picked('outputStyle', ''),
+        launchMode: picked('launchMode', 'session'),
         launchSaveTo: picked('launchSaveTo', ''),
         launchArgs: document.getElementById('launchArgs').value.trim(),
         aliasName: document.getElementById('aliasName').value.trim(),
@@ -3929,7 +3987,7 @@ module.exports = {
     PLACES,
     // The launch vocabularies, read by the manifest's test, by the Settings tab
     // above and by the quick pick behind **Open Claude Code with…**.
-    MODELS, EFFORTS, ADVISORS, STYLES, SAVE_TARGETS, clientSettingsFor, PERMISSION_MODES, FALLBACKS, ADVISOR_ADVICE,
+    MODES, MODELS, EFFORTS, ADVISORS, STYLES, SAVE_TARGETS, clientSettingsFor, PERMISSION_MODES, FALLBACKS, ADVISOR_ADVICE,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

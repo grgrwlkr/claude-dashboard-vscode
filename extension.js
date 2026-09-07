@@ -31,6 +31,7 @@ const values = (list) => list.map(([value]) => value).filter(Boolean);
 const launchSettings = () => {
     const conf = vscode.workspace.getConfiguration('claudeStatusline');
     return {
+        mode: conf.get('launchMode') || 'session',
         model: conf.get('model') || '',
         effort: conf.get('effort') || '',
         advisor: conf.get('advisor') || '',
@@ -1088,6 +1089,7 @@ function configView(state) {
         openLocation: cfg.get('openLocation'),
         // Read back as well as written: the page redraws from this, so a key
         // missing here is a choice that looks forgotten the moment it is saved.
+        launchMode: cfg.get('launchMode'),
         model: cfg.get('model'),
         effort: cfg.get('effort'),
         advisor: cfg.get('advisor'),
@@ -1115,7 +1117,7 @@ function configView(state) {
 // avoid. The list is the gate: a message naming anything else is dropped.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
     'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog',
-    'openLocation', 'model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchSaveTo',
+    'openLocation', 'launchMode', 'model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchSaveTo',
     'launchArgs', 'aliasName'];
 
 // The keys that ignore the scope the page offers. All five are declared
@@ -1126,7 +1128,8 @@ const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
 // `bypassPermissions`, nor name the model it falls back to, nor point a write
 // at a file in your home directory — and VS Code rejects a workspace write to
 // such a key with an error that would take the rest of the save down with it.
-const USER_ONLY = ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel', 'launchSaveTo'];
+// The mode joins them: what the button runs is not a repository's to choose.
+const USER_ONLY = ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel', 'launchSaveTo', 'launchMode'];
 
 // The full changelog, when the user has allowed the fetch. One public file, no
 // credentials, and at most once an hour — kept in the extension's own storage
@@ -1313,7 +1316,7 @@ async function handleMessage(context, msg) {
     if (msg.type === 'launchPreview') {
         const c = msg.settings || {};
         const launch = {
-            model: c.model, effort: c.effort, advisor: c.advisor,
+            mode: c.launchMode, model: c.model, effort: c.effort, advisor: c.advisor,
             permissionMode: c.permissionMode, fallbackModel: c.fallbackModel,
             outputStyle: c.outputStyle, args: c.launchArgs,
         };
@@ -1433,7 +1436,7 @@ function pinLaunchSettings({ settings, home = os.homedir(), workspace = vscode.w
         : target === 'local' && workspace ? path.join(workspace, '.claude', 'settings.local.json')
             : '';
     if (!file) return false;
-    const { values, skipped } = dashboard.clientSettingsFor(settings || {});
+    const { values, skipped } = dashboard.clientSettingsFor({ ...(settings || {}), mode: settings?.launchMode });
     if (skipped.length) {
         vscode.window.showWarningMessage(`Claude statusline: ${skipped.join(', ')} not written to ${file} — the client's settings schema has no "max"; the command line still carries it`);
     }
@@ -1553,7 +1556,7 @@ function installAlias({ settings, home = os.homedir(), shell = process.env.SHELL
     if (!rc) return;
 
     const line = dashboard.aliasLine(c.aliasName, {
-        model: c.model, effort: c.effort, advisor: c.advisor,
+        mode: c.launchMode, model: c.model, effort: c.effort, advisor: c.advisor,
         permissionMode: c.permissionMode, fallbackModel: c.fallbackModel,
         outputStyle: c.outputStyle, args: c.launchArgs,
     });
@@ -1748,7 +1751,8 @@ function applyConfig(state) {
     // too, chosen once and easy to forget, and the session starts on them.
     const launch = launchSettings();
     const on = [launch.model, launch.effort && `effort ${launch.effort}`].filter(Boolean).join(', ');
-    btn.tooltip = [(PLACES[cfg.get('openLocation')] || PLACES.activeGroup).says, on && `on ${on}`]
+    btn.tooltip = [(PLACES[cfg.get('openLocation')] || PLACES.activeGroup).says,
+        launch.mode === 'agents' && 'the agent view', on && `on ${on}`]
         .filter(Boolean).join(' · ');
     btn.command = 'claudeStatusline.openClaude';
     btn.show();
@@ -1858,7 +1862,7 @@ function activate(context) {
             // The pin follows the keys it is made of, whichever way they were
             // set — the Launch tab's Save or the settings editor both end here,
             // so this is the one place the file is written from.
-            const LAUNCH = ['model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchSaveTo'];
+            const LAUNCH = ['launchMode', 'model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchSaveTo'];
             if (LAUNCH.some((k) => e.affectsConfiguration(`claudeStatusline.${k}`))) {
                 const cfg = vscode.workspace.getConfiguration('claudeStatusline');
                 pinLaunchSettings({
@@ -2120,7 +2124,7 @@ async function openClaude(context, launch = launchSettings()) {
     const terminal = vscode.window.createTerminal({
         // The same env var Claude Code reads for its own terminal, so a machine
         // that renames one renames both.
-        name: tabName(),
+        name: tabName(launch.mode),
         iconPath: claudeIcon(context),
         location: where.location,
         // Where the session lands on disk, said out loud rather than left to the
@@ -2193,7 +2197,7 @@ const tabFor = (terminal) => [...ourTabs].find((t) => t.terminal === terminal);
 // The name a tab is opened under, before a session renames it. The same env var
 // Claude Code reads for its own terminal, so a machine that renames one renames
 // both.
-const tabName = () => process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code';
+const tabName = (mode) => process.env.CLAUDE_CODE_TERMINAL_TITLE || (mode === 'agents' ? 'Claude agents' : 'Claude Code');
 
 // A mark put into the environment of every tab this button opens, and the one
 // thing about such a tab that a reload is known to carry: the extension host

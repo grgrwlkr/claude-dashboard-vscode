@@ -37,6 +37,10 @@ const now = Date.now();
 // which the forecast has anything to say: below plan the window outlasts the
 // spending and `{dry}` is silent on purpose.
 const demo = DEMO ? require('./demo-index').demo(now, args.includes('--over') ? { weeklyPct: 76 } : {}) : null;
+// `--agents` draws the Launch tab with the agent view chosen: the advisor and
+// fallback panels off with the demo's own choices kept in them, which is the
+// state worth photographing and the one the probe should measure.
+if (demo && args.includes('--agents')) demo.meta.config.launchMode = 'agents';
 const { index, stats } = demo
     ? { index: demo.index, stats: { total: demo.meta.files } }
     : ix.refreshIndex(store);

@@ -346,7 +346,7 @@ tooltips.
 | Tab | What it answers |
 | --- | --- |
 | Settings | the extension's own settings — the bar, the reads it makes, where its items sit — edited here rather than in `settings.json` |
-| Launch | what **Open Claude Code** starts a session with: the model, the effort, the advisor and the output style, each option carrying what it is for and what it costs — including the styles you wrote yourself, read from `~/.claude/output-styles` |
+| Launch | what **Open Claude Code** starts — a session or the agent view — and with what: the model, the effort, the advisor and the output style, each option carrying what it is for and what it costs — including the styles you wrote yourself, read from `~/.claude/output-styles` |
 | Claude Code | what you have set, what you could set, and what you moved away from the default — settings files in the order the client resolves them, with the file that won each key named and the ones it shadowed counted |
 | Memory & context | the files loaded into every prompt — `CLAUDE.md`, `rules/`, project memory — sized in tokens and priced across every request made |
 | Health | settings as they resolve, MCP servers, plugins and what each ships — each marked used or idle by whether anything of it appears in the transcripts — hooks, permission rules |
@@ -508,6 +508,7 @@ All of these apply the moment they change; none needs a window reload.
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
 | `claudeStatusline.openLocation` | `activeGroup` | Where **Open Claude Code** puts the session: `activeGroup` a tab in the group you are looking at, `beside` a tab in a new group to the right, `panel` the terminal panel at the bottom, `newWindow` a tab moved out into its own window |
+| `claudeStatusline.launchMode` | `session` | What **Open Claude Code** starts: `session` runs `claude`, `agents` runs `claude agents`, the agent view. The model, effort, permission mode, output style and extra arguments go with either; the advisor and the fallback model are not passed to the agent view. User settings only |
 | `claudeStatusline.model` | `""` | Start the session on this model, as `claude --model <alias>`, from the aliases the client accepts: `opus`, `opus[1m]`, `sonnet`, `sonnet[1m]`, `fable`, `fable[1m]`, `haiku`, `best`, `opusplan`. The `[1m]` variants ask for the 1M window explicitly; the plain alias runs on 200k behind a gateway, on Pro and on third-party providers. Empty passes no flag and leaves the choice to the client |
 | `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>`: `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
 | `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>`: `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |
@@ -548,9 +549,13 @@ there as **Dashnlines for Claude 1**, **2**, and so on.
 thinks, whether a second model advises it, which actions run without asking,
 where a request goes when the model is overloaded, and how it answers you. That
 is the **Setup → Launch** tab, one panel per choice, each option carrying what it
-is for and what it costs:
+is for and what it costs. The first panel says what the button starts: one
+session, or the agent view — `claude agents`, which dispatches background
+sessions and watches them. The agent view takes the same flags as defaults for
+the sessions it starts, except the advisor and the fallback model; those two
+panels are switched off while it is chosen, their choices kept for a session:
 
-![Starting a session: nine panels — where Open Claude Code puts the session, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the permission mode, the fallback model, the output style with the client's five above the ones you wrote yourself, any extra arguments, and the command the button runs with a shell alias for it](media/screenshots/launch-dark.png)
+![Starting a session: ten panels — what Open Claude Code starts, a session or the agent view; where it puts it, the model with its rate and window, the effort with what each level costs per reply, the advisor with the pairings the client would refuse dimmed and explained, the permission mode, the fallback model, the output style with the client's five above the ones you wrote yourself, any extra arguments, and the command the button runs with a shell alias for it](media/screenshots/launch-dark.png)
 
 Each choice becomes one flag on the command line the button runs, and each one
 left alone passes no flag, so the client decides exactly as it did before. A

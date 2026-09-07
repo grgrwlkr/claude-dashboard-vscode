@@ -878,4 +878,8 @@ ul.log li { margin: 2px 0; opacity: .85; }
 .card-opt:has(input:disabled) { opacity: .4; border-style: dashed; }
 .card-opt:has(input:disabled):hover { background: none; }
 .card-why { font-size: 11px; color: var(--vscode-charts-yellow); white-space: nowrap; }
+/* A whole panel the chosen mode does not use. Kept in place with its choice,
+   its head dimmed; the options inside are disabled and draw themselves dashed. */
+.panel-off > .panel-head, .panel-off > .panel-title, .panel-off > .panel-note { opacity: .5; }
+.mode-note { margin: 0 0 8px; font-size: 11.5px; color: var(--vscode-charts-yellow); }
 footer { margin-top: 28px; opacity: .5; font-size: 11px; }
