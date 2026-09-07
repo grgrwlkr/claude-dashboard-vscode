@@ -1174,6 +1174,29 @@ test('opening the dashboard keeps one notification up through every phase and fe
     for (const r of started) assert.ok(r.signal instanceof AbortSignal, `${r.url} carries a timeout`);
 });
 
+// A worker that will not start must not take the dashboard with it: the reading
+// falls back to the host's own thread, which is where it happened all along.
+test('the dashboard opens even when the index worker cannot start', async () => {
+    const run = activate({ segments: ['{weekly}'], settings: { fetchLimits: false } });
+    const real = ix.refreshIndexInWorker;
+    let tried = 0;
+    ix.refreshIndexInWorker = () => { tried++; return Promise.reject(new Error('no worker here')); };
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: false, status: 503, text: async () => '', json: async () => [] });
+    try {
+        await ext.__showDashboard(run.context);
+        assert.equal(tried, 1, 'the worker was tried first');
+        const panel = vscode.__panels[vscode.__panels.length - 1];
+        assert.ok(panel && panel.webview.html.length > 1000, 'and the page was built anyway');
+    } finally {
+        ix.refreshIndexInWorker = real;
+        globalThis.fetch = origFetch;
+        const panel = vscode.__panels[vscode.__panels.length - 1];
+        if (panel) panel.dispose();
+        run.dispose();
+    }
+});
+
 test('the open dashboard is rebuilt on the tick, except while settings are open', async () => {
     const run = activate({ segments: ['{weekly}'] });
     let panel;

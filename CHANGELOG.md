@@ -9,7 +9,8 @@ is a pre-release and an **even** one is a stable release.
 
 ### Changed
 
-- The session transcript is read once a tick, and only from where the last read stopped.
+- The session transcript is read once a tick, from where the last read stopped.
+- Indexing runs on its own thread; the editor and the progress notification keep moving.
 
 ### Fixed
 

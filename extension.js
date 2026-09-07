@@ -963,16 +963,22 @@ async function buildIndex(storageDir, { force = false, silent = false, progress 
     // A refresh nobody asked for does not get a notification: the page is
     // already on screen, and a toast every minute is the opposite of ambient.
     if (silent) return ix.refreshIndex(storageDir, { root: indexRoot() });
-    const run = (p) => {
+    const run = async (p) => {
         if (force) ix.saveIndex(storageDir, { version: ix.INDEX_VERSION, files: {} });
-        return new Promise((resolve) => {
-            // setImmediate lets the notification paint before the synchronous
-            // read begins; without it the first run looks like a frozen window.
-            setImmediate(() => resolve(ix.refreshIndex(storageDir, {
-                root: indexRoot(),
-                onProgress: (done, total) => p.report({ message: `indexing ${done}/${total}` }),
-            })));
-        });
+        const onProgress = (done, total) => p.report({ message: `indexing ${done}/${total}` });
+        // On a thread of its own, so the editor keeps answering while a gigabyte
+        // is read — and so the notification below can actually repaint, which on
+        // the host's own thread it could not.
+        try {
+            return await ix.refreshIndexInWorker(storageDir, { root: indexRoot(), onProgress });
+        } catch {
+            // No worker: the reading still has to happen. setImmediate lets the
+            // notification paint before the synchronous read begins; without it
+            // the first run looks like a frozen window.
+            return new Promise((resolve) => {
+                setImmediate(() => resolve(ix.refreshIndex(storageDir, { root: indexRoot(), onProgress })));
+            });
+        }
     };
     if (progress) return run(progress);
     return vscode.window.withProgress({

@@ -37,6 +37,48 @@ function tree(fn) {
     }
 }
 
+// The same scratch tree for a test that awaits: a `finally` around a returned
+// promise removes the directories before the first await inside has run.
+async function treeAsync(fn) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-tree-'));
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-store-'));
+    const slug = '-Users-x-Develop-demo';
+    const write = (rel, lines) => {
+        const full = path.join(root, slug, rel);
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, lines.join('\n') + '\n');
+        return full;
+    };
+    try { return await fn({ root, store, slug, write }); } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(store, { recursive: true, force: true });
+    }
+}
+
+// A gigabyte of transcripts is seven seconds of reading, and on the extension
+// host's own thread that is seven seconds in which the editor answers nothing —
+// the progress notification included, which is why it used to sit still.
+test('refreshIndexInWorker builds the same index off the main thread', async () => treeAsync(async ({ root, store, write }) => {
+    write('sess-1.jsonl', [rec()]);
+    write(path.join('sess-1', 'subagents', 'agent-a.jsonl'), [rec()]);
+
+    const seen = [];
+    const { index, stats } = await ix.refreshIndexInWorker(store, {
+        root, onProgress: (done, total) => seen.push([done, total]),
+    });
+
+    assert.equal(stats.total, 2);
+    assert.equal(stats.parsed, 2);
+    assert.ok(seen.length > 0, 'the worker said how far it had got');
+    // On disk, and the same answer the synchronous path gives.
+    assert.equal(Object.keys(ix.loadIndex(store).files).length, 2);
+    assert.deepEqual(ix.summarize(index), ix.summarize(ix.refreshIndex(store, { root }).index));
+}));
+
+test('refreshIndexInWorker reports a failure instead of hanging', async () => treeAsync(async ({ store }) => {
+    await assert.rejects(() => ix.refreshIndexInWorker(store, { root: '/nowhere/at/all', worker: '/nope/missing-worker.js' }));
+}));
+
 test('describeFile reads the relationship encoded in the path', () => {
     const base = path.join(ix.PROJECTS, '-Users-x-Develop-demo');
     const main = ix.describeFile(path.join(base, 'sess-1.jsonl'));

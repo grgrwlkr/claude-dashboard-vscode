@@ -770,6 +770,47 @@ function refreshIndex(storageDir, { root = PROJECTS, onProgress } = {}) {
     return { index, stats: { total: files.length, reused, parsed, removed, bytes } };
 }
 
+// Where the worker lives, beside this file, so an installed .vsix resolves it
+// the same way the repository does.
+const WORKER_FILE = path.join(__dirname, 'index-worker.js');
+
+/**
+ * The same refresh, on a thread of its own.
+ *
+ * A cold build is 7.3 s over 1.2 GB on this machine, and run on the extension
+ * host that is 7.3 s of an editor that answers nothing — which also freezes the
+ * notification meant to show the work in progress. Everything expensive happens
+ * in `index-worker.js`; what comes back is the stats, and the index is read from
+ * the file the worker wrote.
+ *
+ * Rejects rather than falling back on its own: the caller owns that decision,
+ * and a silent synchronous retry would reintroduce the freeze it exists to
+ * avoid without saying so.
+ */
+function refreshIndexInWorker(storageDir, { root = PROJECTS, onProgress, worker = WORKER_FILE } = {}) {
+    return new Promise((resolve, reject) => {
+        let Worker;
+        try { ({ Worker } = require('worker_threads')); } catch (e) { reject(e); return; }
+
+        let thread;
+        try { thread = new Worker(worker, { workerData: { storageDir, root } }); } catch (e) { reject(e); return; }
+
+        let stats = null;
+        let failed = null;
+        thread.on('message', (m) => {
+            if (!m) return;
+            if (m.type === 'progress') { if (onProgress) onProgress(m.done, m.total); } else if (m.type === 'done') stats = m.stats;
+            else if (m.type === 'error') failed = new Error(m.message);
+        });
+        thread.on('error', (e) => { failed = e; });
+        thread.on('exit', (code) => {
+            if (failed) { reject(failed); return; }
+            if (!stats) { reject(new Error(`index worker exited with ${code}`)); return; }
+            resolve({ index: loadIndex(storageDir), stats });
+        });
+    });
+}
+
 /** Fold every per-file aggregate into the shape the dashboard renders. */
 function summarize(index) {
     const total = {
@@ -966,6 +1007,7 @@ module.exports = {
     monthToDate, peakParallel, exportJson, exportCsv,
     PROJECTS, INDEX_VERSION, SUBAGENT_RE, INTERESTING,
     describeFile, projectName, indexFile, walk, loadIndex, freshIndex, saveIndex, refreshIndex,
+    refreshIndexInWorker,
     summarize, dayKey, bucket, emptyAgg, emptyFriction, emptyBreaks, effortKey, splitEffort, ADVISOR_TIER,
     CACHE_BREAK_TOKENS, readAgentMeta,
     promptText, tallyWords, trimWords, lenBucket, LEN_BUCKETS,
