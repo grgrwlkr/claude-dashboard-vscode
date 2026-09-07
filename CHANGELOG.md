@@ -11,6 +11,10 @@ is a pre-release and an **even** one is a stable release.
 
 - The session transcript is read once a tick, and only from where the last read stopped.
 
+### Fixed
+
+- **Peak parallel sessions** on the Sessions tab counted every session twice in its last ten minutes.
+
 ## [0.56.0] — 2026-09-07
 
 ### Added

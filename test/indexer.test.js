@@ -297,6 +297,48 @@ test('peakParallel finds the widest moment of each day', () => {
 
 test('peakParallel ignores a session with no clock on it', () => {
     assert.deepEqual(ix.peakParallel([{ start: 0, end: 0 }]), {});
+    assert.deepEqual(ix.peakParallel([{ start: 5, end: 4 }]), {});
+    assert.deepEqual(ix.peakParallel([]), {});
+    assert.deepEqual(ix.peakParallel(null), {});
+});
+
+// A session open across several midnights is open on each of those days, and it
+// is one session on each of them rather than one somewhere and none elsewhere.
+test('peakParallel counts a long session in every day it touches', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const days = ix.peakParallel([{ start, end: start + 3 * 24 * 3600e3 }]);
+    const keys = Object.keys(days);
+    assert.equal(keys.length, 4);
+    for (const key of keys) {
+        assert.equal(days[key].sessions, 1, key);
+        assert.equal(days[key].peak, 1, key);
+    }
+    // Written in order, oldest first.
+    assert.deepEqual(keys, [...keys].sort());
+});
+
+// The peak is where the widest bucket sits, and `at` is that bucket's offset
+// from midnight — the pair a reader needs to say "three at once, around 14:00".
+test('peakParallel puts the peak where the busiest ten minutes are', () => {
+    const midnight = new Date(Date.parse('2026-08-08T12:00:00Z')).setHours(0, 0, 0, 0);
+    const at = (mins) => midnight + mins * 60e3;
+    const days = ix.peakParallel([
+        { start: at(600), end: at(700) },
+        { start: at(650), end: at(660) },  // three overlap only in 650..660
+        { start: at(655), end: at(658) },
+    ]);
+    const day = days[ix.dayKey(at(600))];
+    assert.equal(day.peak, 3);
+    assert.equal(day.sessions, 3);
+    assert.equal(day.at, Math.floor(650 / 10) * 10 * 60e3);
+});
+
+// Shorter than one bucket is still a session that was running.
+test('peakParallel counts a session shorter than a bucket', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const days = ix.peakParallel([{ start, end: start + 60e3 }]);
+    assert.equal(Object.keys(days).length, 1);
+    assert.equal(days[ix.dayKey(start)].peak, 1);
 });
 
 // Wall-clock says when a session started and when it stopped, which for one

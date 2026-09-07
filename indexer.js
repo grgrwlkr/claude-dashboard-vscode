@@ -241,10 +241,14 @@ function mergeFiles(target, src) {
     }
 }
 
+// Called once per record while indexing and once per session-day while counting
+// what ran in parallel, so it is written without the closure and the `padStart`
+// it used to allocate on every call.
 const dayKey = (ms) => {
     const d = new Date(ms);
-    const p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    return `${d.getFullYear()}-${m < 10 ? '0' : ''}${m}-${day < 10 ? '0' : ''}${day}`;
 };
 
 // What the path itself tells us: project slug, and for subagents the parent
@@ -890,36 +894,46 @@ function exportCsv(total) {
 const PARALLEL_BUCKET_MS = 10 * 60 * 1000;
 const BUCKETS_PER_DAY = 144;
 
+/**
+ * A session fills the buckets it spans, day by day, and is counted once against
+ * each day it touches.
+ *
+ * Walking bucket by bucket from `start` to `end` — which is what this did — cost
+ * one `dayKey` per ten minutes of every session, and counted the last bucket of
+ * a session twice whenever its end fell in the same bucket as the final step:
+ * one session read as a peak of two, three overlapping ones as four. Filling the
+ * range instead answers both, and `sessions` is counted here rather than by a
+ * second walk of every session per day.
+ */
 function peakParallel(sessions) {
     const days = {};
     for (const s of sessions || []) {
         if (!s.start || !s.end || s.end < s.start) continue;
-        for (let at = s.start; ; at += PARALLEL_BUCKET_MS) {
-            const capped = Math.min(at, s.end);
-            const key = dayKey(capped);
+        let midnight = new Date(s.start).setHours(0, 0, 0, 0);
+        while (midnight <= s.end) {
+            // Twenty-six hours on and back to midnight: a day is 23 or 25 hours
+            // long where the clocks change, and adding 24 would land inside the
+            // same day or skip past the next one.
+            const next = new Date(midnight + 26 * 3600e3).setHours(0, 0, 0, 0);
+            const key = dayKey(midnight);
             const day = days[key] || (days[key] = { buckets: new Array(BUCKETS_PER_DAY).fill(0), sessions: 0, peak: 0, at: 0 });
-            const midnight = new Date(capped).setHours(0, 0, 0, 0);
-            const slot = Math.min(BUCKETS_PER_DAY - 1, Math.floor((capped - midnight) / PARALLEL_BUCKET_MS));
-            day.buckets[slot]++;
-            if (capped >= s.end) break;
+            day.sessions++;
+
+            const from = Math.max(s.start, midnight);
+            const to = Math.min(s.end, next - 1);
+            const first = Math.max(0, Math.floor((from - midnight) / PARALLEL_BUCKET_MS));
+            const last = Math.min(BUCKETS_PER_DAY - 1, Math.floor((to - midnight) / PARALLEL_BUCKET_MS));
+            for (let i = first; i <= last; i++) day.buckets[i]++;
+
+            midnight = next;
         }
     }
-    for (const [key, day] of Object.entries(days)) {
+    for (const day of Object.values(days)) {
         day.peak = Math.max(...day.buckets);
         day.at = day.buckets.indexOf(day.peak) * PARALLEL_BUCKET_MS;
-        day.sessions = (sessions || []).filter((s) => s.start && s.end
-            && s.end >= s.start && overlapsDay(s, key)).length;
         delete day.buckets;
     }
     return days;
-}
-
-function overlapsDay(s, key) {
-    for (let at = s.start; ; at += PARALLEL_BUCKET_MS) {
-        const capped = Math.min(at, s.end);
-        if (dayKey(capped) === key) return true;
-        if (capped >= s.end) return false;
-    }
 }
 
 /**
