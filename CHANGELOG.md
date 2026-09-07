@@ -5,7 +5,7 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
-## [Unreleased]
+## [0.56.0] — 2026-09-07
 
 ### Added
 
