@@ -307,6 +307,19 @@ const CHARS_PER_TOKEN = 4;
 const scans = new Map();
 const SCANS_KEPT = 4;
 
+// Today's spend is asked of every transcript written to today, which is tens of
+// files rather than one.
+const costs = new Map();
+const COSTS_KEPT = 64;
+
+// Newest last, oldest evicted. A Map iterates in insertion order, so re-setting
+// a key it already has is what moves it to the end.
+function remember(into, key, state, keep) {
+    into.delete(key);
+    into.set(key, state);
+    while (into.size > keep) into.delete(into.keys().next().value);
+}
+
 // A megabyte at a time. The reader works in bytes and cuts on 0x0A: UTF-8 is
 // self-synchronising and a newline can never appear inside a multi-byte
 // sequence, so a line boundary is always a character boundary — which is what
@@ -563,18 +576,16 @@ function scanTranscript(file) {
     state.end = end;
     state.result = { stats: moneyOf(state), parts: windowOf(state) };
 
-    scans.delete(file);
-    scans.set(file, state);
-    while (scans.size > SCANS_KEPT) scans.delete(scans.keys().next().value);
-
+    remember(scans, file, state, SCANS_KEPT);
     return { stats: state.result.stats, parts: state.result.parts, read: { bytes: info.size - from, from, chunks } };
 }
 
 // Drop what is remembered about a transcript — a session that has ended, or a
 // test that is about to write a different file to the same path.
 function forgetTranscript(file) {
-    if (file === undefined) scans.clear();
-    else scans.delete(file);
+    if (file === undefined) { scans.clear(); costs.clear(); return; }
+    scans.delete(file);
+    costs.delete(file);
 }
 
 // Everything that needs the whole transcript is computed in one pass: cost,
@@ -618,19 +629,51 @@ function costToday(nowMs = Date.now()) {
     return { usd: total, files };
 }
 
-function costSince(file, since) {
-    let text;
-    try { text = fs.readFileSync(file, 'utf8'); } catch { return 0; }
-    const held = new Map();
-    for (const line of text.split('\n')) {
-        if (line.length < 50 || line[0] !== '{') continue;
-        let r;
-        try { r = JSON.parse(line); } catch { continue; }
-        if (!r.message || !r.message.usage) continue;
-        if ((Date.parse(r.timestamp) || 0) < since) continue;
-        holdFullest(held, r);
+/**
+ * What one transcript has cost since a moment, and what reading it cost.
+ *
+ * The same incremental read as `scanTranscript`, with one more thing that sends
+ * it back to the top: a different `since`. The boundary is baked into what was
+ * held — records before it were never counted — so a state built for yesterday
+ * cannot answer for today.
+ */
+function costScan(file, since) {
+    let info;
+    try { info = fs.statSync(file); } catch { costs.delete(file); return { usd: 0, read: { bytes: 0, from: 0 } }; }
+
+    const prev = costs.get(file);
+    const sig = headSig(file, info.size);
+    let state = null;
+    let from = 0;
+
+    if (prev && prev.since === since && sameHead(prev.sig, sig) && info.size >= prev.size) {
+        if (info.size === prev.size && info.mtimeMs === prev.mtime) {
+            return { usd: prev.usd, read: { bytes: 0, from: prev.end } };
+        }
+        if (info.size > prev.size) { state = prev; from = prev.end; }
     }
-    return chargeHeld(held);
+    if (!state) state = { since, size: 0, mtime: 0, sig: '', end: 0, usd: 0, held: new Map() };
+
+    const { end } = readLines(file, from, info.size, (line) => {
+        if (line.length < 50 || line[0] !== '{') return;
+        let r;
+        try { r = JSON.parse(line); } catch { return; }
+        if (!r.message || !r.message.usage) return;
+        if ((Date.parse(r.timestamp) || 0) < since) return;
+        holdFullest(state.held, r);
+    });
+
+    state.size = info.size;
+    state.mtime = info.mtimeMs;
+    state.sig = sig;
+    state.end = end;
+    state.usd = chargeHeld(state.held);
+    remember(costs, file, state, COSTS_KEPT);
+    return { usd: state.usd, read: { bytes: info.size - from, from } };
+}
+
+function costSince(file, since) {
+    return costScan(file, since).usd;
 }
 
 // Neighbours in this repository: how many live sessions besides ours, and how
@@ -924,7 +967,7 @@ module.exports = {
     slugFor, listSessions, findOwnSession, sessionForShell, titleOf, titleIn,
     transcriptPath, readTail, contextOf,
     windowFor, sessionStats, contextParts, costToday, costSince, peersOf, todoOf,
-    scanTranscript, forgetTranscript, readLines,
+    scanTranscript, forgetTranscript, readLines, costScan,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
     settingsFiles, settingsChain, resolveSetting, styleFromArgs, styleOfSession, MANAGED,
     editSettings, BACKUP_SUFFIX, pinClientSettings,

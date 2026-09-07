@@ -376,6 +376,21 @@ test('refreshIndex reuses unchanged files and re-reads only what grew', () => tr
     assert.equal(ix.summarize(third.index).sessions.find((s) => s.kind === 'main').msgs, 2);
 }));
 
+test('a refresh that found nothing new does not rewrite the index', () => tree(({ root, store, write }) => {
+    write('sess-1.jsonl', [rec()]);
+    ix.refreshIndex(store, { root });
+    const file = path.join(store, 'index.json');
+    const written = fs.statSync(file).mtimeMs;
+
+    ix.refreshIndex(store, { root });
+    assert.equal(fs.statSync(file).mtimeMs, written, 'nothing changed, so nothing was written');
+
+    // A transcript that grew is written down again.
+    fs.appendFileSync(path.join(root, '-Users-x-Develop-demo', 'sess-1.jsonl'), rec() + '\n');
+    ix.refreshIndex(store, { root });
+    assert.notEqual(fs.statSync(file).mtimeMs, written);
+}));
+
 test('a deleted transcript leaves the index instead of haunting the totals', () => tree(({ root, store, write }) => {
     const file = write('sess-1.jsonl', [rec()]);
     write('sess-2.jsonl', [rec()]);

@@ -631,11 +631,16 @@ function collectSlow(state) {
             d.stats = state.stats;
         }
         if (state.needs.has('today')) { state.todayUsd = s.costToday().usd; d.todayUsd = state.todayUsd; }
-        // What the window is full of. Another whole-transcript pass, so it rides
-        // the slow tick with the rest; the memory files are already weighed by
-        // the system snapshot, which is where that half of the answer comes from.
-        state.contextParts = s.contextParts(s.transcriptPath(state.workspace, state.session.sessionId));
-        d.contextParts = state.contextParts;
+        // What the window is full of. It shares the read above rather than
+        // making one of its own, and it is asked on the same condition as the
+        // gauge it hangs under: the breakdown draws nothing without `d.ctx`, so
+        // a bar that mentions no context field would be paying for a panel it
+        // never shows. The memory files are weighed by the system snapshot,
+        // which is where that half of the answer comes from.
+        if (CONTEXT_FIELDS.some((f) => state.needs.has(f))) {
+            state.contextParts = s.contextParts(s.transcriptPath(state.workspace, state.session.sessionId));
+            d.contextParts = state.contextParts;
+        }
         // Every instruction file that reaches the prompt, not just the global
         // ones: the project's own CLAUDE.md and this repository's auto-memory are
         // in the window too.

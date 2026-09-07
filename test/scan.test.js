@@ -159,6 +159,44 @@ test('a missing transcript answers nothing, as it always did', () => {
     assert.equal(s.contextParts('/nope/missing.jsonl'), null);
 });
 
+test("today's spend re-reads only what was appended", () => {
+    withDir((dir) => {
+        const file = path.join(dir, 'k.jsonl');
+        write(file, [usageRec(0)]);
+        s.forgetTranscript(file);
+
+        const first = s.costScan(file, T0 - 1000);
+        assert.equal(first.usd, 25);
+        assert.equal(first.read.from, 0);
+
+        const wasSize = fs.statSync(file).size;
+        append(file, [usageRec(1000)]);
+        const grown = s.costScan(file, T0 - 1000);
+        assert.equal(grown.read.from, wasSize);
+        assert.equal(grown.usd, 50);
+
+        const again = s.costScan(file, T0 - 1000);
+        assert.equal(again.read.bytes, 0);
+        assert.equal(again.usd, 50);
+    });
+});
+
+test("today's spend starts over when the day it is asked about moves", () => {
+    withDir((dir) => {
+        const file = path.join(dir, 'l.jsonl');
+        write(file, [usageRec(0), usageRec(7200000)]);
+        s.forgetTranscript(file);
+
+        assert.equal(s.costScan(file, T0 - 1000).usd, 50);
+        // A later midnight: the earlier record is no longer today's, and the
+        // carried state was built with the old boundary in it.
+        const after = s.costScan(file, T0 + 3600000);
+        assert.equal(after.read.from, 0, 'a new day is read from the top');
+        assert.equal(after.usd, 25);
+        assert.equal(s.costSince(file, T0 + 3600000), 25);
+    });
+});
+
 test('readLines carries a record that spans several chunks', () => {
     withDir((dir) => {
         const file = path.join(dir, 'g.jsonl');

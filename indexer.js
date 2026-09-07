@@ -726,6 +726,9 @@ function saveIndex(storageDir, index) {
  */
 function refreshIndex(storageDir, { root = PROJECTS, onProgress } = {}) {
     const index = loadIndex(storageDir);
+    // An index that came back empty is either missing or of an older shape, and
+    // either way it has to be written even when every file is reused.
+    const wasEmpty = Object.keys(index.files).length === 0;
     const files = walk(root);
     const seen = new Set();
     let reused = 0;
@@ -754,7 +757,12 @@ function refreshIndex(storageDir, { root = PROJECTS, onProgress } = {}) {
         if (!seen.has(known)) { delete index.files[known]; removed++; }
     }
 
-    saveIndex(storageDir, index);
+    // Only when the reading changed. The dashboard refreshes this on every slow
+    // tick, and writing three megabytes a minute to say the same thing moves the
+    // file's mtime — which is the very thing `freshIndex` watches to decide
+    // whether to parse it again, so an unconditional write invalidated the cache
+    // that exists to avoid the parse.
+    if (parsed || removed || wasEmpty) saveIndex(storageDir, index);
     return { index, stats: { total: files.length, reused, parsed, removed, bytes } };
 }
 

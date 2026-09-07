@@ -2060,6 +2060,27 @@ const PANEL = { pid: 11, sessionId: 'panel-session', cwd: '/w' };
 const TAB_A = { pid: 21, sessionId: 'tab-a-session', cwd: '/w' };
 const TAB_B = { pid: 22, sessionId: 'tab-b-session', cwd: '/w' };
 
+// What fills the window is read for a bar that shows the context and for no
+// other. It is a whole-transcript read, and the only one that had no gate on it
+// while the spend fields beside it have had one all along.
+async function partsRead(segments) {
+    const run = activate({ segments, workspace: '/w', settings: { fetchLimits: false } });
+    const real = s.contextParts;
+    let calls = 0;
+    s.contextParts = () => { calls++; return null; };
+    try {
+        await withOwnership({ own: PANEL }, async () => {
+            await vscode.__commands.get('claudeStatusline.refresh')();
+        });
+    } finally { s.contextParts = real; run.dispose(); }
+    return calls;
+}
+
+test('what fills the window is read only for a bar that shows the context', async () => {
+    assert.ok(await partsRead(['{ctx} {ctxTokens}']) > 0, 'a bar with the context reads it');
+    assert.equal(await partsRead(['✻ 7d {weekly}']), 0, 'a bar without it does not');
+});
+
 test('the bar follows the session in the active terminal, not the newest one', async () => {
     const run = activate({ segments: ['{ctx}'], workspace: '/w' });
     try {
