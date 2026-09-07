@@ -5,6 +5,12 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
+## [Unreleased]
+
+### Changed
+
+- The session transcript is read once a tick, and only from where the last read stopped.
+
 ## [0.56.0] — 2026-09-07
 
 ### Added

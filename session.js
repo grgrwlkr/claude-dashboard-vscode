@@ -286,6 +286,153 @@ function contextOf(record) {
 const CHARS_PER_TOKEN = 4;
 
 /**
+ * One read of a transcript answers every question asked of it, and the next read
+ * starts where this one stopped.
+ *
+ * The two whole-file passes this replaces — the money and the window breakdown —
+ * ran on the same tick over the same path, and each held the file in one string:
+ * on a 105 MB transcript that is 618 ms and 478 ms of a blocked extension host
+ * and two peaks of ~440 MB of RSS, once a minute. A transcript is append-only,
+ * so a second look need only read what has appeared since the first. The state
+ * each aggregate keeps is carried between ticks and the reader starts at the
+ * offset where the last complete line ended.
+ *
+ * What makes carrying it safe is `responseKey`: a response is charged from the
+ * fullest record that names it, and a record whose figures grow later in the
+ * file replaces the one already held whichever read saw it first.
+ */
+
+// The last look at each transcript. Four is more than the one file a window
+// asks about, and enough that a second panel does not evict the first.
+const scans = new Map();
+const SCANS_KEPT = 4;
+
+// A megabyte at a time. The reader works in bytes and cuts on 0x0A: UTF-8 is
+// self-synchronising and a newline can never appear inside a multi-byte
+// sequence, so a line boundary is always a character boundary — which is what
+// makes reading in chunks safe without a decoder holding state between them.
+const CHUNK = 1 << 20;
+
+// Enough of the head of the file to notice that it is a different file. A
+// transcript is replaced rather than appended to when a session is resumed into
+// a copy, and then the stored offset addresses the wrong bytes.
+const SIG_BYTES = 512;
+
+/**
+ * Every complete line between two offsets, handed over one at a time, and the
+ * offset where the last complete line ended.
+ *
+ * A record still being written stays unread until its newline lands. Consuming
+ * it early would parse a truncated line — silently dropped as unparseable — and
+ * then read the rest of it as a line of its own on the next tick, losing the
+ * record both times.
+ */
+function readLines(file, from, to, onLine, chunk = CHUNK) {
+    let fd;
+    try { fd = fs.openSync(file, 'r'); } catch { return { end: from, chunks: 0 }; }
+
+    const buf = Buffer.allocUnsafe(Math.max(1, chunk));
+    let carry = Buffer.alloc(0);
+    let pos = from;
+    let chunks = 0;
+    try {
+        while (pos < to) {
+            let got;
+            try { got = fs.readSync(fd, buf, 0, Math.min(buf.length, to - pos), pos); } catch { break; }
+            if (got <= 0) break;
+            pos += got;
+            chunks++;
+
+            const data = carry.length
+                ? Buffer.concat([carry, buf.subarray(0, got)])
+                : Buffer.from(buf.subarray(0, got));
+            const cut = data.lastIndexOf(0x0A);
+            // A line longer than the chunk: keep reading until its newline turns
+            // up rather than handing over half a record.
+            if (cut === -1) { carry = data; continue; }
+            for (const line of data.toString('utf8', 0, cut).split('\n')) onLine(line);
+            carry = Buffer.from(data.subarray(cut + 1));
+        }
+    } finally {
+        try { fs.closeSync(fd); } catch { /* already closed */ }
+    }
+    // Whatever is still in hand was never handed over, so it is not behind us.
+    return { end: pos - carry.length, chunks };
+}
+
+function headSig(file, size) {
+    const want = Math.min(SIG_BYTES, size);
+    if (want <= 0) return '';
+    const buf = Buffer.allocUnsafe(want);
+    let fd;
+    try {
+        fd = fs.openSync(file, 'r');
+        fs.readSync(fd, buf, 0, want, 0);
+    } catch { return ''; } finally {
+        if (fd !== undefined) try { fs.closeSync(fd); } catch { /* already closed */ }
+    }
+    return buf.toString('latin1');
+}
+
+// A file shorter than the signature carries a shorter one, and grows into a
+// longer one as it is written to — so the test is that one is a prefix of the
+// other, never that the two are equal. Comparing them whole read every young
+// transcript from the top on every tick, which is the work this exists to avoid.
+function sameHead(a, b) {
+    return a.length <= b.length ? b.startsWith(a) : a.startsWith(b);
+}
+
+function emptyScan() {
+    return {
+        size: 0, mtime: 0, sig: '', end: 0, result: null,
+        // Money, edits and the shape of the session's clock.
+        held: new Map(), added: 0, removed: 0, first: 0, last: 0, waiting: 0, prevAt: 0,
+        // What the window is full of.
+        skills: new Map(), tools: new Map(), agents: new Map(), mcp: new Map(), hooks: 0,
+    };
+}
+
+// The two aggregates disagree about which records are theirs, and both readings
+// are deliberate: money counts every record in the file, subagents included,
+// while the window belongs to this thread alone. They also disagree about the
+// length below which a line cannot carry what they want — 50 bytes against 40 —
+// and that is kept rather than unified, because a line between the two figures
+// would change one of the two answers.
+function applyLine(state, line) {
+    if (line.length < 40 || line[0] !== '{') return;
+    let record;
+    try { record = JSON.parse(line); } catch { return; }
+    if (line.length >= 50) applyMoney(state, record);
+    applyWindow(state, record);
+}
+
+function applyMoney(state, r) {
+    const at = Date.parse(r.timestamp) || 0;
+    if (at) {
+        if (!state.first) state.first = at;
+        state.last = at;
+    }
+
+    if (r.message && r.message.usage) {
+        holdFullest(state.held, r);
+        // The gap before a model reply is the wait for that reply. There is no
+        // exact api_duration_ms on disk, so the share is an estimate.
+        if (state.prevAt && at > state.prevAt) state.waiting += at - state.prevAt;
+    }
+    if (at) state.prevAt = at;
+
+    const patch = r.toolUseResult && r.toolUseResult.structuredPatch;
+    if (Array.isArray(patch)) {
+        for (const hunk of patch) {
+            for (const l of hunk.lines || []) {
+                if (l[0] === '+') state.added++;
+                else if (l[0] === '-') state.removed++;
+            }
+        }
+    }
+}
+
+/**
  * What is in the context window besides the conversation, as far as the
  * transcript admits.
  *
@@ -306,15 +453,15 @@ const CHARS_PER_TOKEN = 4;
  * definitions, so the largest row of `/context` is not here. The caller reports
  * the difference as unaccounted rather than pretending the window is smaller.
  */
-function contextParts(file) {
-    let text;
-    try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
-
-    const skills = new Map();
-    const tools = new Map();
-    const agents = new Map();
-    const mcp = new Map();
-    let hooks = 0;
+function applyWindow(state, record) {
+    // One file holds several contexts. A subagent's records sit in the same
+    // transcript and carry listings of their own: an `isInitial` one from an
+    // agent would wipe the state built for this window, and its tools would be
+    // counted into a window they were never in. The same three markers
+    // `readTail` has always skipped.
+    if (record.agentId || record.workflowId || record.isSidechain) return;
+    const a = record.attachment;
+    if (!a || typeof a !== 'object') return;
 
     // Each block arrives with the text that was added; where a delta names more
     // entries than it carries lines, the name itself is what reached the prompt.
@@ -326,112 +473,120 @@ function contextParts(file) {
     };
     const drop = (from, names) => { (names || []).forEach((name) => from.delete(name)); };
 
-    for (const line of text.split('\n')) {
-        if (line.length < 40 || line[0] !== '{') continue;
-        let record;
-        try { record = JSON.parse(line); } catch { continue; }
-        // One file holds several contexts. A subagent's records sit in the same
-        // transcript and carry listings of their own: an `isInitial` one from an
-        // agent would wipe the state built for this window, and its tools would
-        // be counted into a window they were never in. The same three markers
-        // `readTail` has always skipped.
-        if (record.agentId || record.workflowId || record.isSidechain) continue;
-        const a = record.attachment;
-        if (!a || typeof a !== 'object') continue;
-
-        if (a.type === 'skill_listing') {
-            if (a.isInitial) skills.clear();
-            const names = a.names || [];
-            // One listing, one block of text: it is split evenly rather than
-            // guessed per skill, because the text is written as a whole.
-            const each = (a.content || '').length / Math.max(1, names.length);
-            names.forEach((name) => skills.set(name, each));
-        } else if (a.type === 'deferred_tools_delta') {
-            drop(tools, a.removedNames);
-            put(tools, a.addedNames, a.addedLines);
-            (a.readdedNames || []).forEach((name) => {
-                if (!tools.has(name)) tools.set(name, String(name).length);
-            });
-        } else if (a.type === 'agent_listing_delta') {
-            if (a.isInitial) agents.clear();
-            drop(agents, a.removedTypes);
-            put(agents, a.addedTypes, a.addedLines);
-        } else if (a.type === 'mcp_instructions_delta') {
-            drop(mcp, a.removedNames);
-            put(mcp, a.addedNames, a.addedBlocks);
-        } else if (a.type === 'hook_additional_context') {
-            hooks += (a.content || []).reduce((sum, c) => sum + String(c).length, 0);
-        }
+    if (a.type === 'skill_listing') {
+        if (a.isInitial) state.skills.clear();
+        const names = a.names || [];
+        // One listing, one block of text: it is split evenly rather than guessed
+        // per skill, because the text is written as a whole.
+        const each = (a.content || '').length / Math.max(1, names.length);
+        names.forEach((name) => state.skills.set(name, each));
+    } else if (a.type === 'deferred_tools_delta') {
+        drop(state.tools, a.removedNames);
+        put(state.tools, a.addedNames, a.addedLines);
+        (a.readdedNames || []).forEach((name) => {
+            if (!state.tools.has(name)) state.tools.set(name, String(name).length);
+        });
+    } else if (a.type === 'agent_listing_delta') {
+        if (a.isInitial) state.agents.clear();
+        drop(state.agents, a.removedTypes);
+        put(state.agents, a.addedTypes, a.addedLines);
+    } else if (a.type === 'mcp_instructions_delta') {
+        drop(state.mcp, a.removedNames);
+        put(state.mcp, a.addedNames, a.addedBlocks);
+    } else if (a.type === 'hook_additional_context') {
+        state.hooks += (a.content || []).reduce((sum, c) => sum + String(c).length, 0);
     }
+}
 
-    const tok = (map) => Math.round([...map.values()].reduce((a, b) => a + b, 0) / CHARS_PER_TOKEN);
+function moneyOf(state) {
+    const duration = state.first && state.last ? state.last - state.first : 0;
+    const cost = chargeHeld(state.held);
     return {
-        skills: tok(skills),
-        tools: tok(tools),
-        agents: tok(agents),
-        mcp: tok(mcp),
-        hooks: Math.round(hooks / CHARS_PER_TOKEN),
-        counts: { skills: skills.size, tools: tools.size, agents: agents.size, mcp: mcp.size },
+        cost,
+        messages: state.held.size,
+        added: state.added,
+        removed: state.removed,
+        durationMs: duration,
+        // Share of wall-clock time spent waiting on model replies.
+        apiPct: duration > 0 ? Math.min(100, Math.round((state.waiting / duration) * 100)) : -1,
+        burn: duration > 60000 ? cost / (duration / 3600000) : -1,
     };
 }
 
-// Everything that needs the whole transcript is computed in a single pass: cost,
-// duration, share of time spent waiting on the model, edits, message count. A
-// 5 MB file parses in ~20 ms, so this runs on the slow tick, not on every draw.
-function sessionStats(file) {
-    let text;
-    try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
-
-    const held = new Map();
-    let added = 0;
-    let removed = 0;
-    let first = 0;
-    let last = 0;
-    let waiting = 0;
-    let prev = 0;
-
-    for (const line of text.split('\n')) {
-        if (line.length < 50 || line[0] !== '{') continue;
-        let r;
-        try { r = JSON.parse(line); } catch { continue; }
-
-        const at = Date.parse(r.timestamp) || 0;
-        if (at) {
-            if (!first) first = at;
-            last = at;
-        }
-
-        if (r.message && r.message.usage) {
-            holdFullest(held, r);
-            // The gap before a model reply is the wait for that reply. There is
-            // no exact api_duration_ms on disk, so the share is an estimate.
-            if (prev && at > prev) waiting += at - prev;
-        }
-        if (at) prev = at;
-
-        const patch = r.toolUseResult && r.toolUseResult.structuredPatch;
-        if (Array.isArray(patch)) {
-            for (const hunk of patch) {
-                for (const l of hunk.lines || []) {
-                    if (l[0] === '+') added++;
-                    else if (l[0] === '-') removed++;
-                }
-            }
-        }
-    }
-
-    const duration = first && last ? last - first : 0;
-    const cost = chargeHeld(held);
+function windowOf(state) {
+    const tok = (map) => Math.round([...map.values()].reduce((a, b) => a + b, 0) / CHARS_PER_TOKEN);
     return {
-        cost,
-        messages: held.size,
-        added,
-        removed,
-        durationMs: duration,
-        // Share of wall-clock time spent waiting on model replies.
-        apiPct: duration > 0 ? Math.min(100, Math.round((waiting / duration) * 100)) : -1,
-        burn: duration > 60000 ? cost / (duration / 3600000) : -1,
+        skills: tok(state.skills),
+        tools: tok(state.tools),
+        agents: tok(state.agents),
+        mcp: tok(state.mcp),
+        hooks: Math.round(state.hooks / CHARS_PER_TOKEN),
+        counts: {
+            skills: state.skills.size,
+            tools: state.tools.size,
+            agents: state.agents.size,
+            mcp: state.mcp.size,
+        },
     };
+}
+
+/**
+ * Bring the reading of one transcript up to date, and say what that cost.
+ *
+ * Three things send the reader back to the top: a file shorter than what was
+ * already read, a different head, and the same length written at a different
+ * time. The last of those is what catches a file replaced by one of exactly its
+ * own size — the head would have to differ inside the first 512 bytes for the
+ * signature to notice, and a resumed copy often does not.
+ */
+function scanTranscript(file) {
+    let info;
+    try { info = fs.statSync(file); } catch { scans.delete(file); return null; }
+
+    const prev = scans.get(file);
+    const sig = headSig(file, info.size);
+    let state = null;
+    let from = 0;
+
+    if (prev && sameHead(prev.sig, sig) && info.size >= prev.size) {
+        if (info.size === prev.size && info.mtimeMs === prev.mtime) {
+            return { stats: prev.result.stats, parts: prev.result.parts, read: { bytes: 0, from: prev.end, chunks: 0 } };
+        }
+        if (info.size > prev.size) { state = prev; from = prev.end; }
+    }
+    if (!state) state = emptyScan();
+
+    const { end, chunks } = readLines(file, from, info.size, (line) => applyLine(state, line));
+    state.size = info.size;
+    state.mtime = info.mtimeMs;
+    state.sig = sig;
+    state.end = end;
+    state.result = { stats: moneyOf(state), parts: windowOf(state) };
+
+    scans.delete(file);
+    scans.set(file, state);
+    while (scans.size > SCANS_KEPT) scans.delete(scans.keys().next().value);
+
+    return { stats: state.result.stats, parts: state.result.parts, read: { bytes: info.size - from, from, chunks } };
+}
+
+// Drop what is remembered about a transcript — a session that has ended, or a
+// test that is about to write a different file to the same path.
+function forgetTranscript(file) {
+    if (file === undefined) scans.clear();
+    else scans.delete(file);
+}
+
+// Everything that needs the whole transcript is computed in one pass: cost,
+// duration, share of time spent waiting on the model, edits, message count.
+function sessionStats(file) {
+    const scan = scanTranscript(file);
+    return scan ? scan.stats : null;
+}
+
+function contextParts(file) {
+    const scan = scanTranscript(file);
+    return scan ? scan.parts : null;
 }
 
 // Today's spend across every project. Files are picked by mtime and records
@@ -769,6 +924,7 @@ module.exports = {
     slugFor, listSessions, findOwnSession, sessionForShell, titleOf, titleIn,
     transcriptPath, readTail, contextOf,
     windowFor, sessionStats, contextParts, costToday, costSince, peersOf, todoOf,
+    scanTranscript, forgetTranscript, readLines,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
     settingsFiles, settingsChain, resolveSetting, styleFromArgs, styleOfSession, MANAGED,
     editSettings, BACKUP_SUFFIX, pinClientSettings,
