@@ -1094,6 +1094,7 @@ function configView(state) {
         permissionMode: cfg.get('permissionMode'),
         fallbackModel: cfg.get('fallbackModel'),
         outputStyle: cfg.get('outputStyle'),
+        launchSaveTo: cfg.get('launchSaveTo'),
         launchArgs: cfg.get('launchArgs'),
         aliasName: cfg.get('aliasName'),
         refreshInterval: cfg.get('refreshInterval'),
@@ -1114,17 +1115,18 @@ function configView(state) {
 // avoid. The list is the gate: a message naming anything else is dropped.
 const WRITABLE = ['segments', 'alignment', 'priority', 'refreshInterval',
     'fetchLimits', 'monthlyBudget', 'checkPluginUpdates', 'autoRefresh', 'fetchChangelog',
-    'openLocation', 'model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchArgs', 'aliasName'];
+    'openLocation', 'model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchSaveTo',
+    'launchArgs', 'aliasName'];
 
-// The keys that ignore the scope the page offers. All four are declared
+// The keys that ignore the scope the page offers. All five are declared
 // `machine` in the manifest — free text going into a shell is not something a
 // repository gets to set, neither is the name of an alias in your own terminal,
 // and a permission mode is a security gate: a cloned repository's
 // `.vscode/settings.json` must not be able to start the button's session in
-// `bypassPermissions`, nor name the model it falls back to — and VS Code rejects
-// a workspace write to such a key with an error that would take the rest of the
-// save down with it.
-const USER_ONLY = ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel'];
+// `bypassPermissions`, nor name the model it falls back to, nor point a write
+// at a file in your home directory — and VS Code rejects a workspace write to
+// such a key with an error that would take the rest of the save down with it.
+const USER_ONLY = ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel', 'launchSaveTo'];
 
 // The full changelog, when the user has allowed the fetch. One public file, no
 // credentials, and at most once an hour — kept in the extension's own storage
@@ -1401,6 +1403,71 @@ async function handleMessage(context, msg) {
             vscode.window.showErrorMessage(`Claude statusline: could not save settings — ${err.message}`);
         }
     }
+}
+
+// The home the pin writes under. Tests point it at a scratch directory; the
+// message channel cannot, for the reason `rcTarget` gives.
+let HOME_OVERRIDE = null;
+
+/**
+ * The Launch tab's choices written into a client settings file, where the
+ * chosen target says.
+ *
+ * The command line reaches only the sessions this extension starts; the
+ * sidebar's sessions and a bare `claude` read the files. Which file is the
+ * user's choice: `user` is `~/.claude/settings.json`, the file the client's own
+ * settings live in and the one that follows the account across machines when
+ * it is synced; `local` is the workspace's own `.claude/settings.local.json`,
+ * the file `/config` writes and the one the client reads first.
+ *
+ * Three things are said rather than assumed. A choice the file cannot hold —
+ * `max` effort — is named as skipped instead of written and dropped. The file
+ * is read back, because a write that returned is not a file that says what was
+ * meant. And the client's own chain is resolved for this workspace: a `local`
+ * file stating another value beats a `user` write, and the client would run
+ * that other value while the page reported success — so each winner is named.
+ */
+function pinLaunchSettings({ settings, home = os.homedir(), workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '' } = {}) {
+    const target = settings?.launchSaveTo || '';
+    const file = target === 'user' ? path.join(home, '.claude', 'settings.json')
+        : target === 'local' && workspace ? path.join(workspace, '.claude', 'settings.local.json')
+            : '';
+    if (!file) return false;
+    const { values, skipped } = dashboard.clientSettingsFor(settings || {});
+    if (skipped.length) {
+        vscode.window.showWarningMessage(`Claude statusline: ${skipped.join(', ')} not written to ${file} — the client's settings schema has no "max"; the command line still carries it`);
+    }
+    const keys = Object.keys(values);
+    if (!keys.length) return false;
+    const dig = (obj, key) => key.split('.').reduce((o, part) => (o == null ? undefined : o[part]), obj);
+    try {
+        s.pinClientSettings(file, values);
+        const read = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const missing = keys.filter((k) => JSON.stringify(dig(read, k)) !== JSON.stringify(values[k]));
+        if (missing.length) {
+            vscode.window.showErrorMessage(`Claude statusline: ${file} does not carry ${missing.join(', ')} after the write`);
+            return false;
+        }
+    } catch (err) {
+        vscode.window.showErrorMessage(`Claude statusline: could not write ${file} — ${err.message}`);
+        return false;
+    }
+    // The client's own order, so a file it does not read — `~/.claude/
+    // settings.local.json`, in the chain for the page that reports it — cannot
+    // be named as the winner. A nested key is looked up inside the file that
+    // wins its top-level object.
+    const chain = s.settingsChain(workspace, home).filter((f) => f.documented);
+    const shadowed = keys.map((k) => {
+        const winner = s.resolveSetting(chain, k.split('.')[0]);
+        if (!winner || winner.path === file) return null;
+        const got = dig({ [k.split('.')[0]]: winner.value }, k);
+        if (got === undefined) return null;
+        return `${k} (${winner.path} sets ${JSON.stringify(got)})`;
+    }).filter(Boolean);
+    if (shadowed.length) {
+        vscode.window.showWarningMessage(`Claude statusline: written to ${file}, but a nearer file wins for this workspace — ${shadowed.join('; ')}`);
+    }
+    return true;
 }
 
 /**
@@ -1788,6 +1855,17 @@ function activate(context) {
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (!e.affectsConfiguration('claudeStatusline')) return;
             applyConfig(state);
+            // The pin follows the keys it is made of, whichever way they were
+            // set — the Launch tab's Save or the settings editor both end here,
+            // so this is the one place the file is written from.
+            const LAUNCH = ['model', 'effort', 'advisor', 'permissionMode', 'fallbackModel', 'outputStyle', 'launchSaveTo'];
+            if (LAUNCH.some((k) => e.affectsConfiguration(`claudeStatusline.${k}`))) {
+                const cfg = vscode.workspace.getConfiguration('claudeStatusline');
+                pinLaunchSettings({
+                    settings: Object.fromEntries(LAUNCH.map((k) => [k, cfg.get(k)])),
+                    home: HOME_OVERRIDE || os.homedir(),
+                });
+            }
             // Only the interval needs a new timer, and the checkboxes on the
             // Settings tab write immediately — re-arming on any key would reset
             // the countdown every time one of them was ticked.
@@ -2239,6 +2317,8 @@ module.exports = {
     // one — the message channel cannot, and that is the point.
     installAlias,
     removeAlias,
+    pinLaunchSettings,
+    __setHome: (home) => { HOME_OVERRIDE = home || null; },
     __render: render,
     __collectWorkflowsFast: collectWorkflowsFast,
     // The places the button can put a session, exported for the one test that

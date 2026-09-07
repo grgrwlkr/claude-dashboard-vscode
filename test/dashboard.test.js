@@ -2427,3 +2427,51 @@ test('switching tab or section by click returns to the top of the page', () => {
     const openTab = script.slice(script.indexOf('function openTab('), script.indexOf('function openSection('));
     assert.ok(!/scrollTo|toTop/.test(openTab), 'openTab must not scroll, the redraw restores through it');
 });
+
+// Where the chosen style is written, offered beside the style itself: the
+// command line alone, the user's own client settings, or the workspace's local
+// file. The form sends the choice with the rest of the Launch tab.
+test('the launch tab offers where to save its choices, and the form sends it', () => {
+    const launch = db.launchTab({ launchSaveTo: 'user' }, {}, []);
+    assert.ok(launch.indexOf('>Saved to</h2>') > launch.indexOf('>Extra arguments</h2>'), 'its own panel, after the choices it covers');
+    const groups = (launch.match(/name="launchSaveTo"/g) || []).length;
+    assert.equal(groups, 3, 'command line only, the user file, the workspace file');
+    assert.match(launch, /value="user"[^>]*checked/);
+    assert.match(launch, /~\/\.claude\/settings\.json/);
+    assert.match(launch, /\.claude\/settings\.local\.json/);
+    assert.match(db.SCRIPT, /launchSaveTo: picked\('launchSaveTo', ''\)/);
+});
+
+// The Launch tab's choices as the client's own settings keys: what a settings
+// file would have to say for a bare `claude` to start the same session.
+test('the launch choices map onto the client settings keys', () => {
+    const { values, skipped } = db.clientSettingsFor({
+        model: 'fable[1m]', effort: 'high', advisor: 'opus', permissionMode: 'bypassPermissions',
+        fallbackModel: 'sonnet,haiku', outputStyle: 'Concise', launchArgs: '--add-dir ../x',
+    });
+    assert.deepEqual(values, {
+        model: 'fable[1m]', effortLevel: 'high', advisorModel: 'opus',
+        'permissions.defaultMode': 'bypassPermissions', fallbackModel: ['sonnet', 'haiku'], outputStyle: 'Concise',
+    });
+    assert.deepEqual(skipped, []);
+    // Empty choices are no keys; `max` has no place in the file, and says so.
+    const again = db.clientSettingsFor({ model: '', effort: 'max', outputStyle: 'Concise' });
+    assert.deepEqual(again.values, { outputStyle: 'Concise' });
+    assert.deepEqual(again.skipped, ['effortLevel']);
+});
+
+// Two "where" questions sit on the same tab: where the extension keeps its own
+// settings, and whether the choices are also written into Claude Code's files.
+// Each answers its own question in its own words.
+test('the save bar says it is the extension\'s own settings, apart from the Claude Code file', () => {
+    const launch = db.launchTab({}, {}, []);
+    const bar = launch.slice(launch.indexOf('class="save-bar"'));
+    assert.match(bar, /the extension's own settings/i);
+    assert.match(bar, /VS Code user settings|this workspace's \.vscode/);
+    const saved = launch.slice(launch.indexOf('>Saved to</h2>'), launch.indexOf('>The command</h2>'));
+    assert.match(saved, /Claude Code/);
+    assert.match(saved, /Save to.*below|chips below|bar below/i);
+    // The Settings tab shares the bar, so it says the same there.
+    const settings = db.settingsTab({}, {}, {});
+    assert.match(settings.slice(settings.indexOf('class="save-bar"')), /the extension's own settings/i);
+});

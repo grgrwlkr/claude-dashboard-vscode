@@ -537,3 +537,54 @@ test('the disk collector uses the weighted plan the extension uses', () => {
     // what is asserted is that the field is carried at all.
     if (d.pace) assert.ok('planW' in d.pace, 'planW reaches the dashboard');
 });
+
+// The output style pinned into a settings file: the one key written, every
+// other byte kept, the file's mode kept — the same promises linking makes.
+test('pinning a style writes outputStyle and keeps every other key and the mode', () => {
+    const dir = tmpHome();
+    const p = path.join(dir, 'settings.json');
+    fs.writeFileSync(p, `${JSON.stringify({ model: 'opus', env: { A: '1' } }, null, 2)}\n`, { mode: 0o600 });
+    assert.equal(term.pinClientSettings(p, { outputStyle: 'Concise' }), true);
+    const after = JSON.parse(fs.readFileSync(p, 'utf8'));
+    assert.equal(after.outputStyle, 'Concise');
+    assert.equal(after.model, 'opus');
+    assert.deepEqual(after.env, { A: '1' });
+    assert.equal(fs.statSync(p).mode & 0o777, 0o600);
+});
+
+test('pinning an empty style touches nothing', () => {
+    const dir = tmpHome();
+    const p = path.join(dir, 'settings.json');
+    const before = `${JSON.stringify({ outputStyle: 'Explanatory' }, null, 2)}\n`;
+    fs.writeFileSync(p, before);
+    assert.equal(term.pinClientSettings(p, { outputStyle: '' }), null);
+    assert.equal(fs.readFileSync(p, 'utf8'), before);
+    const missing = path.join(dir, 'none', 'settings.json');
+    assert.equal(term.pinClientSettings(missing, {}), null);
+    assert.ok(!fs.existsSync(missing));
+});
+
+test('pinning creates the file and its directory when there is none, owner-only', () => {
+    const dir = tmpHome();
+    const p = path.join(dir, '.claude', 'settings.local.json');
+    assert.equal(term.pinClientSettings(p, { outputStyle: 'Concise' }), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(p, 'utf8')), { outputStyle: 'Concise' });
+    assert.equal(fs.statSync(p).mode & 0o777, 0o600);
+});
+
+test('pinning several keys writes each, nests a dotted one, and skips empties', () => {
+    const dir = tmpHome();
+    const p = path.join(dir, 'settings.json');
+    fs.writeFileSync(p, `${JSON.stringify({ permissions: { allow: ['Bash'] }, env: { A: '1' } }, null, 2)}\n`);
+    assert.equal(term.pinClientSettings(p, {
+        model: 'fable[1m]', effortLevel: 'high', advisorModel: '', fallbackModel: ['sonnet', 'haiku'],
+        'permissions.defaultMode': 'bypassPermissions', outputStyle: undefined,
+    }), true);
+    const after = JSON.parse(fs.readFileSync(p, 'utf8'));
+    assert.equal(after.model, 'fable[1m]');
+    assert.equal(after.effortLevel, 'high');
+    assert.deepEqual(after.fallbackModel, ['sonnet', 'haiku']);
+    assert.deepEqual(after.permissions, { allow: ['Bash'], defaultMode: 'bypassPermissions' });
+    assert.ok(!('advisorModel' in after) && !('outputStyle' in after), 'an empty choice writes no key');
+    assert.deepEqual(after.env, { A: '1' });
+});

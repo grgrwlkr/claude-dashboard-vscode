@@ -366,6 +366,22 @@
           "default": "",
           "markdownDescription": "Ask for an output style for the session — how Claude answers, not what it can do.\n\nThere is no command-line flag for this: `outputStyle` is an ordinary setting, so it travels as `claude --settings '{\"outputStyle\":\"…\"}'`, which **merges** with your settings files rather than replacing them — every other key keeps whatever value it already had.\n\nThe list here is the client's built-in styles. A style of your own is a markdown file in `~/.claude/output-styles`, named by its `name` field or by the file name — pick one on the dashboard's **Setup \u2192 Launch** tab, which lists what is on disk. Its name goes in this setting verbatim; the list above is not exhaustive, so a name outside it is expected here."
         },
+        "claudeStatusline.launchSaveTo": {
+          "type": "string",
+          "enum": [
+            "",
+            "user",
+            "local"
+          ],
+          "enumDescriptions": [
+            "Command line only: the choices travel as flags with the session this extension starts, and no file is written.",
+            "~/.claude/settings.json — every session on this account, in every project.",
+            ".claude/settings.local.json in the workspace's first folder — this workspace only; wins over the user file."
+          ],
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Also write the Launch tab's choices into a Claude Code settings file, as the client's own keys — `model`, `effortLevel`, `advisorModel`, `permissions.defaultMode`, `fallbackModel`, `outputStyle` — so sessions this extension does not start read them too. Written whenever one of them or this setting changes; an empty choice writes nothing and removes nothing; the extra arguments have no key. `max` effort is not written: the client's schema stops at `xhigh`.\n\nThe client reads the workspace's `.claude/settings.local.json` before `~/.claude/settings.json`; when a nearer file sets another value, the dashboard says which file wins. User settings only."
+        },
         "claudeStatusline.launchArgs": {
           "type": "string",
           "default": "",

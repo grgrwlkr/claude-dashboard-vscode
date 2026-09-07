@@ -5,6 +5,18 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
+## [Unreleased]
+
+### Added
+
+- **Saved to** on the Launch tab writes the model, effort, advisor, permission mode, fallback and style into `~/.claude/settings.json` or the workspace's `.claude/settings.local.json`.
+- `claudeStatusline.launchSaveTo`: `""`, `user`, `local`. User settings only.
+- A warning names the settings file that wins when a nearer one sets another value, and names `max` effort as not written.
+
+### Changed
+
+- The save bar on the Settings and Launch tabs reads **Keep the extension's own settings in: VS Code user settings / this workspace's .vscode**.
+
 ## [0.54.0] — 2026-09-03
 
 ### Changed

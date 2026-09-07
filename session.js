@@ -518,7 +518,7 @@ const MANAGED = process.platform === 'darwin'
     ? '/Library/Application Support/ClaudeCode/managed-settings.json'
     : '/etc/claude-code/managed-settings.json';
 
-function settingsFiles(workspace) {
+function settingsFiles(workspace, home = HOME) {
     const ws = workspace || '';
     return [
         { scope: 'managed', path: MANAGED, documented: true },
@@ -526,8 +526,8 @@ function settingsFiles(workspace) {
             { scope: 'local', path: path.join(ws, '.claude', 'settings.local.json'), documented: true },
             { scope: 'project', path: path.join(ws, '.claude', 'settings.json'), documented: true },
         ] : []),
-        { scope: 'user local', path: path.join(HOME, '.claude', 'settings.local.json'), documented: false },
-        { scope: 'user', path: path.join(HOME, '.claude', 'settings.json'), documented: true },
+        { scope: 'user local', path: path.join(home, '.claude', 'settings.local.json'), documented: false },
+        { scope: 'user', path: path.join(home, '.claude', 'settings.json'), documented: true },
     ];
 }
 
@@ -537,8 +537,8 @@ function settingsFiles(workspace) {
  * unparseable comes back with `data: null` and is skipped by every reader —
  * the page shows it as a file that is not there rather than dropping the row.
  */
-function settingsChain(workspace) {
-    return settingsFiles(workspace).map((f) => {
+function settingsChain(workspace, home = HOME) {
+    return settingsFiles(workspace, home).map((f) => {
         const data = readJson(f.path);
         return { ...f, exists: data !== null, data };
     });
@@ -690,6 +690,80 @@ function fmtDuration(ms) {
     return `${m}m`;
 }
 
+const BACKUP_SUFFIX = '.claude-dashboard.bak';
+
+// A client settings file, rewritten whole. The client writes these files too —
+// `/model` lands in the user one — so it is read inside the same call that
+// writes it rather than at render time, and replaced by rename so a reader
+// never sees half a file. Shared by the status-line toggle in terminal.js and
+// the Launch tab's pin in extension.js.
+function editSettings(file, edit) {
+    let settings = {};
+    let raw = null;
+    try {
+        raw = fs.readFileSync(file, 'utf8');
+        settings = JSON.parse(raw);
+    } catch { /* an unreadable or absent file is an empty one to write over */ }
+
+    const result = edit(settings);
+    if (result === false) return null;
+
+    // The client keeps this file owner-only and its `env` block routinely holds
+    // tokens. `writeFileSync` with no mode creates 0644, so both the copy and
+    // the replacement would hand the file to every account on the machine —
+    // quietly, since the name and the contents are unchanged. Whatever the file
+    // is now, the copy and the replacement are that or tighter.
+    let mode = 0o600;
+    try { mode = fs.statSync(file).mode & 0o777; } catch { /* a new file starts owner-only */ }
+
+    // Kept once, before the first rewrite, the way the alias writer keeps one
+    // beside `.zshrc`.
+    const backup = `${file}${BACKUP_SUFFIX}`;
+    if (raw !== null && !fs.existsSync(backup)) {
+        try { fs.writeFileSync(backup, raw, { mode }); } catch { /* a backup is a courtesy, not a gate */ }
+    }
+
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode });
+    // `mode` on writeFileSync is masked by the umask; chmod is not, and the
+    // rename carries the mode with it.
+    fs.chmodSync(tmp, mode);
+    fs.renameSync(tmp, file);
+    return result;
+}
+
+/**
+ * Pin client settings into a settings file: every key of `values` that has a
+ * value written, every other key kept, through the same replace-by-rename as
+ * the status line. A dotted key nests — `permissions.defaultMode` lands inside
+ * the `permissions` object beside whatever else is there.
+ *
+ * An empty value writes nothing for that key and never removes it: the key may
+ * be the user's own, written by hand or by `/config`, and there is no marker to
+ * tell ours from theirs — so "none" means "leave it", the way the command line
+ * does. Nothing to write at all returns null and touches no file.
+ *
+ * The workspace file usually does not exist yet, nor its `.claude/` directory;
+ * a missing file starts owner-only, as `editSettings` promises.
+ */
+function pinClientSettings(file, values) {
+    const entries = Object.entries(values || {}).filter(([, v]) => v !== undefined && v !== null && v !== '');
+    if (!entries.length) return null;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    return editSettings(file, (settings) => {
+        for (const [key, value] of entries) {
+            const parts = key.split('.');
+            let at = settings;
+            for (const part of parts.slice(0, -1)) {
+                if (!at[part] || typeof at[part] !== 'object' || Array.isArray(at[part])) at[part] = {};
+                at = at[part];
+            }
+            at[parts.at(-1)] = value;
+        }
+        return true;
+    });
+}
+
 module.exports = {
     SESSIONS, PROJECTS, TAIL,
     slugFor, listSessions, findOwnSession, sessionForShell, titleOf, titleIn,
@@ -697,4 +771,5 @@ module.exports = {
     windowFor, sessionStats, contextParts, costToday, costSince, peersOf, todoOf,
     autoCompactPct, versionInfo, compareVersions, settingsOf, fmtDuration,
     settingsFiles, settingsChain, resolveSetting, styleFromArgs, styleOfSession, MANAGED,
+    editSettings, BACKUP_SUFFIX, pinClientSettings,
 };

@@ -2373,7 +2373,7 @@ const PLACES = [
     ['panel', 'in the terminal panel', 'at the bottom, with the other terminals'],
     ['newWindow', 'in a new window', 'opened here, then carried out of this one'],
 ];
-const SCOPES = [['global', 'my settings'], ['workspace', 'this workspace']];
+const SCOPES = [['global', 'VS Code user settings'], ['workspace', "this workspace's .vscode"]];
 // The aliases `claude --model` accepts, read out of the client itself, and the
 // levels `--effort` takes. One list each: the manifest's dropdown, the quick
 // pick behind **Open Claude Code with…** and this page all read from here, and a
@@ -2543,6 +2543,17 @@ const STYLES = [
     ['Concise', 'concise'],
 ];
 
+// Where the Launch tab's choices are written besides the command line. The
+// command line reaches only the sessions this extension starts; a settings file
+// reaches the sidebar's and a bare `claude` too. The client reads the
+// workspace's local file before the user's, which the second card says in its
+// own words.
+const SAVE_TARGETS = [
+    ['', 'command line only', 'The choices travel as flags with the session this extension starts; no file is written'],
+    ['user', '~/.claude/settings.json', 'Every session on this account, in every project; the file your client settings live in'],
+    ['local', '.claude/settings.local.json', "This workspace's first folder only; wins over the user file, and is where /config writes"],
+];
+
 /**
  * One setting: what it is called, what it does, and the control for it.
  *
@@ -2686,7 +2697,7 @@ function settingsTab(config) {
             ['every', `${Number(cfg.refreshInterval) || 60}s`]),
     })}
         <div class="save-bar">
-          <span class="save-where">Save to</span>
+          <span class="save-where">Keep the extension's own settings in</span>
           ${chips('scope', SCOPES, 'global')}
           <span class="dirty" hidden>unsaved changes</span>
           <button class="btn primary save-go" disabled>Save</button>
@@ -2750,6 +2761,29 @@ function claudeCommand({ model, effort, advisor, permissionMode, fallbackModel, 
     if (outputStyle) parts.push('--settings', quoted(JSON.stringify({ outputStyle })));
     if (args) parts.push(String(args).trim());
     return parts.join(' ');
+}
+
+/**
+ * The same choices as the client's own settings keys — what a settings file has
+ * to say for a bare `claude` to start the session the command line describes.
+ *
+ * `fallbackModel` is a list in the file and a comma-joined string on the flag;
+ * `permissions.defaultMode` nests; the extra arguments have no key and are not
+ * here. An empty choice is no key. `max` effort is not a value the file takes —
+ * the client's schema stops at `xhigh` and drops it without a word — so it is
+ * returned under `skipped` rather than written and lost.
+ */
+function clientSettingsFor({ model, effort, advisor, permissionMode, fallbackModel, outputStyle } = {}) {
+    const values = {};
+    const skipped = [];
+    if (model) values.model = model;
+    if (effort === 'max') skipped.push('effortLevel');
+    else if (effort) values.effortLevel = effort;
+    if (advisor) values.advisorModel = advisor;
+    if (permissionMode) values['permissions.defaultMode'] = permissionMode;
+    if (fallbackModel) values.fallbackModel = String(fallbackModel).split(',').map((m) => m.trim()).filter(Boolean);
+    if (outputStyle) values.outputStyle = outputStyle;
+    return { values, skipped };
 }
 
 /**
@@ -2938,7 +2972,8 @@ function launchTab(config, total, styles) {
         cards('outputStyle', STYLES.map(([v, l]) => [v, l, STYLE_ABOUT[v]]), cfg.outputStyle || '')
         + (ownStyles.length
             ? `<div class="cards-head">Your own</div>${cards('outputStyle', ownStyles, cfg.outputStyle || '')}`
-            : ''), {
+            : '')
+        , {
         note: 'How Claude answers. There is no flag for it — it travels as <code>--settings</code> JSON, which <b>merges</b> with your settings files rather than replacing them. A style of your own is a markdown file in <code>~/.claude/output-styles</code>, named by its <code>name</code> field or by the file; put one there and it appears here.',
         // A custom style is its own label, so the pill reads the same list the
         // cards were built from rather than the client's five.
@@ -2955,6 +2990,10 @@ function launchTab(config, total, styles) {
                 value="${esc(cfg.launchArgs || '')}">`, {
         note: 'Anything else for that command line, written as typed — user settings only.',
         aside: statePills(flags ? ['', `${flags} extra flag${flags === 1 ? '' : 's'}`] : ['', 'none', true]),
+    })}
+        ${panel('Saved to', cards('launchSaveTo', SAVE_TARGETS, cfg.launchSaveTo || ''), {
+        note: 'Also write the choices above into a <b>Claude Code</b> settings file, as the client\'s own keys (<code>model</code>, <code>effortLevel</code>, <code>outputStyle</code>…). The command line reaches only the sessions this extension starts; the file reaches the sidebar\'s sessions and a bare <code>claude</code> too. Written whenever one of the choices changes. The extra arguments have no key and stay on the command line; an empty choice writes nothing and removes nothing. Separate from the bar below, which only says where VS Code keeps this extension\'s settings.',
+        aside: statePills(['saved to', named(cfg.launchSaveTo || '', SAVE_TARGETS), !cfg.launchSaveTo]),
     })}
         ${panel('The command', `<div class="cmd"><code id="launchCommand">${esc(claudeCommand(launch))}</code>
           <button class="btn" data-copy="launchCommand">Copy</button></div>
@@ -2980,7 +3019,7 @@ function launchTab(config, total, styles) {
         note: 'What <b>Open Claude Code</b> runs with these choices. It follows them as you pick; nothing here is read back, so editing it is not offered.',
     })}
         <div class="save-bar">
-          <span class="save-where">Save to</span>
+          <span class="save-where">Keep the extension's own settings in</span>
           ${chips('scope', SCOPES, 'global')}
           <span class="dirty" hidden>unsaved changes</span>
           <button class="btn primary save-go" disabled>Save</button>
@@ -3522,6 +3561,7 @@ if (list && api) {
         permissionMode: picked('permissionMode', ''),
         fallbackModel: picked('fallbackModel', ''),
         outputStyle: picked('outputStyle', ''),
+        launchSaveTo: picked('launchSaveTo', ''),
         launchArgs: document.getElementById('launchArgs').value.trim(),
         aliasName: document.getElementById('aliasName').value.trim(),
     };
@@ -3889,7 +3929,7 @@ module.exports = {
     PLACES,
     // The launch vocabularies, read by the manifest's test, by the Settings tab
     // above and by the quick pick behind **Open Claude Code with…**.
-    MODELS, EFFORTS, ADVISORS, STYLES, PERMISSION_MODES, FALLBACKS, ADVISOR_ADVICE,
+    MODELS, EFFORTS, ADVISORS, STYLES, SAVE_TARGETS, clientSettingsFor, PERMISSION_MODES, FALLBACKS, ADVISOR_ADVICE,
     shortModel, tok, bytes, plural, fmtDur, esc,
     // The stylesheet, for the one test that holds this page's `.o-*` rules
     // against the two outcome tables the tree and the hover keep: a word the

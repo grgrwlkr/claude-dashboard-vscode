@@ -414,3 +414,12 @@ test("sessionStats prices an advisor entry without a model at the record's advis
     assert.ok(Math.abs(s.costSince(file, NOW - 3600 * 1000) - expected) < 1e-9);
     fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// The user-level entries of the chain follow the home they are given, so a
+// test can lay out a home of its own instead of reading the real one.
+test('settingsFiles takes a home of its own for the user-level entries', () => {
+    const files = s.settingsFiles('/ws', '/h');
+    assert.equal(files.find((f) => f.scope === 'user').path, path.join('/h', '.claude', 'settings.json'));
+    assert.equal(files.find((f) => f.scope === 'user local').path, path.join('/h', '.claude', 'settings.local.json'));
+    assert.equal(files.find((f) => f.scope === 'local').path, path.join('/ws', '.claude', 'settings.local.json'));
+});

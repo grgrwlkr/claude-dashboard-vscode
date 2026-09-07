@@ -284,7 +284,10 @@ const pluginGlob = (root) => `${root || PLUGIN_CACHE}/${PLUGIN_REL}`;
 // what matters is that `bin/` sits beside them.
 const scriptIn = (dir) => path.join(dir, 'bin', 'statusline.js');
 
-const BACKUP_SUFFIX = '.claude-dashboard.bak';
+// `editSettings`, `BACKUP_SUFFIX` and `pinClientSettings` live in session.js:
+// the editor's entry point needs them too, and this file is kept out of the
+// package on purpose (see .vscodeignore).
+const { editSettings, BACKUP_SUFFIX, pinClientSettings } = s;
 
 // Single quotes, not double. A path is interpolated into a shell command, and
 // inside double quotes `$(...)`, backticks and `$VAR` all still execute — a
@@ -335,44 +338,6 @@ function statusLineState(settings) {
     return MARKERS.some((m) => command.includes(m)) ? 'ours' : 'other';
 }
 
-// The client writes this file too — `/model` lands in it — so it is read inside
-// the same call that writes it rather than at render time, and replaced by
-// rename so a reader never sees half a file.
-function editSettings(file, edit) {
-    let settings = {};
-    let raw = null;
-    try {
-        raw = fs.readFileSync(file, 'utf8');
-        settings = JSON.parse(raw);
-    } catch { /* an unreadable or absent file is an empty one to write over */ }
-
-    const result = edit(settings);
-    if (result === false) return null;
-
-    // The client keeps this file owner-only and its `env` block routinely holds
-    // tokens. `writeFileSync` with no mode creates 0644, so both the copy and
-    // the replacement would hand the file to every account on the machine —
-    // quietly, since the name and the contents are unchanged. Whatever the file
-    // is now, the copy and the replacement are that or tighter.
-    let mode = 0o600;
-    try { mode = fs.statSync(file).mode & 0o777; } catch { /* a new file starts owner-only */ }
-
-    // Kept once, before the first rewrite, the way the alias writer keeps one
-    // beside `.zshrc`.
-    const backup = `${file}${BACKUP_SUFFIX}`;
-    if (raw !== null && !fs.existsSync(backup)) {
-        try { fs.writeFileSync(backup, raw, { mode }); } catch { /* a backup is a courtesy, not a gate */ }
-    }
-
-    const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode });
-    // `mode` on writeFileSync is masked by the umask; chmod is not, and the
-    // rename carries the mode with it.
-    fs.chmodSync(tmp, mode);
-    fs.renameSync(tmp, file);
-    return result;
-}
-
 /**
  * Point the client at the copied script. Returns the `statusLine` block that was
  * there before, or null when there was none — the caller keeps it so switching
@@ -409,6 +374,6 @@ function unlinkStatusLine(file, previous) {
 
 module.exports = {
     clientData, paint, renderLines, TONES, RESET,
-    commandFor, statusLineState, linkStatusLine, unlinkStatusLine, scriptIn, BACKUP_SUFFIX, pluginGlob, PLUGIN_REL,
+    commandFor, statusLineState, linkStatusLine, unlinkStatusLine, pinClientSettings, scriptIn, BACKUP_SUFFIX, pluginGlob, PLUGIN_REL,
     collectFromDisk, findTranscript,
 };

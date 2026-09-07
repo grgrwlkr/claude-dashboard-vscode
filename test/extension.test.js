@@ -248,7 +248,8 @@ test('the manifest offers exactly the places the button knows', () => {
 test('the manifest offers exactly the models and efforts the page does', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const props = manifest.contributes.configuration.properties;
-    const lists = [['model', db.MODELS], ['effort', db.EFFORTS], ['advisor', db.ADVISORS], ['outputStyle', db.STYLES]];
+    const lists = [['model', db.MODELS], ['effort', db.EFFORTS], ['advisor', db.ADVISORS], ['outputStyle', db.STYLES],
+        ['launchSaveTo', db.SAVE_TARGETS]];
     for (const [key, list] of lists) {
         const property = props[`claudeStatusline.${key}`];
         assert.deepEqual(property.enum, list.map(([value]) => value));
@@ -281,7 +282,8 @@ test('a workspace cannot supply the free-text launch arguments, the permission m
     assert.equal(props['claudeStatusline.launchArgs'].scope, 'machine');
     assert.equal(props['claudeStatusline.permissionMode'].scope, 'machine');
     assert.equal(props['claudeStatusline.fallbackModel'].scope, 'machine');
-    assert.deepEqual(ext.__USER_ONLY, ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel']);
+    assert.equal(props['claudeStatusline.launchSaveTo'].scope, 'machine');
+    assert.deepEqual(ext.__USER_ONLY, ['launchArgs', 'aliasName', 'permissionMode', 'fallbackModel', 'launchSaveTo']);
     for (const key of ['claudeStatusline.model', 'claudeStatusline.effort']) {
         assert.ok(Array.isArray(props[key].enum) && props[key].enum.length > 1, `${key} must be a closed list`);
     }
@@ -2549,5 +2551,152 @@ test('the manifest offers the permission modes and fallback chains the page does
         assert.deepEqual(property.enum, list.map(([value]) => value));
         assert.equal(property.enum.length, property.enumDescriptions.length);
         assert.equal(property.default, '');
+    }
+});
+
+// The style pinned into a client settings file, so sessions this extension does
+// not start — the sidebar's, a bare `claude` — read it too. Which file is the
+// user's choice; the workspace's own file wins over the user's in the client,
+// so a write the client will not see is said out loud rather than reported as
+// done.
+async function withPinHome(run) {
+    return withHome(async ({ home }) => {
+        const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-ws-'));
+        try { return await run({ home, workspace }); } finally { fs.rmSync(workspace, { recursive: true, force: true }); }
+    });
+}
+
+test('the style is pinned into the user settings when the target says user', async () => {
+    await withPinHome(({ home, workspace }) => {
+        ext.pinLaunchSettings({ settings: { outputStyle: 'Concise', launchSaveTo: 'user' }, home, workspace });
+        const file = path.join(home, '.claude', 'settings.json');
+        assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).outputStyle, 'Concise');
+        assert.ok(!fs.existsSync(path.join(workspace, '.claude')), 'the workspace was not written');
+    });
+});
+
+test('the style is pinned into the workspace local file when the target says local', async () => {
+    await withPinHome(({ home, workspace }) => {
+        ext.pinLaunchSettings({ settings: { outputStyle: 'Concise', launchSaveTo: 'local' }, home, workspace });
+        const file = path.join(workspace, '.claude', 'settings.local.json');
+        assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).outputStyle, 'Concise');
+        assert.ok(!fs.existsSync(path.join(home, '.claude')), 'the home was not written');
+    });
+});
+
+test('no target, or no style, pins nothing', async () => {
+    await withPinHome(({ home, workspace }) => {
+        ext.pinLaunchSettings({ settings: { outputStyle: 'Concise', launchSaveTo: '' }, home, workspace });
+        ext.pinLaunchSettings({ settings: { outputStyle: '', launchSaveTo: 'user' }, home, workspace });
+        assert.ok(!fs.existsSync(path.join(home, '.claude')));
+        assert.ok(!fs.existsSync(path.join(workspace, '.claude')));
+    });
+});
+
+test('pinning warns when a file nearer the client shadows the one written', async () => {
+    await withPinHome(({ home, workspace }) => {
+        vscode.__reset();
+        const local = path.join(workspace, '.claude', 'settings.local.json');
+        fs.mkdirSync(path.dirname(local), { recursive: true });
+        fs.writeFileSync(local, JSON.stringify({ outputStyle: 'default' }));
+        ext.pinLaunchSettings({ settings: { outputStyle: 'Concise', launchSaveTo: 'user' }, home, workspace });
+        assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')).outputStyle, 'Concise');
+        const warned = vscode.__warnings.at(-1) || '';
+        assert.match(warned, /settings\.local\.json/, 'the shadowing file is named');
+        assert.match(warned, /default/, 'and the value that wins');
+        // Written where the client reads first: nothing to warn about.
+        vscode.__reset();
+        ext.pinLaunchSettings({ settings: { outputStyle: 'Concise', launchSaveTo: 'local' }, home, workspace });
+        assert.equal(vscode.__warnings.length, 0);
+    });
+});
+
+test('changing the style or its target in the settings pins it again', async () => {
+    await withPinHome(({ home, workspace }) => {
+        const run = activate({ segments: ['{today}'], workspace,
+            settings: { outputStyle: 'Concise', launchSaveTo: 'user' } });
+        ext.__setHome(home);
+        try {
+            const file = path.join(home, '.claude', 'settings.json');
+            assert.ok(!fs.existsSync(file), 'activation alone writes nothing');
+            vscode.__changeConfiguration('claudeStatusline.outputStyle');
+            assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).outputStyle, 'Concise');
+            vscode.__setSettings({ segments: ['{today}'], outputStyle: 'Learning', launchSaveTo: 'user' });
+            vscode.__changeConfiguration('claudeStatusline.launchSaveTo');
+            assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).outputStyle, 'Learning');
+            // Any other key leaves the file alone.
+            fs.writeFileSync(file, JSON.stringify({ outputStyle: 'Explanatory' }));
+            vscode.__changeConfiguration('claudeStatusline.refreshInterval');
+            assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).outputStyle, 'Explanatory');
+        } finally { ext.__setHome(null); run.dispose(); }
+    });
+});
+
+test('the save target is user-only and read back by the launch tab', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        await panel.__receive({ type: 'save', scope: 'workspace', settings: { launchSaveTo: 'user' } });
+        const wrote = vscode.__updates.filter((u) => u.key === 'launchSaveTo');
+        assert.equal(wrote.length, 1);
+        assert.equal(wrote[0].target, vscode.ConfigurationTarget.Global);
+        assert.match(panel.webview.html, /name="launchSaveTo"/);
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
+// `~/.claude/settings.local.json` is in the chain for the page that reports it,
+// flagged undocumented: the client does not read it. A style there must not be
+// reported as winning over the file the pin just wrote.
+test('a file the client does not read never counts as the winner', async () => {
+    await withPinHome(({ home, workspace }) => {
+        vscode.__reset();
+        const dead = path.join(home, '.claude', 'settings.local.json');
+        fs.mkdirSync(path.dirname(dead), { recursive: true });
+        fs.writeFileSync(dead, JSON.stringify({ outputStyle: 'Explanatory' }));
+        ext.pinLaunchSettings({ settings: { outputStyle: 'Concise', launchSaveTo: 'user' }, home, workspace });
+        assert.equal(vscode.__warnings.length, 0, vscode.__warnings.join('\n'));
+    });
+});
+
+test('every launch choice is pinned, the arguments are not, and max effort is named as skipped', async () => {
+    await withPinHome(({ home, workspace }) => {
+        vscode.__reset();
+        ext.pinLaunchSettings({ settings: {
+            model: 'fable[1m]', effort: 'max', advisor: 'opus', permissionMode: 'bypassPermissions',
+            fallbackModel: 'opus', outputStyle: 'Concise', launchArgs: '--add-dir ../x', launchSaveTo: 'user',
+        }, home, workspace });
+        const after = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8'));
+        assert.deepEqual(after, {
+            model: 'fable[1m]', advisorModel: 'opus', permissions: { defaultMode: 'bypassPermissions' },
+            fallbackModel: ['opus'], outputStyle: 'Concise',
+        });
+        assert.match(vscode.__warnings.join('\n'), /effortLevel.*max/);
+    });
+});
+
+test('the listener pins on any launch choice, not only the style', async () => {
+    await withPinHome(({ home, workspace }) => {
+        const run = activate({ segments: ['{today}'], workspace, settings: { model: 'opus', launchSaveTo: 'user' } });
+        ext.__setHome(home);
+        try {
+            vscode.__changeConfiguration('claudeStatusline.model');
+            const file = path.join(home, '.claude', 'settings.json');
+            assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).model, 'opus');
+        } finally { ext.__setHome(null); run.dispose(); }
+    });
+});
+
+// `.vscodeignore` keeps the terminal half out of the package on purpose, so a
+// module the editor's entry point requires must not be on that list — the
+// installed extension would throw on activation while the tree passes every test.
+test('every module extension.js requires ships in the package', () => {
+    const root = path.join(__dirname, '..');
+    const source = fs.readFileSync(path.join(root, 'extension.js'), 'utf8');
+    const required = [...source.matchAll(/require\('\.\/([^']+)'\)/g)].map((m) => `${m[1]}.js`);
+    const ignored = fs.readFileSync(path.join(root, '.vscodeignore'), 'utf8')
+        .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    for (const file of required) {
+        assert.ok(!ignored.includes(file), `${file} is required by extension.js but excluded by .vscodeignore`);
     }
 });
