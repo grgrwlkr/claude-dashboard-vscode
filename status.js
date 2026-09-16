@@ -412,7 +412,12 @@ function money(d, h) {
     return { id: 'money', title: 'Spend', blocks };
 }
 
-function work(d) {
+// What the client calls itself, in this extension's words: the registry writes
+// `cli`, `claude-vscode` and `claude-desktop`, and none of the three is what a
+// reader of the page calls the thing they are looking at.
+const CLIENTS = { cli: 'terminal', 'claude-vscode': 'sidebar', 'claude-desktop': 'desktop' };
+
+function work(d, h = {}) {
     const { peers, todo } = d;
     if (!todo && !(peers && peers.total > 0)) return null;
     const blocks = [];
@@ -425,6 +430,25 @@ function work(d) {
         if (peers.busy > 0) pills.push({ text: `${peers.busy} busy`, tone: 'active' });
     }
     if (pills.length) blocks.push({ kind: 'pills', items: pills });
+
+    // The sessions themselves, one row each. The count above says how many there
+    // are; this says which, and it is the only thing that tells two sessions of
+    // one repository apart — a name, where under the folder it sits, and what it
+    // is doing right now.
+    if (peers && peers.list && peers.list.length > 0) {
+        blocks.push({
+            kind: 'sessions',
+            rows: peers.list.map((p) => ({
+                id: p.id,
+                label: p.name || String(p.id).slice(0, 8),
+                where: p.where || '',
+                busy: p.status === 'busy',
+                meta: [CLIENTS[p.entrypoint] || p.entrypoint || 'session', p.status || '',
+                    p.startedAt && h.fmtDuration ? `${h.fmtDuration(Date.now() - p.startedAt)} old` : '']
+                    .filter(Boolean).join(' · '),
+            })),
+        });
+    }
 
     // The count is the figure and the share is beside it: "4/7" is what anyone
     // asks for, and it used to live in the section's own title with a separate

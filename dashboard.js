@@ -530,6 +530,42 @@ const tile = (label, value, sub, pct, tone) => {
 };
 
 /**
+ * The same tile, for a number only a live session has, in a window that has
+ * none. The row keeps all four of its tiles: half a row of figures reads as a
+ * page that failed to load, which is what it was taken for, and "why is this
+ * empty" has a worse answer when the tile is not there to ask it of.
+ *
+ * The action is what fills the tile — the same button as the status bar's — so
+ * the explanation and the way out of it are one element.
+ */
+const ghostTile = (label) => `<div class="tile ghost"><span class="tile-label">${esc(label)}</span>`
+    + '<span class="ghost-text">no session in this window</span>'
+    + '<button class="ghost-link" type="button" data-launch>Open Claude Code here</button></div>';
+
+/**
+ * A panel of the Now tab in a window with no session — the rows it will carry,
+ * with no figures in them. Same reason as ghostTile one row up: the column flow
+ * held the limits alone and the rest of the page was blank, which reads as a
+ * page that failed rather than as a window that has not started a session yet.
+ *
+ * A skeleton rather than a sentence, because the shape of what is coming is the
+ * part a sentence cannot say. The rows are the figures these two sections open
+ * with — status.js writes them as gauges and meters, and this is not those
+ * blocks emptied, it is a list of what they are about.
+ */
+const GHOST_PANELS = [
+    ['context', 'Session', ['context', 'model', 'effort', 'branch']],
+    ['money', 'Spend', ['this session', 'per hour', 'today', 'messages']],
+];
+
+const ghostRow = (label) => `<tr><th scope="row">${esc(label)}</th><td class="num ghost-cell">—</td></tr>`;
+
+const ghostPanel = (id, title, rows) => panel(title,
+    `<table class="kv">${rows.map(ghostRow).join('')}</table>
+    <div class="ghost-foot">no session in this window<button class="ghost-link" type="button" data-launch>Open Claude Code here</button></div>`,
+    { id, cls: 'panel-ghost' });
+
+/**
  * A setting, switched where it stands. The same control appears in the Settings
  * tab and beside the panel it governs — one component, so a toggle cannot say
  * one thing in one place and another somewhere else, and turning something on
@@ -2119,12 +2155,33 @@ const splitPills = (blocks) => {
  * Assembled from the section's own blocks by kind, never by position, so the
  * hover and this strip cannot drift: what `status.js` writes is what both show.
  */
+/**
+ * The other live sessions in this folder, one row each.
+ *
+ * `attach` is what the Now tab adds and the sidebar and the hover do not: a
+ * session of somebody else's can be taken over into this window, and the row
+ * that says it exists is the place to do it from. Read-only everywhere else,
+ * because only the page that can send a message has anywhere to send it.
+ */
+function sessionList(block, { attach = false } = {}) {
+    return `<div class="peer-list">${block.rows.map((row) => `<div class="peer">
+        <i class="peer-dot${row.busy ? ' busy' : ''}"></i>
+        <span class="peer-name">${esc(row.label)}</span>${
+    row.where ? `<span class="peer-where dim">${esc(row.where)}</span>` : ''}
+        <span class="peer-meta dim">${esc(row.meta)}</span>${
+    attach ? `<button class="peer-act" type="button" data-attach="${esc(row.id)}">attach</button>` : ''}
+    </div>`).join('')}</div>`;
+}
+
 function tasksStrip(section) {
     if (!section) return '';
     const gauge = section.blocks.find((b) => b.kind === 'gauge');
     const active = section.blocks.find((b) => b.kind === 'note' && b.tone === 'active');
     const [pills] = splitPills(section.blocks);
-    if (!gauge && !pills) return '';
+    // The task list is the strip. Without one there is nothing to draw across
+    // the page: the neighbours are a panel of their own, and a strip carrying
+    // its own name and a count was what this looked like when it had neither.
+    if (!gauge) return '';
     return `<div class="strip" data-panel="${esc(section.id)}">
         <span class="strip-name">${esc(section.title)}</span>
         ${gauge ? `<span class="strip-count">${esc(gauge.headline)}</span>
@@ -2135,6 +2192,17 @@ function tasksStrip(section) {
     active.label ? `<em>${esc(active.label)}</em>` : ''}<span>${esc(active.text)}</span></span>` : '<span class="strip-now"></span>'}
         ${pills}
     </div>`;
+}
+
+// The neighbours as a panel of the column flow. Its own title rather than the
+// section's: `work` is called "Tasks" as soon as there is a task list, and this
+// panel is about the sessions either way.
+function peersPanel(section) {
+    const block = section && section.blocks.find((b) => b.kind === 'sessions');
+    if (!block || block.rows.length === 0) return '';
+    const [aside] = splitPills(section.blocks);
+    return panel('Other sessions here', sessionList(block, { attach: true }),
+        { id: 'work', aside: aside || undefined });
 }
 
 function statusBlocks(blocks) {
@@ -2201,6 +2269,7 @@ function statusBlocks(blocks) {
         // Pills belong beside the section's own heading, and both renderers lift
         // them out before calling this. One reaching here is a section drawn by
         // something that has not been taught to — draw it rather than drop it.
+        if (block.kind === 'sessions') return sessionList(block);
         if (block.kind === 'pills') return pillsHtml(block);
         if (block.kind === 'note') {
             const label = block.label ? `<b>${esc(block.label)}</b> — ` : '';
@@ -2262,14 +2331,16 @@ function nowTab(sections, workflows, metrics) {
         head.push(tile('5-hour window', `${m.session5h.pct}%`,
             `resets in ${fmtLeft(m.session5h.resetIn, 0)}`, m.session5h.pct));
     }
+    // These two are the session's own, and a window without one keeps their
+    // place rather than losing it — see ghostTile.
     if (m.context) {
         head.push(tile('context', `${m.context.estimated ? '~' : ''}${m.context.pct}%`,
             `${tok(m.context.tokens)} of ${tok(m.context.window)}`, m.context.pct));
-    }
+    } else head.push(ghostTile('context'));
     if (m.spend) {
         head.push(tile('this session', `~${fmtCost(m.spend.cost)}`,
             m.spend.burn > 0 ? `~${fmtCost(m.spend.burn)} an hour` : ''));
-    }
+    } else head.push(ghostTile('this session'));
 
     return `<section class="tab" data-tab="now">
         ${head.length ? tiles(...head) : ''}
@@ -2279,6 +2350,9 @@ function nowTab(sections, workflows, metrics) {
         const [aside, blocks] = splitPills(section.blocks);
         return panel(section.title, statusBlocks(blocks), { id: section.id, aside });
     }).join('')}
+          ${peersPanel(rows.find((section) => section.id === 'work'))}
+          ${GHOST_PANELS.filter(([id]) => !rows.some((section) => section.id === id))
+        .map(([id, title, fields]) => ghostPanel(id, title, fields)).join('')}
         </div>
         ${tasksStrip(rows.find((section) => section.id === 'work'))}
         ${active.length ? panel('Workflows in the last hour', runsTableOf(runRows(active)), {
@@ -2561,6 +2635,7 @@ const STYLES = [
 const MODES = [
     ['session', 'a session', 'One interactive session in the tab, as claude'],
     ['agents', 'the agent view', 'Dispatch background sessions and watch them, as claude agents; the choices below become the defaults for the sessions it starts'],
+    ['background', 'a background session, opened here', 'Start it detached as claude --bg and attach to it; claude agents lists it beside the rest, and closing the tab leaves it running'],
 ];
 
 const SAVE_TARGETS = [
@@ -2767,6 +2842,7 @@ function claudeCommand({ mode, model, effort, advisor, permissionMode, fallbackM
     const agents = mode === 'agents';
     const parts = [CLAUDE_COMMAND];
     if (agents) parts.push('agents');
+    if (mode === 'background') parts.push('--bg');
     if (model) parts.push('--model', quoted(model));
     if (effort) parts.push('--effort', quoted(effort));
     if (advisor && !agents) parts.push('--advisor', quoted(advisor));
@@ -2779,8 +2855,36 @@ function claudeCommand({ mode, model, effort, advisor, permissionMode, fallbackM
     // sent and everything else the user has configured stays as it was.
     if (outputStyle) parts.push('--settings', quoted(JSON.stringify({ outputStyle })));
     if (args) parts.push(String(args).trim());
+    if (mode === 'background') return attachLine(parts.join(' '));
     return parts.join(' ');
 }
+
+// `claude --bg` returns to the shell and prints the id the rest of the family
+// takes: `backgrounded · 3f5863e5 (idle — send a prompt to start)`, coloured
+// even through a pipe (NO_COLOR is not read, measured 2026-09-16). So the id is
+// read off that line with the escape sequences taken out of it — in awk alone,
+// because BSD sed has no \x1b and the alias below already has quoting enough.
+//
+// `--session-id` cannot spare the parse: with `--bg` the client answers
+// "--bg manages the session id" and ignores it.
+//
+// One expression rather than a variable: an alias that assigned one would leave
+// it in the shell that sourced it, and a failed parse then attaches to nothing
+// visibly rather than to the wrong session quietly.
+const ID_FROM_OUTPUT = `awk '{gsub(/\\033\\[[0-9;]*m/, ""); if ($1 == "backgrounded") { print $3; exit }}'`;
+const attachLine = (start) => `${CLAUDE_COMMAND} attach "$(${start} | ${ID_FROM_OUTPUT})"`;
+
+/**
+ * The same command against an id already known — a neighbour on the Now tab.
+ *
+ * The id is not ours: it is `sessionId` out of the client's session registry,
+ * a file this extension only reads. So the shape is checked here rather than
+ * trusted, and the value is quoted — the page's own list says which session may
+ * be attached to, and this says what may reach a command line at all. An id
+ * that is not one answers with no command rather than with a quoted oddity.
+ */
+const attachCommand = (id) => (/^[A-Za-z0-9_-]{1,64}$/.test(String(id))
+    ? `${CLAUDE_COMMAND} attach ${quoted(String(id))}` : '');
 
 /**
  * The same choices as the client's own settings keys — what a settings file has
@@ -2900,7 +3004,7 @@ function launchTab(config, total, styles) {
     // otherwise announces itself only after the session has started answering.
     // One reading of the choices, used three times: the line that is shown, the
     // alias built from it, and the command the button runs.
-    const mode = cfg.launchMode === 'agents' ? 'agents' : 'session';
+    const mode = MODES.some(([v]) => v === cfg.launchMode) ? cfg.launchMode : 'session';
     const agents = mode === 'agents';
     const launch = {
         mode, model: cfg.model, effort: cfg.effort, advisor: cfg.advisor,
@@ -2975,7 +3079,7 @@ function launchTab(config, total, styles) {
 
     return `<section class="tab" data-tab="launch" hidden>
         ${panel('What it starts', cards('launchMode', MODES, mode), {
-        note: 'One session, or the agent view — <code>claude agents</code>, which dispatches background sessions and watches them. The choices below travel with either as flags; the advisor and the fallback model are not taken by the agent view and are switched off with it.',
+        note: 'One session, the agent view — <code>claude agents</code>, which dispatches background sessions and watches them — or a background session opened right here, as <code>claude --bg</code> followed by <code>claude attach</code>. The choices below travel with any of them as flags; the advisor and the fallback model are not taken by the agent view and are switched off with it.',
         aside: statePills(['starts', named(mode, MODES)]),
     })}
         ${panel('Where it opens', cards('openLocation', PLACES, cfg.openLocation || 'activeGroup'), {
@@ -3309,6 +3413,23 @@ const litLine = (e, on) => {
 document.addEventListener('mouseover', (e) => litLine(e, true));
 document.addEventListener('mouseout', (e) => litLine(e, false));
 document.addEventListener('click', (e) => {
+  // A neighbour's session, taken over into this window.
+  const attach = e.target.closest('[data-attach]');
+  if (attach && api) {
+    e.preventDefault();
+    e.stopPropagation();
+    api.postMessage({ type: 'attach', id: attach.dataset.attach });
+    return;
+  }
+  // The placeholder tiles of a window with no session: the same button as the
+  // status bar's, where the missing number is.
+  const launch = e.target.closest('[data-launch]');
+  if (launch && api) {
+    e.preventDefault();
+    e.stopPropagation();
+    api.postMessage({ type: 'openClaude' });
+    return;
+  }
   // A directory: shown in the OS file manager rather than opened as a document.
   const show = e.target.closest('[data-reveal]');
   if (show && api) {
@@ -3979,7 +4100,7 @@ module.exports = {
     SCRIPT,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab, launchTab,
-    claudeCommand, aliasLine, withAliasBlock, shellRcFor,
+    claudeCommand, attachCommand, aliasLine, withAliasBlock, shellRcFor,
     limitsTab, weekLabel, nowTab, sidebarNow, sidebarPage, sidebarSections, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     // The places a session can be opened in — the cards on the Settings tab and,

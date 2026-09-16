@@ -33,6 +33,19 @@ function patchRec(offsetMs, added, removed) {
     });
 }
 
+function bashDiffRec(offsetMs, fileLines) {
+    return JSON.stringify({
+        timestamp: new Date(T0 + offsetMs).toISOString(),
+        toolUseResult: {
+            stdout: '',
+            bashEditDiff: {
+                files: fileLines.map((lines, i) => ({ filePath: `/repo/f${i}.txt`, hunks: [{ lines }] })),
+                moreFiles: 0,
+            },
+        },
+    });
+}
+
 function withTranscript(lines, fn) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-'));
     const file = path.join(dir, 'session.jsonl');
@@ -55,6 +68,14 @@ test('sessionStats sums edits and ignores context lines of a patch', () => {
         const st = s.sessionStats(file);
         assert.equal(st.added, 13);
         assert.equal(st.removed, 4);
+    });
+});
+
+test('sessionStats counts the lines a Bash command changed across its files', () => {
+    withTranscript([usageRec(0), bashDiffRec(1000, [[' ctx', '-old', '+new', '+more'], ['+created']])], (file) => {
+        const st = s.sessionStats(file);
+        assert.equal(st.added, 3);
+        assert.equal(st.removed, 1);
     });
 });
 

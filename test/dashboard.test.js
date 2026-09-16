@@ -1227,6 +1227,107 @@ test('every value a section carries reaches the page, in all four of them', () =
     }
 });
 
+// The window that has no session of its own is the common case — a second
+// editor window, or the first one before the button has been pressed — and the
+// headline row used to lose half its tiles there, which reads as a page that
+// failed to load rather than as a page with nothing to say.
+test('the session tiles stay in the row as placeholders when no session is open', () => {
+    const sections = [{ id: 'limits', title: 'Limits', blocks: [{ kind: 'table', rows: [['7d', '85%']] }] }];
+    const html = db.nowTab(sections, [], {
+        weekly: { pct: 85, plan: 78 },
+        session5h: { pct: 5, resetIn: 3600 },
+    });
+
+    // Four tiles, in the order the live row has them.
+    const labels = [...html.matchAll(/class="tile-label">([^<]+)</g)].map((m) => m[1]);
+    assert.deepEqual(labels, ['weekly window', '5-hour window', 'context', 'this session']);
+
+    // Each placeholder says why it is empty and offers the one thing that fills
+    // it, and the action is a hook the extension answers rather than a link.
+    assert.equal((html.match(/class="tile ghost/g) || []).length, 2);
+    // Four in all: the two tiles here and the two skeleton panels below them.
+    assert.equal((html.match(/no session in this window/g) || []).length, 4);
+    assert.equal((html.match(/data-launch/g) || []).length, 4);
+
+    // A live figure never wears the placeholder treatment. The sections come
+    // with it: `statusMetrics` and `statusSections` read the same session, so a
+    // tile without its panel is a state the page never has.
+    const live = db.nowTab([...sections,
+        { id: 'context', title: 'opus 5', blocks: [{ kind: 'table', rows: [['ctx', '13%']] }] },
+        { id: 'money', title: 'Spend', blocks: [{ kind: 'table', rows: [['today', '~$1']] }] },
+    ], [], {
+        weekly: { pct: 85, plan: 78 },
+        session5h: { pct: 5, resetIn: 3600 },
+        context: { pct: 13, tokens: 134000, window: 1000000, estimated: false },
+        spend: { cost: 1.5, burn: 0 },
+    });
+    assert.ok(!live.includes('tile ghost'), 'a session was open and the row still drew placeholders');
+    assert.ok(!live.includes('data-launch'));
+});
+
+// The same window, one row down: without a session the column flow held the
+// limits alone and the rest of the page was blank. The two panels stand as
+// skeletons of themselves — the rows they will carry, with no figures in them.
+test('the session panels stand as skeletons when no session is open', () => {
+    const sections = [{ id: 'limits', title: 'Limits', blocks: [{ kind: 'table', rows: [['7d', '85%']] }] }];
+    const html = db.nowTab(sections, [], { weekly: { pct: 85, plan: 78 } });
+
+    assert.match(html, /<section class="panel panel-ghost"[^>]*data-panel="context"/);
+    assert.match(html, /<section class="panel panel-ghost"[^>]*data-panel="money"/);
+    // Both stay inside the column flow, where the live panels sit.
+    const cols = html.slice(html.indexOf('<div class="cols">'), html.indexOf('</section>', html.indexOf('data-panel="money"')));
+    for (const label of ['context', 'model', 'effort', 'branch', 'this session', 'per hour', 'today', 'messages']) {
+        assert.ok(cols.includes(`>${db.esc(label)}<`), `the skeleton is missing its "${label}" row`);
+    }
+    // Two tiles and two panels, each offering the one thing that fills it.
+    assert.equal((html.match(/data-launch/g) || []).length, 4);
+
+    // A live section is never doubled by a skeleton of itself.
+    const live = db.nowTab([...sections,
+        { id: 'context', title: 'opus 5', blocks: [{ kind: 'table', rows: [['ctx', '13%']] }] },
+        { id: 'money', title: 'Spend', blocks: [{ kind: 'table', rows: [['today', '~$1']] }] },
+    ], [], { weekly: { pct: 85, plan: 78 }, context: { pct: 13, tokens: 134000, window: 1000000 }, spend: { cost: 1.5, burn: 0 } });
+    assert.ok(!live.includes('panel-ghost'));
+    assert.ok(!live.includes('data-launch'));
+});
+
+// The neighbours used to be a strip with a title, a count and nothing else —
+// the count was all the section carried. They are a panel now, one row per
+// session, and each row can be taken over into this window.
+test('the neighbours are a panel of sessions, each with a way into it', () => {
+    const work = {
+        id: 'work',
+        title: 'Other sessions here',
+        blocks: [
+            { kind: 'pills', items: [{ text: '2 sessions' }, { text: '1 busy', tone: 'active' }] },
+            { kind: 'sessions', rows: [
+                { id: 'aaaaaaaa-1111', label: 'the rewrite', where: '', busy: true, meta: 'terminal · busy · 15m old' },
+                { id: 'bbbbbbbb-2222', label: 'bbbbbbbb', where: '.claude/worktrees/x', busy: false, meta: 'sidebar · idle · 2h old' },
+            ] },
+        ],
+    };
+    const html = db.nowTab([{ id: 'limits', title: 'Limits', blocks: [{ kind: 'table', rows: [['7d', '85%']] }] }, work], [], {});
+
+    // A panel in the column flow, not a strip: the strip is the task list, and
+    // without one there was nothing in it but its own name.
+    assert.match(html, /<section class="panel"[^>]*data-panel="work"[\s\S]*?Other sessions here/);
+    assert.ok(!html.includes('class="strip"'), 'no task list, no strip');
+
+    for (const row of work.blocks[1].rows) {
+        assert.ok(html.includes(db.esc(row.label)), `${row.label} is missing from the panel`);
+        assert.ok(html.includes(db.esc(row.meta)), `${row.label} has no client, state or age beside it`);
+        assert.ok(html.includes(`data-attach="${row.id}"`), `${row.label} offers no way in`);
+    }
+    assert.ok(html.includes('.claude/worktrees/x'), 'a session below the folder says where it is');
+    assert.match(html, /class="peer-dot busy"/, 'the busy one is marked');
+
+    // With a task list the strip comes back, and the panel stays.
+    const both = db.nowTab([{ ...work, title: 'Tasks', blocks: [...work.blocks,
+        { kind: 'gauge', headline: '3/6', value: '50% done', sub: '3 left', pct: 50, chips: [] }] }], [], {});
+    assert.match(both, /class="strip"/);
+    assert.match(both, /data-attach="aaaaaaaa-1111"/);
+});
+
 // Four panels in a three-column flow leave one column carrying two and the
 // others ending high, and no size of card fixes that — the browser balances the
 // columns and tasks are always the odd panel out. So they leave the flow.
@@ -2481,7 +2582,7 @@ test('the save bar says it is the extension\'s own settings, apart from the Clau
 // not take — `--advisor`, `--fallback-model` — are left off the line, and off
 // the pin, which describes that line.
 test('the launch mode puts agents after the command and drops what the agent view refuses', () => {
-    assert.deepEqual(db.MODES.map(([v]) => v), ['session', 'agents']);
+    assert.deepEqual(db.MODES.map(([v]) => v), ['session', 'agents', 'background']);
     const all = {
         model: 'fable[1m]', effort: 'high', advisor: 'opus', permissionMode: 'bypassPermissions',
         fallbackModel: 'sonnet,haiku', outputStyle: 'Proactive', args: '--add-dir ../x',
@@ -2492,6 +2593,49 @@ test('the launch mode puts agents after the command and drops what the agent vie
     assert.match(db.aliasLine('cx', { mode: 'agents', model: 'opus' }), /^alias cx='claude agents --model /);
     const { values } = db.clientSettingsFor({ mode: 'agents', ...all });
     assert.deepEqual(Object.keys(values).sort(), ['effortLevel', 'model', 'outputStyle', 'permissions.defaultMode']);
+});
+
+// The third mode is two commands: the client starts the session detached and
+// prints an id, and that id is what the terminal attaches to. `--bg` is the root
+// command, so unlike the agent view it takes every flag the session takes.
+test('the background mode starts a detached session and attaches to it', () => {
+    const all = {
+        model: 'fable[1m]', effort: 'high', advisor: 'opus', permissionMode: 'bypassPermissions',
+        fallbackModel: 'sonnet,haiku', outputStyle: 'Proactive', args: '--add-dir ../x',
+    };
+    const line = db.claudeCommand({ mode: 'background', ...all });
+
+    // The inner command is the session line with --bg after `claude`, flags and all.
+    assert.match(line, /^claude attach "\$\(claude --bg --model 'fable\[1m\]' --effort 'high' --advisor 'opus' /);
+    assert.match(line, /--fallback-model 'sonnet,haiku'/, 'the root command takes what the agent view refuses');
+    assert.match(line, /--add-dir \.\.\/x \|/, "the user's own arguments stay with the session, not the parse");
+    assert.ok(line.endsWith("')\""), `the attach closes the substitution: ${line.slice(-20)}`);
+    // The id is read off the printed line with the colours taken out of it.
+    assert.match(line, /gsub\(\/\\033\\\[\[0-9;\]\*m\/, ""\)/);
+
+    // Nothing the agent view drops is dropped here, and the pin describes the
+    // same session.
+    const { values } = db.clientSettingsFor({ mode: 'background', ...all });
+    assert.deepEqual(Object.keys(values).sort(),
+        ['advisorModel', 'effortLevel', 'fallbackModel', 'model', 'outputStyle', 'permissions.defaultMode']);
+
+    // The alias survives the second level of quoting: the command is full of
+    // single quotes and so is the awk program inside it.
+    const alias = db.aliasLine('cx', { mode: 'background', model: 'opus' });
+    assert.match(alias, /^alias cx='claude attach /);
+    assert.ok(alias.endsWith("'"), 'the alias closes its own quote');
+    assert.ok(alias.includes("'\\''"), 'inner quotes are escaped for the alias');
+});
+
+// The id in that command comes from a file this extension does not write —
+// `sessionId` in the client's own session registry — so it is quoted on the way
+// to a shell, and anything that is not a session id is refused before it.
+test('an attach command quotes the id, and refuses one that is not an id', () => {
+    assert.equal(db.attachCommand('aaaaaaaa-1111-2222-3333-444444444444'),
+        "claude attach 'aaaaaaaa-1111-2222-3333-444444444444'");
+    assert.equal(db.attachCommand("x'; rm -rf ~; #"), '');
+    assert.equal(db.attachCommand('$(whoami)'), '');
+    assert.equal(db.attachCommand(''), '');
 });
 
 // The mode is the first choice on the tab, because it decides which of the

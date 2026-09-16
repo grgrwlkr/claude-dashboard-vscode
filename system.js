@@ -65,6 +65,26 @@ const SETTING_KEYS = [
     'autoUpdatesChannel', 'verbose', 'todoFeatureEnabled', 'statusLine',
 ];
 
+// `maxEffortLevel` (2.1.267) is the one key that does not follow the first-wins walk
+// above: the client clamps to the LOWEST applicable ceiling across settings files, and
+// reads `max` as the exempting value rather than as a cap. Walking the chain the usual
+// way would name a ceiling the session is not running under. The per-model form
+// (`modelSettings.<model>.maxEffortLevel`) is deliberately not resolved here — this
+// function has no session model to key it by, so a per-model ceiling stays invisible.
+const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh'];
+
+function maxEffortOf(chain) {
+    let best = null;
+    for (const { file, cfg } of chain) {
+        const value = cfg.maxEffortLevel;
+        if (typeof value !== 'string' || value === 'max') continue;
+        const rank = EFFORT_ORDER.indexOf(value);
+        if (rank < 0) continue;
+        if (!best || rank < best.rank) best = { rank, value, from: shortPath(file) };
+    }
+    return best ? { value: best.value, from: best.from } : undefined;
+}
+
 function settingsOf(workspace, root = ROOT) {
     const chain = settingsChain(workspace, root);
     const out = {};
@@ -78,6 +98,8 @@ function settingsOf(workspace, root = ROOT) {
             }
         }
     }
+    const ceiling = maxEffortOf(chain);
+    if (ceiling) out.maxEffortLevel = ceiling;
     // env is a map rather than a scalar: worth showing whole, since a stray
     // variable here changes behaviour in every session on the machine.
     const env = {};

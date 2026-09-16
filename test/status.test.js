@@ -322,6 +322,36 @@ test('the work section names itself once, whichever half of it exists', () => {
     assert.ok(both.blocks.some((b) => b.kind === 'note' && b.text === 'writing the parser'));
 });
 
+// The neighbours were a count and nothing else, so the panel drawing them could
+// only say how many there were. They travel as rows now — one per session, with
+// what tells two sessions of one repository apart.
+test('the work section carries the neighbours themselves, not only how many', () => {
+    const peers = {
+        total: 2,
+        busy: 1,
+        list: [
+            { id: 'aaaaaaaa-1111', name: 'the rewrite', entrypoint: 'cli', status: 'busy', startedAt: (NOW - 900) * 1000, where: '' },
+            { id: 'bbbbbbbb-2222', name: '', entrypoint: 'claude-vscode', status: 'idle', startedAt: (NOW - 7200) * 1000, where: '.claude/worktrees/x' },
+        ],
+    };
+    const work = status.statusSections({ ...data, peers }, helpers, {}).find((x) => x.id === 'work');
+    const block = work.blocks.find((b) => b.kind === 'sessions');
+    assert.ok(block, 'the work section has no list of sessions in it');
+    assert.deepEqual(block.rows.map((r) => r.id), ['aaaaaaaa-1111', 'bbbbbbbb-2222']);
+    // A session with a title wears it; one without is its short id.
+    assert.equal(block.rows[0].label, 'the rewrite');
+    assert.equal(block.rows[1].label, 'bbbbbbbb');
+    // The client is said in this extension's own words, not the client's.
+    assert.match(block.rows[0].meta, /^terminal · busy · /);
+    assert.match(block.rows[1].meta, /^sidebar · idle · /);
+    assert.equal(block.rows[0].busy, true);
+    assert.equal(block.rows[1].where, '.claude/worktrees/x');
+
+    // No neighbours, no block — and the pills still count what there is.
+    const alone = status.statusSections({ ...data, peers: { total: 0, busy: 0, list: [] } }, helpers, {}).find((x) => x.id === 'work');
+    assert.ok(!alone.blocks.some((b) => b.kind === 'sessions'));
+});
+
 test('a task list is a share, and says so beside the count', () => {
     const work = status.statusSections(data, helpers, {}).find((x) => x.id === 'work');
     // The count is the figure and the share stands beside it — one gauge rather

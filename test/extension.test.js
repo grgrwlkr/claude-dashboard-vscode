@@ -1560,6 +1560,21 @@ test('the tab button opens the session in the active editor group', async () => 
     } finally { run.dispose(); }
 });
 
+// The placeholder tiles on Now carry the same button, and a message the page
+// sends is the only way to find out whether it is wired: the markup test next
+// door sees the hook and nothing about what answers it.
+test('the placeholder tile on Now opens a session', async () => {
+    const run = activate({ segments: ['{today}'] });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const before = vscode.__terminals.length;
+        await panel.__receive({ type: 'openClaude' });
+        assert.equal(vscode.__terminals.length, before + 1, 'no session was opened');
+        assert.equal(lastTerminal().options.name, 'Claude Code');
+    } finally { if (panel) panel.dispose(); run.dispose(); }
+});
+
 // The other three places, each one argument away from the first. They are worth
 // a test apiece because none of them is visible from anywhere else: a wrong
 // location opens a session all the same, in the wrong half of the window.
@@ -2761,6 +2776,57 @@ test('launchMode is a user-only closed choice and the button runs the agent view
         vscode.__shellIntegrationArrives(terminal);
         assert.deepEqual(terminal.executed, ["claude agents --model 'fable[1m]'"]);
         assert.equal(terminal.options.name, 'Claude agents');
+    } finally { run.dispose(); }
+});
+
+// A neighbour is taken over into this window by attaching to it, and the id has
+// to come from the registry rather than from the message: a webview can send
+// anything, and this one turns into a command line.
+//
+// The neighbours are pinned for the same reason the limits are: otherwise this
+// asserts that the machine running it happens to have two Claude sessions open
+// in the same folder.
+test('attach opens the session the page offered, and nothing else', async () => {
+    const real = s.peersOf;
+    s.peersOf = () => ({
+        total: 2,
+        busy: 1,
+        list: [
+            { id: 'aaaaaaaa-1111', name: 'the rewrite', entrypoint: 'cli', status: 'busy', startedAt: Date.now() - 9e5, where: '' },
+            { id: 'bbbbbbbb-2222', name: '', entrypoint: 'claude-vscode', status: 'idle', startedAt: Date.now() - 7e6, where: 'sub' },
+        ],
+    });
+    const run = activate({ segments: ['{peers}'], workspace: '/w' });
+    let panel;
+    try {
+        panel = await openDashboard();
+        const offered = [...panel.webview.html.matchAll(/data-attach="([^"]+)"/g)].map((m) => m[1]);
+        assert.deepEqual(offered, ['aaaaaaaa-1111', 'bbbbbbbb-2222'], 'the panel draws both neighbours');
+
+        const before = vscode.__terminals.length;
+        await panel.__receive({ type: 'attach', id: 'not-a-session' });
+        assert.equal(vscode.__terminals.length, before, 'an id the page never offered is refused');
+
+        await panel.__receive({ type: 'attach', id: offered[0] });
+        assert.equal(vscode.__terminals.length, before + 1);
+        vscode.__shellIntegrationArrives(lastTerminal());
+        assert.deepEqual(lastTerminal().executed, [db.attachCommand(offered[0])]);
+        assert.match(lastTerminal().executed[0], /^claude attach '[A-Za-z0-9_-]+'$/, 'the id is quoted');
+    } finally { if (panel) panel.dispose(); run.dispose(); s.peersOf = real; }
+});
+
+// The third mode sends two commands as one line, and the tab says which of the
+// three it is: after a reload the tab is all that is left of how it was opened.
+test('the background mode attaches to the session it starts, and says so', async () => {
+    const run = activate({ segments: ['{today}'], settings: { launchMode: 'background', model: 'fable[1m]', advisor: 'opus' } });
+    try {
+        await openClaude();
+        const terminal = lastTerminal();
+        vscode.__shellIntegrationArrives(terminal);
+        assert.deepEqual(terminal.executed,
+            [db.claudeCommand({ mode: 'background', model: 'fable[1m]', advisor: 'opus' })]);
+        assert.match(terminal.executed[0], /^claude attach "\$\(claude --bg /);
+        assert.equal(terminal.options.name, 'Claude background');
     } finally { run.dispose(); }
 });
 

@@ -423,3 +423,29 @@ test('settingsFiles takes a home of its own for the user-level entries', () => {
     assert.equal(files.find((f) => f.scope === 'user local').path, path.join('/h', '.claude', 'settings.local.json'));
     assert.equal(files.find((f) => f.scope === 'local').path, path.join('/ws', '.claude', 'settings.local.json'));
 });
+
+// The panel on Now lists the neighbours rather than counting them, so this
+// answers with the sessions themselves. The registry directory is a parameter
+// for the same reason the settings home is: a test must never read the real one.
+test('peersOf names the neighbours, and finds the ones below the folder', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-peers-'));
+    const put = (name, session) => fs.writeFileSync(path.join(dir, name), JSON.stringify(session));
+    const live = process.pid;
+    put('own.json', { sessionId: 'own', pid: live, cwd: '/w', status: 'busy' });
+    put('a.json', { sessionId: 'a', pid: live, cwd: '/w', status: 'busy', name: 'the rewrite', entrypoint: 'cli', startedAt: NOW });
+    put('b.json', { sessionId: 'b', pid: live, cwd: '/w/.claude/worktrees/x', status: 'idle', entrypoint: 'claude-vscode' });
+    put('dead.json', { sessionId: 'dead', pid: 2 ** 30, cwd: '/w', status: 'busy' });
+    put('elsewhere.json', { sessionId: 'far', pid: live, cwd: '/other', status: 'idle' });
+
+    const peers = s.peersOf('/w', 'own', dir);
+    assert.equal(peers.total, 2, 'the dead one and the one in another folder are not neighbours');
+    assert.equal(peers.busy, 1);
+    assert.deepEqual(peers.list.map((p) => p.id), ['a', 'b']);
+    assert.equal(peers.list[0].name, 'the rewrite');
+    assert.equal(peers.list[0].entrypoint, 'cli');
+    // A session under the folder says where it is; one in the folder itself has
+    // nothing to add.
+    assert.equal(peers.list[0].where, '');
+    assert.equal(peers.list[1].where, '.claude/worktrees/x');
+    fs.rmSync(dir, { recursive: true, force: true });
+});

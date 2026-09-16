@@ -51,13 +51,13 @@ function alive(pid) {
     try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function listSessions() {
+function listSessions(dir = SESSIONS) {
     let names;
-    try { names = fs.readdirSync(SESSIONS); } catch { return []; }
+    try { names = fs.readdirSync(dir); } catch { return []; }
     const out = [];
     for (const name of names) {
         if (!name.endsWith('.json')) continue;
-        const s = readJson(path.join(SESSIONS, name));
+        const s = readJson(path.join(dir, name));
         if (s && s.sessionId && s.pid) out.push(s);
     }
     return out;
@@ -434,13 +434,22 @@ function applyMoney(state, r) {
     }
     if (at) state.prevAt = at;
 
-    const patch = r.toolUseResult && r.toolUseResult.structuredPatch;
-    if (Array.isArray(patch)) {
-        for (const hunk of patch) {
-            for (const l of hunk.lines || []) {
-                if (l[0] === '+') state.added++;
-                else if (l[0] === '-') state.removed++;
-            }
+    const res = r.toolUseResult;
+    if (!res) return;
+    countLines(state, res.structuredPatch);
+    // Edits made through Bash arrive as one diff over every file the command
+    // changed (see noteEdit in indexer.js).
+    if (res.bashEditDiff && Array.isArray(res.bashEditDiff.files)) {
+        for (const d of res.bashEditDiff.files) countLines(state, d && d.hunks);
+    }
+}
+
+function countLines(state, hunks) {
+    if (!Array.isArray(hunks)) return;
+    for (const hunk of hunks) {
+        for (const l of hunk.lines || []) {
+            if (l[0] === '+') state.added++;
+            else if (l[0] === '-') state.removed++;
         }
     }
 }
@@ -676,13 +685,34 @@ function costSince(file, since) {
     return costScan(file, since).usd;
 }
 
-// Neighbours in this repository: how many live sessions besides ours, and how
-// many of them are busy.
-function peersOf(workspace, ownSessionId) {
-    const live = listSessions().filter(
-        (s) => alive(s.pid) && s.cwd === workspace && s.sessionId !== ownSessionId,
-    );
-    return { total: live.length, busy: live.filter((s) => s.status === 'busy').length };
+// Neighbours in this repository: the live sessions besides ours, how many there
+// are and how many are busy.
+//
+// Below the folder as well as in it: a session started in a subdirectory, or in
+// a worktree under `.claude/worktrees/`, is working on this repository and used
+// to be invisible here — the match was an exact cwd and nothing else.
+//
+// The registry directory is a parameter for the same reason `settingsFiles`
+// takes a home: a test must be able to lay out sessions of its own.
+function peersOf(workspace, ownSessionId, dir = SESSIONS) {
+    const under = `${String(workspace).replace(/\/$/, '')}/`;
+    const live = listSessions(dir).filter((s) => alive(s.pid) && s.sessionId !== ownSessionId
+        && (s.cwd === workspace || String(s.cwd || '').startsWith(under)));
+    return {
+        total: live.length,
+        busy: live.filter((s) => s.status === 'busy').length,
+        // What a list of them needs and nothing more. `where` is the part of the
+        // path below the folder, which is the only thing that tells two sessions
+        // of one repository apart at a glance.
+        list: live.map((s) => ({
+            id: s.sessionId,
+            name: s.name || '',
+            entrypoint: s.entrypoint || '',
+            status: s.status || '',
+            startedAt: Date.parse(s.startedAt || '') || s.startedAt || 0,
+            where: s.cwd === workspace ? '' : String(s.cwd || '').slice(under.length),
+        })),
+    };
 }
 
 // The current session's task list — the same source the agent's own todo uses.

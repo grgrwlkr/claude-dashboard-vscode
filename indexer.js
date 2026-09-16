@@ -40,7 +40,9 @@ const PROJECTS = path.join(HOME, '.claude', 'projects');
 // `efforts`; an index of 9 holds it on the executor's row.
 // 11: a session row lists the advisor among its models and drops `<synthetic>`
 // from them; an index of 10 has the list the other way round.
-const INDEX_VERSION = 11;
+// 12: a Bash result carrying `bashEditDiff` passes the prefilter and counts in
+// `files`; an index of 11 dropped those records before parsing them.
+const INDEX_VERSION = 12;
 
 // Subagent transcripts live under <slug>/<sessionId>/subagents/, and workflow
 // agents one level deeper under .../workflows/<wfId>/. The path is the only
@@ -308,7 +310,7 @@ function projectName(slug) {
 // that carries none of these markers, and skipping it is what keeps a full pass
 // in the tens of milliseconds per file. One alternation scans each line once;
 // a chain of includes() calls would scan it once per marker.
-const INTERESTING = /"usage"|"promptSource"|"is_error":true|"toolDenialKind"|"compactMetadata"|"aiTitle"|"customTitle"|"interrupted":true|"interruptedByShutdown":true|"hookErrors":\[\{|"structuredPatch"/;
+const INTERESTING = /"usage"|"promptSource"|"is_error":true|"toolDenialKind"|"compactMetadata"|"aiTitle"|"customTitle"|"interrupted":true|"interruptedByShutdown":true|"hookErrors":\[\{|"structuredPatch"|"bashEditDiff"/;
 
 /**
  * Aggregate a single transcript. Only records matching INTERESTING are parsed,
@@ -601,13 +603,25 @@ function noteTools(agg, content, toolNames, row) {
 function noteEdit(agg, r) {
     const res = r.toolUseResult;
     if (!res || typeof res !== 'object') return;
+    // A Bash command that edited files carries no filePath of its own: the client
+    // (2.1.269+, behind a server flag) puts every changed file in one diff, with
+    // hunks shaped like structuredPatch. Each file is one edit.
+    const bash = res.bashEditDiff;
+    if (bash && Array.isArray(bash.files)) {
+        for (const d of bash.files) if (d && d.filePath) countEdit(agg, d.filePath, d.hunks);
+        return;
+    }
     // Not `path`: that is the module this file imports, and shadowing it here
     // leaves a trap for whoever next needs path.join inside this function.
     const file = res.filePath || (res.file && res.file.filePath);
     if (!file) return;
+    countEdit(agg, file, res.structuredPatch);
+}
+
+function countEdit(agg, file, hunks) {
     const f = agg.files[file] || (agg.files[file] = { edits: 0, added: 0, removed: 0 });
     f.edits++;
-    for (const hunk of (Array.isArray(res.structuredPatch) ? res.structuredPatch : [])) {
+    for (const hunk of (Array.isArray(hunks) ? hunks : [])) {
         for (const line of hunk.lines || []) {
             if (line[0] === '+') f.added++;
             else if (line[0] === '-') f.removed++;

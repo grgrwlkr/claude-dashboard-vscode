@@ -34,6 +34,23 @@ test('settings resolve down the chain and the first file with a key wins', () =>
     assert.deepEqual(s.env, { A: '1', B: '2' });
 }));
 
+test('maxEffortLevel takes the lowest ceiling in the chain, not the first file that carries one', () => tree(({ root, write }) => {
+    write('settings.local.json', { maxEffortLevel: 'xhigh' });
+    write('settings.json', { maxEffortLevel: 'medium' });
+    const s = sys.settingsOf('', root);
+    // 2.1.267: every other key resolves to the first file in the chain, this one does not.
+    // The client clamps to the lowest applicable ceiling across settings files, so the
+    // first-wins walk would show a ceiling the session is not actually running under.
+    assert.equal(s.values.maxEffortLevel.value, 'medium');
+}));
+
+test('a maxEffortLevel of max is no ceiling at all, so no row is shown', () => tree(({ root, write }) => {
+    write('settings.json', { maxEffortLevel: 'max' });
+    const s = sys.settingsOf('', root);
+    // `max` is the exempting value in the client's own resolution, not a cap.
+    assert.equal(s.values.maxEffortLevel, undefined);
+}));
+
 test('hooks are flattened with the event, matcher and origin of each', () => tree(({ root, write }) => {
     write('settings.json', {
         hooks: {

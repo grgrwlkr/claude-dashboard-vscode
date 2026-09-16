@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashnlines for Claude — Dashboard & Statusline",
   "description": "Unofficial. A 24-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.56.0",
+  "version": "0.58.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -236,15 +236,17 @@
           "type": "string",
           "enum": [
             "session",
-            "agents"
+            "agents",
+            "background"
           ],
           "enumDescriptions": [
             "One interactive session in the tab, as `claude`.",
-            "The agent view, as `claude agents` — dispatches background sessions and watches them. The model, effort, permission mode and output style become the defaults for the sessions it starts; the advisor and the fallback model are not passed."
+            "The agent view, as `claude agents` — dispatches background sessions and watches them. The model, effort, permission mode and output style become the defaults for the sessions it starts; the advisor and the fallback model are not passed.",
+            "A background session opened in the tab, as `claude --bg` followed by `claude attach`. It takes every flag a session takes, `claude agents` lists it, and it keeps running when the tab closes."
           ],
           "default": "session",
           "scope": "machine",
-          "markdownDescription": "What **Open Claude Code** starts: one session, or the agent view (`claude agents`).\n\nThe agent view takes the model, effort, permission mode, output style and extra arguments as defaults for the sessions it dispatches. It does not take `--advisor` or `--fallback-model`: those choices are kept but not passed while this says `agents`.\n\nUser settings only."
+          "markdownDescription": "What **Open Claude Code** starts: one session, the agent view (`claude agents`), or a background session opened in the tab (`claude --bg`, then `claude attach`).\n\nThe agent view takes the model, effort, permission mode, output style and extra arguments as defaults for the sessions it dispatches. It does not take `--advisor` or `--fallback-model`: those choices are kept but not passed while this says `agents`.\n\nA background session takes every flag a session takes. It is listed by `claude agents` and goes on running when the tab is closed; `claude attach <id>` opens it again.\n\nUser settings only."
         },
         "claudeStatusline.model": {
           "type": "string",

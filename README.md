@@ -297,9 +297,12 @@ panel exists for, what that figure is made of, the facts, and a footer.
 
 **⏱️ Now** is the state of Claude as the page was opened: four headline tiles,
 the week as a track of time, then limits, session and spend as three panels at
-full width, the task list as one strip under them, and a row per agent of every
-workflow still running. These panels carry the same text as the status-bar
-tooltips.
+full width, the other live sessions in this folder as a fourth with **attach** on
+each row, the task list as one strip under them, and a row per agent of every
+workflow still running. A window with no session of its own keeps the shape:
+**Context** and **This session** stand as empty tiles, **Session** and **Spend**
+as skeletons of their rows, and each offers **Open Claude Code here**. These
+panels carry the same text as the status-bar tooltips.
 
 <details>
 <summary><b>💸 Spend</b> — where the money went</summary>
@@ -508,7 +511,7 @@ All of these apply the moment they change; none needs a window reload.
 | `claudeStatusline.monthlyBudget` | `0` | A spend ceiling for the calendar month, in dollars. Above zero the dashboard draws the month against it and says so once at 80 % and once at 100 % |
 | `claudeStatusline.checkPluginUpdates` | `false` | Ask each plugin's marketplace for a newer version. Off means those requests are never made |
 | `claudeStatusline.openLocation` | `activeGroup` | Where **Open Claude Code** puts the session: `activeGroup` a tab in the group you are looking at, `beside` a tab in a new group to the right, `panel` the terminal panel at the bottom, `newWindow` a tab moved out into its own window |
-| `claudeStatusline.launchMode` | `session` | What **Open Claude Code** starts: `session` runs `claude`, `agents` runs `claude agents`, the agent view. The model, effort, permission mode, output style and extra arguments go with either; the advisor and the fallback model are not passed to the agent view. User settings only |
+| `claudeStatusline.launchMode` | `session` | What **Open Claude Code** starts: `session` runs `claude`, `agents` runs `claude agents`, the agent view, and `background` runs `claude --bg` and attaches to the session it prints, which `claude agents` then lists. The model, effort, permission mode, output style and extra arguments go with any of them; the advisor and the fallback model are not passed to the agent view. User settings only |
 | `claudeStatusline.model` | `""` | Start the session on this model, as `claude --model <alias>`, from the aliases the client accepts: `opus`, `opus[1m]`, `sonnet`, `sonnet[1m]`, `fable`, `fable[1m]`, `haiku`, `best`, `opusplan`. The `[1m]` variants ask for the 1M window explicitly; the plain alias runs on 200k behind a gateway, on Pro and on third-party providers. Empty passes no flag and leaves the choice to the client |
 | `claudeStatusline.effort` | `""` | Start it at this effort, as `claude --effort <level>`: `low`, `medium`, `high`, `xhigh`, `max`. Empty passes no flag |
 | `claudeStatusline.advisor` | `""` | Turn on the server-side advisor for the session, as `claude --advisor <model>`: `opus`, `sonnet`, `fable`, `haiku`. The client hides this flag from its `--help`; empty passes no flag and leaves the client's own `advisorModel` alone |

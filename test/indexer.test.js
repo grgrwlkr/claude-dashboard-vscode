@@ -124,6 +124,33 @@ test('indexFile ignores a transcript with no usage records', () => tree(({ write
     assert.equal(ix.indexFile(file), null);
 }));
 
+// A Bash command that changed files carries one diff for all of them. The shape is
+// the client's own, captured from a 2.1.270 run: absolute paths, hunk lines with
+// the same prefixes as structuredPatch, `created` on a new file.
+function bashDiffRec(files) {
+    return JSON.stringify({
+        timestamp: new Date(T0).toISOString(),
+        type: 'user',
+        toolUseResult: {
+            stdout: '', stderr: '', interrupted: false,
+            bashEditDiff: { files, moreFiles: 0, changedFiles: files.map((f) => f.filePath) },
+        },
+    });
+}
+
+test('indexFile counts the lines a Bash command changed, file by file', () => tree(({ write }) => {
+    const file = write('sess-1.jsonl', [
+        rec(),
+        bashDiffRec([
+            { filePath: '/repo/a.txt', hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [' alpha', '-beta', '+BETA', ' gamma'] }] },
+            { filePath: '/repo/c.txt', hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, lines: ['+new'] }], created: true },
+        ]),
+    ]);
+    const agg = ix.indexFile(file);
+    assert.deepEqual(agg.files['/repo/a.txt'], { edits: 1, added: 1, removed: 1 });
+    assert.deepEqual(agg.files['/repo/c.txt'], { edits: 1, added: 1, removed: 0 });
+}));
+
 // One API response arrives as several records — one per content block — and in
 // this shape each of them repeats the whole `usage` of the response. Counting
 // them as written charges the same reply once per block: measured over this
@@ -632,6 +659,10 @@ test('the line prefilter skips tool traffic but not a record that matters', () =
     // The bulk of a transcript: a successful tool result carrying a file.
     assert.ok(!ix.INTERESTING.test('{"type":"user","toolUseResult":{"stdout":"ok","interrupted":false}}'));
     assert.ok(!ix.INTERESTING.test('{"type":"system","hookErrors":[],"level":"suggestion"}'));
+});
+
+test('the line prefilter keeps a Bash result that carries an edit diff', () => {
+    assert.ok(ix.INTERESTING.test('{"type":"user","toolUseResult":{"stdout":"","bashEditDiff":{"files":[],"moreFiles":0}}}'));
 });
 
 test('dayKey uses local dates, so a day boundary is the user\'s midnight', () => {

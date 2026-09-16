@@ -150,6 +150,13 @@ function renderSection(section) {
                 : block.rows.map(([a, b]) => [a, b]);
             md.appendMarkdown(table(rows, block.head));
         }
+        // The same list the Now tab draws, without the way into it: a hover has
+        // nowhere to send a click.
+        if (block.kind === 'sessions' && block.rows.length > 0) {
+            md.appendMarkdown(table(block.rows.map((r) => [
+                `${r.busy ? '●' : '○'} ${r.label}${r.where ? ` (${r.where})` : ''}`, r.meta,
+            ])));
+        }
         if (block.kind === 'subtitle') md.appendMarkdown(`\n**${block.text}**\n\n`);
         if (block.kind === 'note') {
             const icon = TONE_ICON[block.tone];
@@ -559,17 +566,21 @@ function collectFast(state) {
     const d = state.data;
     d.now = Math.floor(Date.now() / 1000);
     const own = state.session;
+    // The neighbours do not depend on this window having a session: a window
+    // with none is exactly where "who else is working here" is worth reading,
+    // and it used to be the one place the answer was withheld.
+    if (state.workspace && (state.needs.has('peers') || state.needs.has('peersBusy'))) {
+        d.peers = s.peersOf(state.workspace, own ? own.sessionId : '');
+    }
     if (!own || !state.workspace) {
-        d.ctx = null; d.peers = null; d.todo = null;
+        d.ctx = null; d.todo = null;
+        if (!state.workspace) d.peers = null;
         state.context = null;
         return;
     }
     if (CONTEXT_FIELDS.some((f) => state.needs.has(f))) {
         d.ctx = s.contextOf(s.readTail(s.transcriptPath(state.workspace, own.sessionId)));
         state.context = d.ctx;
-    }
-    if (state.needs.has('peers') || state.needs.has('peersBusy')) {
-        d.peers = s.peersOf(state.workspace, own.sessionId);
     }
     if (state.needs.has('todo') || state.needs.has('todoActive')) {
         d.todo = s.todoOf(own.sessionId);
@@ -1280,6 +1291,25 @@ async function handleMessage(context, msg) {
 
     if (msg.type === 'tab') { openTab = String(msg.id || ''); return; }
 
+    // The placeholder tiles on Now, in a window with no session of its own.
+    // Same call as the status-bar button, so a session started from the page
+    // lands where `openLocation` says and carries the same launch settings.
+    if (msg.type === 'openClaude') { openClaude(context); return; }
+
+    // A neighbour taken over into this window. Same guard as `open` and
+    // `reveal` above: only an id this extension itself put on the page, because
+    // what the message turns into is a command line.
+    if (msg.type === 'attach') {
+        const wanted = String(msg.id || '');
+        const offered = ((barState.data.peers && barState.data.peers.list) || []).map((p) => p.id);
+        if (!offered.includes(wanted)) return;
+        // Empty when the id is not one — see attachCommand. Nothing is opened
+        // for a registry entry carrying something else.
+        const command = dashboard.attachCommand(wanted);
+        if (command) openTerminal(context, command, 'Claude attached');
+        return;
+    }
+
     // Open one of the files the page lists, for editing. Only a path the page
     // was given — the message carries what the extension itself put there, and
     // anything else is refused rather than opened.
@@ -1763,7 +1793,8 @@ function applyConfig(state) {
     const launch = launchSettings();
     const on = [launch.model, launch.effort && `effort ${launch.effort}`].filter(Boolean).join(', ');
     btn.tooltip = [(PLACES[cfg.get('openLocation')] || PLACES.activeGroup).says,
-        launch.mode === 'agents' && 'the agent view', on && `on ${on}`]
+        launch.mode === 'agents' && 'the agent view',
+        launch.mode === 'background' && 'in the background', on && `on ${on}`]
         .filter(Boolean).join(' · ');
     btn.command = 'claudeStatusline.openClaude';
     btn.show();
@@ -2130,12 +2161,19 @@ async function openClaudeWith(context) {
 }
 
 async function openClaude(context, launch = launchSettings()) {
+    return openTerminal(context, dashboard.claudeCommand(launch), tabName(launch.mode));
+}
+
+/**
+ * A tab of this extension's, running one command. Everything about where it
+ * lands, how the command is sent and when the tab goes away is the same
+ * whichever command it is — a session started from the settings, or a
+ * neighbour's session attached to from the Now tab.
+ */
+async function openTerminal(context, command, name) {
     const where = PLACES[vscode.workspace.getConfiguration('claudeStatusline').get('openLocation')] || PLACES.activeGroup;
-    const command = dashboard.claudeCommand(launch);
     const terminal = vscode.window.createTerminal({
-        // The same env var Claude Code reads for its own terminal, so a machine
-        // that renames one renames both.
-        name: tabName(launch.mode),
+        name,
         iconPath: claudeIcon(context),
         location: where.location,
         // Where the session lands on disk, said out loud rather than left to the
@@ -2208,7 +2246,8 @@ const tabFor = (terminal) => [...ourTabs].find((t) => t.terminal === terminal);
 // The name a tab is opened under, before a session renames it. The same env var
 // Claude Code reads for its own terminal, so a machine that renames one renames
 // both.
-const tabName = (mode) => process.env.CLAUDE_CODE_TERMINAL_TITLE || (mode === 'agents' ? 'Claude agents' : 'Claude Code');
+const TAB_NAMES = { agents: 'Claude agents', background: 'Claude background' };
+const tabName = (mode) => process.env.CLAUDE_CODE_TERMINAL_TITLE || TAB_NAMES[mode] || 'Claude Code';
 
 // A mark put into the environment of every tab this button opens, and the one
 // thing about such a tab that a reload is known to carry: the extension host

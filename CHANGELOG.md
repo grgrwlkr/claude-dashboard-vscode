@@ -5,7 +5,15 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
-## [Unreleased]
+## [0.58.0] — 2026-09-16
+
+### Added
+
+- Edit counts include files changed by Bash commands, from Claude Code's `bashEditDiff`.
+- **Context** and **This session** keep their tiles on Now with no session open, each offering **Open Claude Code here**.
+- **Session** and **Spend** stand on Now as skeletons of their rows with no session open.
+- `claudeStatusline.launchMode`: `background`. The tab runs `claude --bg` and attaches to the session it prints; `claude agents` lists it.
+- **Other sessions here** on Now lists the neighbours — name, client, state, age — each with **attach**.
 
 ### Changed
 
@@ -14,6 +22,7 @@ is a pre-release and an **even** one is a stable release.
 
 ### Fixed
 
+- Neighbouring sessions count from below the folder as well as in it, so a worktree or a subdirectory is no longer invisible.
 - **Peak parallel sessions** on the Sessions tab counted every session twice in its last ten minutes.
 
 ## [0.56.0] — 2026-09-07

@@ -26,6 +26,10 @@ const wfm = require(`${REPO}/workflows`);
 
 const args = process.argv.slice(2);
 const DEMO = args.includes('--demo');
+// The state of a window with no session of its own — a second editor window, or
+// the first one before the button has been pressed. Half the Now tab is drawn
+// from a live session, so nothing else shows what that half looks like empty.
+const NO_SESSION = args.includes('--no-session');
 const positional = args.filter((a) => !a.startsWith('--'));
 const store = positional[0] || fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-prev-'));
 const out = positional[1] || path.join(os.tmpdir(), 'dashboard-preview.html');
@@ -96,7 +100,7 @@ const html = db.render(index, total, demo ? demo.meta : {
         const nowS = Math.floor(Date.now() / 1000);
         const lim = u.limitsOf(u.readCache(nowS) || {});
         const pace = lim.weekly ? u.pace(lim.weekly, nowS) : null;
-        const own = sess.findOwnSession(REPO);
+        const own = NO_SESSION ? null : sess.findOwnSession(REPO);
         const ctx = own ? sess.contextOf(sess.readTail(sess.transcriptPath(REPO, own.sessionId))) : null;
         const stats = own ? sess.sessionStats(sess.transcriptPath(REPO, own.sessionId)) : null;
         return status.statusMetrics({ now: nowS, weekly: lim.weekly, session: lim.session, pace, ctx,
@@ -106,7 +110,7 @@ const html = db.render(index, total, demo ? demo.meta : {
         const nowS = Math.floor(Date.now() / 1000);
         const lim = u.limitsOf(u.readCache(nowS) || {});
         const pace = lim.weekly ? u.pace(lim.weekly, nowS) : null;
-        const own = sess.findOwnSession(REPO);
+        const own = NO_SESSION ? null : sess.findOwnSession(REPO);
         const ctx = own ? sess.contextOf(sess.readTail(sess.transcriptPath(REPO, own.sessionId))) : null;
         const stats = own ? sess.sessionStats(sess.transcriptPath(REPO, own.sessionId)) : null;
         return status.statusSections({
@@ -118,7 +122,8 @@ const html = db.render(index, total, demo ? demo.meta : {
             ctx, stats, version: sess.versionInfo(own && own.version),
             settings: sess.settingsOf(REPO, null, sess.styleOfSession(own && own.pid)),
             compactPct: sess.autoCompactPct(REPO, ctx ? ctx.window : 0), todayUsd: sess.costToday().usd,
-            peers: own ? sess.peersOf(REPO, own.sessionId) : null, todo: own ? sess.todoOf(own.sessionId) : null,
+            // Peers do not need a session of this window's own — see collectFast.
+            peers: sess.peersOf(REPO, own ? own.sessionId : ''), todo: own ? sess.todoOf(own.sessionId) : null,
         }, {
             fmtCost, fmtLeft: u.fmtLeft, fmtAbs: (ts) => u.fmtAbs(ts), fmtWhen: u.fmtWhen,
             fmtDuration: sess.fmtDuration, tok: wfm.tokenLabel, shortModel: db.shortModel,

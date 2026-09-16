@@ -220,6 +220,53 @@ td.share.wide i { left: 0; right: auto; }
 /* Pushed to the bottom so a tile with no meter keeps its sub on the same
    baseline as the tiles beside it. */
 .tile-sub { font-size: 11px; opacity: .55; min-height: 14px; margin-top: auto; }
+/* A tile waiting for a session it does not have. Dashed rather than dimmed
+   alone: at 40% opacity on a dark theme it read as a tile that had failed to
+   render, and the outline says "nothing here yet" where a fade only says
+   "quiet". No border-box shadow here — the dashed outline replaces the hairline
+   the tile carries, so the two do not draw one on top of the other. */
+.tile.ghost { background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
+  box-shadow: none; outline: 1px dashed color-mix(in srgb, var(--vscode-foreground) 26%, transparent);
+  outline-offset: -1px; }
+.tile.ghost .tile-label { opacity: .35; }
+/* Centred in what is left of the tile, so the sentence sits where the figure
+   would be and the row keeps one baseline. */
+.ghost-text { display: flex; flex-direction: column; justify-content: center; align-items: center;
+  text-align: center; flex: 1; min-height: 46px; font-size: 11px; line-height: 1.35; opacity: .5; }
+.ghost-link { display: block; width: 100%; margin-top: auto; padding: 0; border: 0; background: none;
+  font: inherit; font-size: 11px; text-align: center; cursor: pointer;
+  color: var(--vscode-textLink-foreground, #3794ff); }
+.ghost-link:hover { text-decoration: underline; }
+/* The panel of a section a window with no session has nothing for: the rows it
+   will carry, drawn as a skeleton. Dashed and unfilled, like the tiles above
+   it, so the two say the same thing in the same way. */
+.panel-ghost { background: none; border-style: dashed; }
+.panel-ghost .panel-title { opacity: .45; }
+.panel-ghost .ghost-cell { opacity: .3; }
+.ghost-foot { display: flex; flex-direction: column; align-items: center; gap: 4px;
+  margin-top: 12px; font-size: 11px; opacity: .5; }
+/* The one thing in a ghost panel that is not dimmed: it is a button. */
+.ghost-foot .ghost-link { opacity: 1; }
+
+/* The other live sessions in this folder. A row is a name, where it sits and
+   what it is doing, with the way into it on the right — the same shape as a
+   list of files, because that is what it is read as. */
+.peer-list { display: flex; flex-direction: column; }
+.peer { display: flex; align-items: center; gap: 8px; padding: 7px 2px; font-size: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent); }
+.peer:last-child { border-bottom: 0; }
+/* The dot carries the one state worth a colour. Grey is not "off" — it is a
+   session sitting idle, which is most of them most of the time. */
+.peer-dot { flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: color-mix(in srgb, var(--vscode-foreground) 35%, transparent); }
+.peer-dot.busy { background: var(--vscode-charts-green); }
+.peer-name { font-weight: 600; overflow-wrap: anywhere; }
+.peer-where, .peer-meta { font-size: 11px; }
+.peer-where { overflow-wrap: anywhere; }
+.peer-act { margin-left: auto; flex: none; font: inherit; font-size: 11px; padding: 2px 9px;
+  cursor: pointer; border: 1px solid var(--vscode-panel-border); border-radius: 4px;
+  background: none; color: var(--vscode-textLink-foreground, #3794ff); }
+.peer-act:hover { background: var(--vscode-list-hoverBackground); }
 .chart { width: 100%; height: auto; overflow: visible; }
 .chart.heat { max-width: 420px; }
 .tick { fill: currentColor; opacity: .5; font-size: 9px; }
