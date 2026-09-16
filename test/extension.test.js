@@ -2227,17 +2227,22 @@ test('the agent view in the active tab hides the session instead of guessing one
             const agents = await openActiveTab(5151);
             vscode.__activateTerminal(agents);
             await new Promise((r) => setImmediate(r));
-            seen.length = 0;
             await vscode.__commands.get('claudeStatusline.refresh')();
-            assert.deepEqual(seen, [], `the agent view tab still read a session: ${JSON.stringify(seen)}`);
-            assert.equal(run.context.claudeState.session, null);
+            // Asserted on this window's own state, not on the transcript reads
+            // the process makes: the spy is shared, and on a runner with no
+            // limits cache an earlier test's limits request lands during this
+            // one and reads its own session through it (CI, 2026-09-16).
+            const state = run.context.claudeState;
+            assert.equal(state.session, null, 'the agent view tab kept a guessed session');
+            assert.equal(state.data.ctx, null, 'and the bar still has a context to show');
 
             const tab = await openActiveTab(4242);
             vscode.__activateTerminal(tab);
             await new Promise((r) => setImmediate(r));
-            seen.length = 0;
             await vscode.__commands.get('claudeStatusline.refresh')();
-            assert.ok(seen.includes('tab-a-session'), 'a tab that names its session brings the bar back');
+            assert.equal(state.session && state.session.sessionId, 'tab-a-session',
+                'a tab that names its session brings the bar back');
+            assert.ok(seen.includes('tab-a-session'));
         });
     } finally { s.agentViewIn = real; run.dispose(); }
 });
