@@ -768,6 +768,53 @@ ul.log li { margin: 2px 0; opacity: .85; }
    and a table that scrolls sideways inside it reads as broken rather than wide. */
 .side .now-table th[scope="row"] { white-space: normal; padding-right: 8px; }
 .side .row { grid-template-columns: 2.6rem 1fr auto; }
+
+/* The four blocks of the one sidebar view. Each header is drawn the way VS Code
+   draws a view's own header — a chevron and the name in the same weight — so
+   the column reads as it did when these were four views, without VS Code
+   dividing its height between them. */
+.side-page { padding: 0; }
+.side-block { border: 0; margin: 0; }
+.side-block[hidden] { display: none; }
+.side-block-head { display: flex; align-items: center; list-style: none; cursor: pointer;
+  height: 22px; padding: 0 8px 0 0; font-size: 13px; font-weight: 600; user-select: none; }
+.side-block-head::-webkit-details-marker { display: none; }
+/* Drawn with borders rather than an icon: the page's policy loads no images,
+   and a data: URI mask is an image as far as the policy is concerned. */
+.side-block-head::before { content: ''; flex: none; box-sizing: border-box; width: 7px; height: 7px;
+  margin: 0 8px 0 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  opacity: .8; transform: rotate(-45deg); transition: transform .1s; }
+.side-block[open] > .side-block-head::before { transform: translateY(-2px) rotate(45deg); }
+.side-block-head:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.side-block-body { padding: 0 12px 10px 20px; }
+
+/* The two lists: a tree's rows, as rows. */
+.side-list { display: flex; flex-direction: column; }
+.side-row { display: flex; align-items: center; gap: 6px; min-height: 22px; min-width: 0; }
+.side-icon { flex: none; width: 14px; text-align: center; font-size: 11px; opacity: .8; }
+.side-icon.i-sync-spin { display: inline-block; animation: side-spin 1.2s linear infinite; }
+@keyframes side-spin { to { transform: rotate(360deg); } }
+.side-icon.i-check { color: var(--vscode-charts-green); }
+.side-icon.i-error { color: var(--vscode-charts-red); }
+.side-icon.i-circle-filled { font-size: 9px; opacity: .55; }
+.side-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-desc { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; opacity: .6; }
+.side-acts { margin-left: auto; display: flex; gap: 2px; flex: none; visibility: hidden; }
+.side-row:hover .side-acts, .side-row:focus-within .side-acts { visibility: visible; }
+.side-act { font: inherit; font-size: 12px; line-height: 18px; width: 20px; padding: 0; border: 0;
+  border-radius: 3px; background: none; color: inherit; cursor: pointer; opacity: .75; }
+.side-act:hover { background: var(--vscode-list-hoverBackground); opacity: 1; }
+.side-node > summary { list-style: none; cursor: pointer; }
+.side-node > summary::-webkit-details-marker { display: none; }
+/* A row that folds wears the tree's twistie, drawn like the block headers'. A
+   row that does not keeps the same indent, so labels line up either way. */
+.side-list .side-row::before { content: ''; flex: none; width: 10px; }
+.side-node > summary > .side-row::before { box-sizing: border-box; width: 6px; height: 6px; margin: 0 2px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: .7;
+  transform: rotate(-45deg); }
+.side-node[open] > summary > .side-row::before { transform: translateY(-2px) rotate(45deg); }
+.side-kids { padding-left: 16px; }
 .now-table { width: 100%; margin: 0; }
 .now-table th, .now-table td { border: none; padding: 3px 0; }
 .now-table th[scope="row"] { font: inherit; text-transform: none; letter-spacing: 0;

@@ -2435,6 +2435,127 @@ function sidebarPage(sections, which) {
 <style>${STYLE}</style></head><body class="side-body">${sidebarNow(sections, which)}</body></html>`;
 }
 
+/**
+ * The sidebar as one view, with its four blocks folding inside it.
+ *
+ * It was four views, and VS Code divided the column between them: every pane
+ * cut its content off at its own edge, and a pane hidden by its `when` clause
+ * left its share of the height empty. One view has one scroll, and the blocks
+ * take the height their content needs — the way Claude Code's own panel is laid
+ * out.
+ *
+ * Drawn once and filled by message. Replacing the document on every tick, as
+ * the two readouts used to, would reset the scroll position and every fold the
+ * reader had opened; so the page holds its folds in the webview's own state and
+ * the extension only ever sends the blocks' contents.
+ *
+ * The open state of each block on a first draw is what the four panes opened
+ * with — the readouts open, the lists closed — and from there on it is the
+ * reader's.
+ */
+const SIDEBAR_BLOCKS = [
+    ['limits', 'Limits', true],
+    ['session', 'Session', true],
+    ['live', 'Live Sessions', false],
+    ['runs', 'Workflow Runs', false],
+];
+
+function sidebarShell(nonce) {
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>${STYLE}</style></head><body class="side-body side-page">
+${SIDEBAR_BLOCKS.map(([id, title, open]) => `<details class="side-block" data-block="${id}"${open ? ' open' : ''}>
+  <summary class="side-block-head"><span class="side-block-title">${title}</span></summary>
+  <div class="side-block-body"></div>
+</details>`).join('\n')}
+<script nonce="${nonce}">${SIDEBAR_SCRIPT}</script></body></html>`;
+}
+
+// The page's whole behaviour: fill the blocks it is sent, remember what the
+// reader folded, and hand the two run actions back to the extension. A fold is
+// remembered only once the reader has touched it, so a run that starts later
+// still opens itself the way its tree row did.
+const SIDEBAR_SCRIPT = `
+const api = acquireVsCodeApi();
+const saved = api.getState() || {};
+const blocks = saved.blocks || {};
+const nodes = saved.nodes || {};
+const save = () => api.setState({ blocks, nodes });
+// Only a fold the reader made is remembered. The browser raises \`toggle\` for a
+// details opened by markup too — on load, and whenever a run's row is drawn
+// open because the run is going — and recording those would keep a finished
+// run open forever. A click on the summary, which keyboard activation also
+// raises, is what marks a fold as the reader's.
+const remember = (d, store, key) => {
+  d.querySelector(':scope > summary').addEventListener('click', () => { d.dataset.touched = '1'; });
+  d.addEventListener('toggle', () => {
+    if (!d.dataset.touched) return;
+    delete d.dataset.touched;
+    store[key] = d.open;
+    save();
+  });
+};
+for (const d of document.querySelectorAll('details.side-block')) {
+  if (d.dataset.block in blocks) d.open = blocks[d.dataset.block];
+  remember(d, blocks, d.dataset.block);
+}
+window.addEventListener('message', (event) => {
+  const m = event.data;
+  if (!m || m.type !== 'draw') return;
+  for (const [id, html] of Object.entries(m.blocks || {})) {
+    const block = document.querySelector('details.side-block[data-block="' + id + '"]');
+    if (!block) continue;
+    block.hidden = html === null;
+    const body = block.querySelector('.side-block-body');
+    if (html === null || body.innerHTML === html) continue;
+    body.innerHTML = html;
+    for (const n of body.querySelectorAll('details.side-node')) {
+      if (n.dataset.node in nodes) n.open = nodes[n.dataset.node];
+      remember(n, nodes, n.dataset.node);
+    }
+  }
+});
+document.addEventListener('click', (event) => {
+  const b = event.target.closest('[data-run-act]');
+  if (!b) return;
+  event.preventDefault();
+  event.stopPropagation();
+  api.postMessage({ type: 'run', act: b.dataset.runAct, runId: b.dataset.run });
+});
+api.postMessage({ type: 'ready' });
+`;
+
+// The codicons the trees drew, as characters: a webview has no icon font of
+// its own, and these five plus the dot are every icon the two lists use.
+const SIDE_ICONS = {
+    'sync~spin': '↻', check: '✓', error: '✕', 'circle-slash': '⊘', question: '?', 'circle-filled': '●',
+};
+
+/**
+ * A list of the sidebar — the rows a tree would have drawn, from the same
+ * nodes: a label, the grey description beside it, the icon, the hover. A node
+ * with children folds; a run carries the two actions its context menu offered.
+ */
+function sidebarList(rows) {
+    if (!rows || rows.length === 0) return '<p class="empty">Nothing here.</p>';
+    return `<div class="side-list">${rows.map(sideRow).join('')}</div>`;
+}
+
+function sideRow(row) {
+    const glyph = SIDE_ICONS[row.icon];
+    const icon = `<span class="side-icon${row.icon ? ` i-${esc(String(row.icon).replace('~', '-'))}` : ''}">${glyph ? esc(glyph) : ''}</span>`;
+    const acts = row.kind === 'run' && row.runId
+        ? `<span class="side-acts"><button type="button" class="side-act" data-run-act="open" data-run="${esc(row.runId)}" title="Open workflow script">⧉</button>`
+            + `<button type="button" class="side-act" data-run-act="copy" data-run="${esc(row.runId)}" title="Copy run id">⎘</button></span>`
+        : '';
+    const line = `<span class="side-row"${row.tooltip ? ` title="${esc(row.tooltip)}"` : ''}>${icon}`
+        + `<span class="side-label">${esc(row.label)}</span>`
+        + `${row.description ? `<span class="side-desc">${esc(row.description)}</span>` : ''}${acts}</span>`;
+    if (!row.children || row.children.length === 0) return line;
+    return `<details class="side-node" data-node="${esc(row.id)}"${row.expanded ? ' open' : ''}>`
+        + `<summary>${line}</summary><div class="side-kids">${row.children.map(sideRow).join('')}</div></details>`;
+}
+
 // Every choice on this tab, with the sentence that says what picking it does.
 // A dropdown hides all but one of these behind a click, which is the whole
 // reason they are drawn open: a setting nobody can see the alternatives to is a
@@ -4101,7 +4222,7 @@ module.exports = {
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab, launchTab,
     claudeCommand, attachCommand, aliasLine, withAliasBlock, shellRcFor,
-    limitsTab, weekLabel, nowTab, sidebarNow, sidebarPage, sidebarSections, paceTrack, statusBlocks, meterTone,
+    limitsTab, weekLabel, nowTab, sidebarNow, sidebarPage, sidebarShell, sidebarList, sidebarSections, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     // The places a session can be opened in — the cards on the Settings tab and,
     // through extension.js, the button's own table of what each one means.

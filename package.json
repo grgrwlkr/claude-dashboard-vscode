@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashnlines for Claude — Dashboard & Statusline",
   "description": "Unofficial. A 24-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.58.0",
+  "version": "0.60.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -110,21 +110,6 @@
           "group": "navigation"
         }
       ],
-      "view/item/context": [
-        {
-          "command": "claudeStatusline.openWorkflowScript",
-          "when": "view == claudeStatusline.runsPane && viewItem == run",
-          "group": "inline"
-        },
-        {
-          "command": "claudeStatusline.openWorkflowScript",
-          "when": "view == claudeStatusline.runsPane && viewItem == run"
-        },
-        {
-          "command": "claudeStatusline.copyRunId",
-          "when": "view == claudeStatusline.runsPane && viewItem == run"
-        }
-      ],
       "commandPalette": [
         {
           "command": "claudeStatusline.openWorkflowScript",
@@ -148,27 +133,9 @@
     "views": {
       "claudeStatusline": [
         {
-          "id": "claudeStatusline.limitsPane",
-          "name": "Limits",
-          "type": "webview",
-          "initialSize": 1
-        },
-        {
-          "id": "claudeStatusline.sessionPane",
-          "name": "Session",
-          "type": "webview",
-          "initialSize": 1,
-          "when": "claudeStatusline.hasSession"
-        },
-        {
-          "id": "claudeStatusline.livePane",
-          "name": "Live sessions",
-          "visibility": "collapsed"
-        },
-        {
-          "id": "claudeStatusline.runsPane",
-          "name": "Workflow runs",
-          "visibility": "collapsed"
+          "id": "claudeStatusline.sidebarPane",
+          "name": "Dashnlines for Claude",
+          "type": "webview"
         }
       ]
     },

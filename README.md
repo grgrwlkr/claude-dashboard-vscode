@@ -386,19 +386,24 @@ stores prompt text.
 
 The `/workflows` progress tree lives in the terminal and dies with it; what it
 wrote to disk stays. The extension reads that into three surfaces: a **Workflow
-runs** tree in the Activity Bar (run → phase → agent), the runs table on the
+Runs** list in the Activity Bar (run → phase → agent), the runs table on the
 dashboard, and the placeholders above.
 
-That tree is the last of four sections in the **Dashnlines for Claude** container.
-Above it: **Limits** — the week as the figure, the 5-hour and per-model windows
-as rows under it, whether spend is over or under plan, and when the window runs
-out at this rate; **Session** — the model, the context window with a breakdown of
-what fills it, and what the session in this window has cost, hidden when there is
-no session here; and **Live sessions** — every session on the machine whose
-process is alive, named by its project. The first two carry the status bar's own
-tooltip text. The container opens with those two sharing the height and the two
-lists collapsed; VS Code remembers whatever you drag or open instead. The icon
-carries a badge with the number of live sessions.
+The **Dashnlines for Claude** container is one view with four blocks that fold:
+**Limits** — the week as the figure, the 5-hour and per-model windows as rows
+under it, whether spend is over or under plan, and when the window runs out at
+this rate; **Session** — the model, the context window with a breakdown of what
+fills it, and what the session in this window has cost, hidden when there is no
+session here; **Live Sessions** — every session on the machine whose process is
+alive, named by its project; and **Workflow Runs**, where a run's row carries
+**Open workflow script** and **Copy run id**. The first two carry the status
+bar's own tooltip text. Limits and Session open unfolded and the two lists
+folded; the view remembers what you fold. The icon carries a badge with the
+number of sessions waiting on you, read from `claude agents --json`.
+
+The session of a window is the one in the active terminal: a `claude` session, or
+the one a `claude attach <id>` tab shows. A tab running `claude agents` shows no
+session.
 
 A run is in one of three states: **running** (no final snapshot, the owning
 session is alive, the directory moved in the last ten minutes), **finished** (the

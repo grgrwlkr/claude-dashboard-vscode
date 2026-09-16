@@ -449,3 +449,116 @@ test('peersOf names the neighbours, and finds the ones below the folder', () => 
     assert.equal(peers.list[1].where, '.claude/worktrees/x');
     fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// Since sessions run in the background by default the process that owns one is
+// never a child of the shell it is shown in: the daemon owns it, and the shell
+// runs `claude attach <id>`. Measured 2026-09-16 on 2.1.273 — every live session
+// on the machine had `claude bg-pty-host` for a parent, and the terminals held
+// the attach clients. Matched by parent alone, no tab had a session in it.
+test('sessionForShell finds a background session through the attach running in the tab', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-attach-'));
+    const put = (name, session) => fs.writeFileSync(path.join(dir, name), JSON.stringify(session));
+    const live = process.pid;
+    put('a.json', { sessionId: 'e37fc57a-2c83-4c0e-bfb9-2cdb4aeeed4a', pid: live, cwd: '/w', kind: 'bg' });
+    put('b.json', { sessionId: '2519a4fd-0000-0000-0000-000000000000', pid: live, cwd: '/w', kind: 'bg' });
+    const table = [
+        { pid: 900, ppid: 3130, command: 'claude attach e37fc57a' },
+        { pid: 901, ppid: 3131, command: '/Users/x/.local/bin/claude attach 2519a4fd' },
+        { pid: 902, ppid: 3132, command: 'claude agents --model opus[1m]' },
+        { pid: 903, ppid: 3133, command: 'vim attach-notes.md' },
+    ];
+    const at = (shell) => s.sessionForShell(shell, { dir, table });
+    assert.equal(at(3130)?.sessionId, 'e37fc57a-2c83-4c0e-bfb9-2cdb4aeeed4a');
+    assert.equal(at(3131)?.sessionId, '2519a4fd-0000-0000-0000-000000000000', 'the full path to the binary is the same client');
+    // The agent view holds many sessions and says nothing about which one is on
+    // screen, so it is no answer rather than a guess.
+    assert.equal(at(3132), null);
+    assert.equal(at(3133), null, 'a word in a file name is not an attach');
+    assert.equal(at(9999), null);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// A session found through the tab it is attached in can belong to any folder,
+// and its transcript is filed under that folder, not under the window's. Keyed
+// by the window, the bar read a file that does not exist and went blank.
+test('a session transcript is looked for under the session folder, not the window', () => {
+    const session = { sessionId: 'e37fc57a-2c83', cwd: '/Users/x/Develop/SimCity' };
+    assert.equal(s.transcriptOf(session, '/Users/x/Develop/claude-statusline-vscode'),
+        path.join(s.PROJECTS, '-Users-x-Develop-SimCity', 'e37fc57a-2c83.jsonl'));
+    // A registry entry without a cwd still has the window to fall back on.
+    assert.equal(s.transcriptOf({ sessionId: 'abc' }, '/w'), path.join(s.PROJECTS, '-w', 'abc.jsonl'));
+});
+
+// The window's own session, when no tab names one — the agent view in the
+// active terminal, or no terminal at all. A session in a worktree under the
+// window's folder is this repository's work too; an exact folder still wins.
+test('findOwnSession falls back to a session below the folder when none is in it', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-own-'));
+    const put = (name, session) => fs.writeFileSync(path.join(dir, name), JSON.stringify(session));
+    const live = process.pid;
+    put('wt.json', { sessionId: 'worktree', pid: live, cwd: '/w/.claude/worktrees/x', kind: 'bg' });
+    put('far.json', { sessionId: 'elsewhere', pid: live, cwd: '/wx', kind: 'bg' });
+    const table = [];
+    assert.equal(s.findOwnSession('/w', 1, { dir, table })?.sessionId, 'worktree');
+
+    put('exact.json', { sessionId: 'exact', pid: live, cwd: '/w', kind: 'bg' });
+    assert.equal(s.findOwnSession('/w', 1, { dir, table })?.sessionId, 'exact', 'the folder itself comes first');
+    // `/wx` shares a prefix with `/w` and is not below it.
+    assert.equal(s.findOwnSession('/nothing', 1, { dir, table }), null);
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// With nothing in a tab to say which session the window means, the newest one
+// in the folder was taken — and a background session nobody has prompted yet is
+// often the newest thing there. Measured 2026-09-16: the COG window picked an
+// idle session with no reply in its transcript over one holding 209k of context.
+test('the fallback prefers a session that has answered over a newer empty one', () => {
+    const working = { sessionId: 'working', cwd: '/nowhere-a', startedAt: '2026-09-16T10:00:00Z' };
+    const idle = { sessionId: 'idle', cwd: '/nowhere-b', startedAt: '2026-09-16T12:00:00Z' };
+    const answered = (x) => x.sessionId === 'working';
+    assert.equal(s.newestWorking([idle, working], answered).sessionId, 'working');
+    // When none has answered, the newest still stands rather than nothing.
+    assert.equal(s.newestWorking([working, idle], () => false).sessionId, 'idle');
+});
+
+// The agent view holds many sessions and says nothing about which one is on
+// screen (measured 2026-09-16: no child process, one control socket, no
+// `attached` field in `claude agents --json`). A tab running it is recognised so
+// the window can say it cannot tell, rather than guess.
+test('agentViewIn recognises the agent view running in a tab', () => {
+    const table = [
+        { pid: 900, ppid: 41463, command: 'claude agents --model opus[1m] --effort high' },
+        { pid: 901, ppid: 7017, command: '/Users/x/.local/bin/claude agents' },
+        { pid: 902, ppid: 3130, command: 'claude attach e37fc57a' },
+        { pid: 903, ppid: 5000, command: 'claude agents --json' },
+        { pid: 904, ppid: 5001, command: 'vim agents.md' },
+    ];
+    assert.equal(s.agentViewIn(41463, { table }), true);
+    assert.equal(s.agentViewIn(7017, { table }), true, 'by path as well as by name');
+    assert.equal(s.agentViewIn(3130, { table }), false, 'an attach is one session, and says which');
+    assert.equal(s.agentViewIn(5000, { table }), false, 'a listing that prints and exits is not a view');
+    assert.equal(s.agentViewIn(5001, { table }), false);
+    assert.equal(s.agentViewIn(0, { table }), false);
+});
+
+// The badge counts the sessions waiting on the reader, read the documented way:
+// `claude agents --json`, where `state: blocked` is a background session that
+// needs something only you can give, and `status: waiting` is a live process
+// holding an open prompt (code.claude.com/docs/en/agent-view, "Read session
+// state from a script", checked 2026-09-16). A session that finished its turn is
+// `done`, and is not waiting on anyone.
+test('waitingCount counts the sessions that need you, once each', () => {
+    const entries = [
+        { kind: 'background', id: 'a1', sessionId: 'a1-full', state: 'blocked', status: 'idle' },
+        { kind: 'background', id: 'b2', sessionId: 'b2-full', state: 'blocked' },
+        { kind: 'background', id: 'c3', sessionId: 'c3-full', state: 'done', status: 'idle' },
+        { kind: 'background', id: 'd4', sessionId: 'd4-full', state: 'working', status: 'busy' },
+        { kind: 'interactive', sessionId: 'e5-full', status: 'waiting', waitingFor: 'permission prompt' },
+        { kind: 'interactive', sessionId: 'f6-full', status: 'idle' },
+        // Both signals on one session is still one session.
+        { kind: 'background', id: 'g7', sessionId: 'g7-full', state: 'blocked', status: 'waiting', waitingFor: 'input needed' },
+    ];
+    assert.equal(s.waitingCount(entries), 4);
+    assert.equal(s.waitingCount([]), 0);
+    assert.equal(s.waitingCount(null), null, 'no reading is not zero sessions');
+});

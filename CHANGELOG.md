@@ -5,6 +5,21 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
+## [0.60.0] — 2026-09-16
+
+### Changed
+
+- The sidebar is one view; **Limits**, **Session**, **Live Sessions** and **Workflow Runs** fold inside it.
+- A run's **Open workflow script** and **Copy run id** are buttons on its row in the sidebar.
+- The sidebar badge counts sessions waiting on you, from `claude agents --json`, instead of live sessions.
+
+### Fixed
+
+- A tab running `claude agents` shows no session in the bar, Now or the sidebar.
+- A tab running `claude attach` is the session in it: the bar, Now and the sidebar describe it again.
+- Session context and spend are read from the session's own folder, not the window's.
+- With no session named by a tab, the window takes one below its folder and one that has answered.
+
 ## [0.58.0] — 2026-09-16
 
 ### Added

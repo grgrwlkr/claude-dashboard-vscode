@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const vscode = require('vscode');
 const u = require('./usage');
 const s = require('./session');
@@ -335,31 +336,10 @@ const TOOLTIPS = {
 // can reach them. Nothing here reads a run — it reads the state the two ticks
 // have already filled, so the panel and the bar can never disagree.
 class WorkflowTree {
+    // A tree no view is registered for: the sidebar reads its rows through
+    // getChildren and getTreeItem, which are where a run's rows are decided.
     constructor(state) {
         this.state = state;
-        this.emitter = new vscode.EventEmitter();
-        this.onDidChangeTreeData = this.emitter.event;
-        // The reading the tree was last drawn from, and what that reading would
-        // have drawn, so a draw that changed nothing does not ask for one.
-        this.drawn = null;
-        this.stamp = '';
-    }
-
-    // Only when the reading actually changed — and what counts as a change is
-    // whether the tree would draw something different, not whether a collector
-    // built a fresh object. Both of them replace state.data.workflows wholesale,
-    // and the slow one does it every minute whether or not anything moved, so
-    // the object is a fast "certainly unchanged" test and nothing more: the
-    // stamp is taken from the nodes themselves, which is the only thing that
-    // cannot disagree with what a redraw would produce.
-    refresh() {
-        const data = this.state.data.workflows || null;
-        if (data === this.drawn) return;
-        this.drawn = data;
-        const stamp = wfm.treeStamp((data && data.runs) || []);
-        if (stamp === this.stamp) return;
-        this.stamp = stamp;
-        this.emitter.fire();
     }
 
     getChildren(node) {
@@ -415,32 +395,10 @@ class LiveSessionsTree {
     // has three sessions on it, and then none, without one existing anywhere.
     constructor(readSessions) {
         this.readSessions = readSessions || (() => sys.live().sessions);
-        this.emitter = new vscode.EventEmitter();
-        this.onDidChangeTreeData = this.emitter.event;
-        this.stamp = '';
-        this.view = null;
     }
 
     read() {
         try { return this.readSessions().filter((s) => s.alive); } catch { return []; }
-    }
-
-    // Same contract as WorkflowTree.refresh: redraw only when a row would look
-    // different, so a tick that changed nothing costs nothing.
-    refresh() {
-        const rows = this.read();
-        const stamp = JSON.stringify(rows.map((s) => [s.id, s.status, s.cwd]));
-        if (stamp !== this.stamp) {
-            this.stamp = stamp;
-            this.emitter.fire();
-        }
-        if (this.view) {
-            // No badge rather than a zero: a badge reading nought is a dot that
-            // never leaves, and its absence says the same thing quietly.
-            this.view.badge = rows.length
-                ? { value: rows.length, tooltip: dashboard.plural(rows.length, 'live Claude session') }
-                : undefined;
-        }
     }
 
     getChildren(node) { return node ? [] : this.read(); }
@@ -457,35 +415,112 @@ class LiveSessionsTree {
 }
 
 /**
- * Now, in the sidebar. The page has no script and nothing to click, so it is
- * rebuilt outright on every draw rather than patched, and only while it is
- * visible: a hidden view is redrawn when it comes back, which is the moment its
- * numbers start mattering again.
+ * The sidebar: one view, four blocks folding inside it (see `sidebarShell`).
+ *
+ * The page is set once and filled by message, and a message is sent only when
+ * what it carries differs from the last one — the slow tick rebuilds the run
+ * list every minute whether or not anything moved, and every send replaces the
+ * markup the reader had folds open in.
+ *
+ * The two lists are drawn from the same trees they were native views of, so a
+ * row reads as it did: the tree still decides the label, the description, the
+ * icon and which runs open themselves.
  */
-class NowView {
-    // `which` names the slice of the status sections this pane draws — the two
-    // panes are the same class because they differ in nothing else.
-    constructor(state, which) {
+class SidebarView {
+    constructor(state) {
         this.state = state;
-        this.which = which;
         this.view = null;
+        this.sent = '';
     }
 
     resolveWebviewView(view) {
         this.view = view;
-        view.webview.options = { enableScripts: false };
-        view.onDidChangeVisibility(() => this.refresh());
+        this.sent = '';
+        view.webview.options = { enableScripts: true };
+        view.webview.html = dashboard.sidebarShell(crypto.randomBytes(16).toString('base64'));
+        view.webview.onDidReceiveMessage((msg) => this.receive(msg));
+        // A hidden view keeps its page but misses the sends; coming back, it is
+        // brought up to date whatever was sent last.
+        view.onDidChangeVisibility(() => { this.sent = ''; this.refresh(); });
         this.refresh();
     }
 
-    refresh() {
-        if (!this.view || !this.view.visible) return;
-        try {
-            this.view.webview.html = dashboard.sidebarPage(
-                dashboard.sidebarSections(statusNow(this.state), this.which), this.which,
-            );
-        } catch { /* the bar is drawn; this view waits for the next tick */ }
+    receive(msg) {
+        if (!msg) return;
+        // Sent by the page once its script is listening — a draw posted before
+        // that is lost, which is why the first one waits for this.
+        if (msg.type === 'ready') { this.sent = ''; this.refresh(); return; }
+        if (msg.type === 'run') {
+            // The same guard as the dashboard's `open` and `reveal`: only a run
+            // this extension drew, because the id comes from a webview and the
+            // command it turns into opens a file.
+            const runs = (this.state.data.workflows && this.state.data.workflows.runs) || [];
+            const run = runs.find((r) => r.runId === msg.runId);
+            const command = { open: 'claudeStatusline.openWorkflowScript', copy: 'claudeStatusline.copyRunId' }[msg.act];
+            if (run && command) vscode.commands.executeCommand(command, { kind: 'run', run });
+        }
     }
+
+    refresh() {
+        if (!this.view) return;
+        // The sessions waiting on the reader — the one count worth being
+        // interrupted by. No badge rather than a zero: a badge reading nought is
+        // a dot that never leaves. No reading is no badge too, not a zero.
+        const waiting = this.state.waiting;
+        this.view.badge = waiting > 0
+            ? { value: waiting, tooltip: `${dashboard.plural(waiting, 'session')} waiting on you` }
+            : undefined;
+        if (!this.view.visible) return;
+        // Each block on its own: the run list is drawn from records a client that
+        // ships almost daily writes, and one it cannot read must cost that list,
+        // not the limits above it. A block that fails keeps what it showed last.
+        const last = this.blocks || {};
+        const block = (id, draw) => { try { return draw(); } catch { return last[id] === undefined ? '' : last[id]; } };
+        const sections = block('sections', () => statusNow(this.state)) || [];
+        const session = dashboard.sidebarSections(sections, 'session');
+        const blocks = {
+            limits: block('limits', () => dashboard.sidebarNow(dashboard.sidebarSections(sections, 'limits'), 'limits')),
+            // Withheld rather than drawn empty: the block hides itself, as the
+            // pane it was hid behind a `when` clause.
+            session: session.length > 0 ? block('session', () => dashboard.sidebarNow(session, 'session')) : null,
+            live: block('live', () => dashboard.sidebarList(treeRows(this.state.sessionsTree))),
+            runs: block('runs', () => dashboard.sidebarList(treeRows(this.state.tree))),
+        };
+        this.blocks = blocks;
+        const stamp = JSON.stringify(blocks);
+        if (stamp === this.sent) return;
+        this.sent = stamp;
+        this.view.webview.postMessage({ type: 'draw', blocks });
+    }
+}
+
+// A tree's rows as plain data, for a page that cannot hold a TreeItem. What the
+// tree decided stays decided: the label, the description, the icon and whether
+// a row opens itself all come from its own getTreeItem.
+function treeRows(tree, node) {
+    if (!tree) return [];
+    return tree.getChildren(node).map((child) => {
+        const item = tree.getTreeItem(child);
+        const agent = child.kind === 'agent' && child.agent;
+        // An agent's hover was markdown with its prose escaped for it; a title
+        // attribute wants the words themselves.
+        const tooltip = agent
+            ? [agent.promptPreview, agent.resultPreview].filter(Boolean).join('\n\n')
+            : (item.tooltip && typeof item.tooltip === 'object' ? item.tooltip.value : item.tooltip) || '';
+        const folds = item.collapsibleState !== undefined
+            && item.collapsibleState !== vscode.TreeItemCollapsibleState.None;
+        return {
+            id: String(item.id || child.id || ''),
+            kind: child.kind || '',
+            runId: (child.run && child.run.runId) || '',
+            label: String(item.label || ''),
+            description: String(item.description || ''),
+            icon: (item.iconPath && item.iconPath.id) || '',
+            tooltip: String(tooltip),
+            expanded: item.collapsibleState === vscode.TreeItemCollapsibleState.Expanded,
+            children: folds ? treeRows(tree, child) : [],
+        };
+    });
 }
 
 function tooltipSections(state, topics) {
@@ -524,35 +559,12 @@ function render(state) {
         }
     });
 
-    // The panel draws from the same state as the bar, so one draw refreshes
-    // both. A test that fills a state by hand has no tree, and the bar is not
-    // held hostage to one — nor the other way round.
-    if (state.tree) {
-        try { state.tree.refresh(); } catch { /* the bar is drawn; the tree waits for the next tick */ }
+    // The sidebar draws from the same state as the bar, so one draw refreshes
+    // both — and neither may take the other down: a state a test filled by hand
+    // has no sidebar at all.
+    if (state.sidebar) {
+        try { state.sidebar.refresh(); } catch { /* redrawn on the next tick */ }
     }
-    // Same rule for the two sidebar views: neither may take the bar down with
-    // it, and a state a test filled by hand has none of the three.
-    if (state.sessionsTree) {
-        try { state.sessionsTree.refresh(); } catch { /* redrawn on the next tick */ }
-    }
-    for (const view of [state.limitsView, state.nowView]) {
-        if (!view) continue;
-        try { view.refresh(); } catch { /* redrawn on the next tick */ }
-    }
-    // The session pane is hidden rather than left empty when nothing is running
-    // in this window: an empty pane still claims its share of the sidebar, and
-    // that share comes out of the limits above it. Set only on a change — this
-    // runs on every tick, and `setContext` is a round trip to the workbench.
-    try {
-        const has = dashboard.sidebarSections(statusNow(state), 'session').length > 0;
-        if (state.hasSession !== has) {
-            state.hasSession = has;
-            vscode.commands.executeCommand('setContext', 'claudeStatusline.hasSession', has);
-            // Kept for the next window, which lays the sidebar out before it can
-            // know the answer for itself.
-            if (state.memory) state.memory.update(HAD_SESSION, has);
-        }
-    } catch { /* the bar is drawn; the pane keeps whatever it had */ }
 }
 
 // Fields whose value comes out of the single expensive pass over the whole
@@ -579,7 +591,7 @@ function collectFast(state) {
         return;
     }
     if (CONTEXT_FIELDS.some((f) => state.needs.has(f))) {
-        d.ctx = s.contextOf(s.readTail(s.transcriptPath(state.workspace, own.sessionId)));
+        d.ctx = s.contextOf(s.readTail(s.transcriptOf(own, state.workspace)));
         state.context = d.ctx;
     }
     if (state.needs.has('todo') || state.needs.has('todoActive')) {
@@ -638,7 +650,7 @@ function collectSlow(state) {
         // The whole transcript is parsed for this, so it only happens when some
         // segment asks a question that needs it.
         if (MONEY_FIELDS.some((f) => state.needs.has(f))) {
-            state.stats = s.sessionStats(s.transcriptPath(state.workspace, state.session.sessionId));
+            state.stats = s.sessionStats(s.transcriptOf(state.session, state.workspace));
             d.stats = state.stats;
         }
         if (state.needs.has('today')) { state.todayUsd = s.costToday().usd; d.todayUsd = state.todayUsd; }
@@ -649,7 +661,7 @@ function collectSlow(state) {
         // never shows. The memory files are weighed by the system snapshot,
         // which is where that half of the answer comes from.
         if (CONTEXT_FIELDS.some((f) => state.needs.has(f))) {
-            state.contextParts = s.contextParts(s.transcriptPath(state.workspace, state.session.sessionId));
+            state.contextParts = s.contextParts(s.transcriptOf(state.session, state.workspace));
             d.contextParts = state.contextParts;
         }
         // Every instruction file that reaches the prompt, not just the global
@@ -839,6 +851,28 @@ function fastTick(state) {
     // A session is named a little after it starts and renamed at any point, so
     // the tab follows on the same ten seconds as the rest of the cheap reads.
     renameActiveTab(state);
+    refreshWaiting(state);
+}
+
+/**
+ * How many sessions are waiting on the reader, for the badge. On the fast tick
+ * because the badge is a notification, and a question answered a minute late is
+ * the thing it exists to prevent; one read at a time, because the listing is a
+ * process and a slow one must not pile up behind the next tick. Only a change
+ * redraws: the sidebar is sent nothing when the count is what it was.
+ */
+function refreshWaiting(state) {
+    if (state.waitingRead) return state.waitingRead;
+    state.waitingRead = s.readAgents()
+        .then((entries) => {
+            const count = s.waitingCount(entries);
+            if (count !== state.waiting) {
+                state.waiting = count;
+                if (state.sidebar) state.sidebar.refresh();
+            }
+        }, () => { /* no reading; the badge keeps what it had */ })
+        .finally(() => { state.waitingRead = null; });
+    return state.waitingRead;
 }
 
 /**
@@ -864,6 +898,13 @@ function refreshSession(state) {
     if (shell) {
         const inTab = s.sessionForShell(shell);
         if (inTab) { state.session = inTab; state.sessionShell = shell; return; }
+        // The one tab where falling back would be a lie: the agent view holds
+        // every session and shows one, and nothing on the machine says which
+        // (no child process, one control socket, no such field in
+        // `claude agents --json` — measured 2026-09-16). The folder's newest
+        // session is then a guess presented as the session on screen, so the
+        // window has none until a tab names one.
+        if (s.agentViewIn(shell)) { state.session = null; state.sessionShell = shell; return; }
     }
     // The cached session is kept while its process lives — but not when it was
     // taken from a tab that is no longer the active one, or switching tabs would
@@ -1804,14 +1845,6 @@ function applyConfig(state) {
 function activate(context) {
     const cfg = vscode.workspace.getConfiguration('claudeStatusline');
 
-    // Before anything is read or registered: the session pane sits behind a
-    // `when` clause, and `initialSize` is applied to a pane the first time it is
-    // shown. A key set on the first tick therefore arrives after VS Code has
-    // laid the container out with the pane missing, and the pane then takes
-    // whatever height is left instead of its half. What the last window found is
-    // remembered and answered with straight away; the first tick corrects it.
-    vscode.commands.executeCommand('setContext', 'claudeStatusline.hasSession',
-        Boolean(context.globalState && context.globalState.get(HAD_SESSION)));
 
     const state = {
         workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
@@ -1860,9 +1893,11 @@ function activate(context) {
     // is opened; render() refreshes it from there on.
     state.tree = new WorkflowTree(state);
     state.sessionsTree = new LiveSessionsTree();
-    state.limitsView = new NowView(state, 'limits');
-    state.nowView = new NowView(state, 'session');
+    state.sidebar = new SidebarView(state);
     slowTick(state);
+    // Once now, so the badge is right as the window opens rather than ten seconds
+    // after it.
+    refreshWaiting(state);
 
     // The timer is what `autoRefresh` is named for — "Refresh on a timer" — so
     // it is checked here rather than only inside refreshDashboard. Off, the
@@ -1949,25 +1984,13 @@ function activate(context) {
             const tab = tabFor(t);
             if (tab) ourTabs.delete(tab);
         }),
-        // The ids carry a `Pane` suffix because VS Code remembers a container's
-        // layout — height and collapsed state — under the id of each view, and
-        // remembered state outranks anything the manifest declares. Renaming
-        // them is the only way an extension can say "start over": the four
-        // before these were `limits`, `now`, `sessions` and `workflows`, and the
-        // panel they described opened at sizes chosen weeks earlier.
-        vscode.window.registerWebviewViewProvider('claudeStatusline.limitsPane', state.limitsView),
-        vscode.window.registerWebviewViewProvider('claudeStatusline.sessionPane', state.nowView),
-        // Held rather than discarded: the badge lives on the view object, not on
-        // the provider, and it is the provider that knows the count.
-        (() => {
-            const view = vscode.window.createTreeView('claudeStatusline.livePane', {
-                treeDataProvider: state.sessionsTree,
-            });
-            state.sessionsTree.view = view;
-            state.sessionsTree.refresh();
-            return view;
-        })(),
-        vscode.window.createTreeView('claudeStatusline.runsPane', { treeDataProvider: state.tree }),
+        // One view for the whole container. The id is new on purpose: VS Code
+        // remembers a container's layout — heights, collapsed panes — under the
+        // ids of its views, and the four before this one (`limitsPane`,
+        // `sessionPane`, `livePane`, `runsPane`) would have handed their
+        // remembered sizes to a layout they no longer describe.
+        vscode.window.registerWebviewViewProvider('claudeStatusline.sidebarPane', state.sidebar,
+            { webviewOptions: { retainContextWhenHidden: false } }),
         vscode.commands.registerCommand('claudeStatusline.dashboard', () => showDashboard(context)),
         vscode.commands.registerCommand('claudeStatusline.reindex', () => showDashboard(context, { force: true })),
         vscode.commands.registerCommand('claudeStatusline.export', () => exportIndex(context)),
@@ -2255,10 +2278,6 @@ const tabName = (mode) => process.env.CLAUDE_CODE_TERMINAL_TITLE || TAB_NAMES[mo
 // `name`, `shellPath`, `shellArgs`, `cwd`, `env`, `hideFromUser` — and the icon
 // is not among them (`$acceptTerminalOpened`, VS Code 1.121).
 const TAB_MARK = 'CLAUDE_DASHBOARD_TAB';
-
-// Whether the last window this extension ran in had a Claude session of its own.
-// Read before the sidebar is built, written whenever the answer changes.
-const HAD_SESSION = 'hadSession';
 
 // Pids of the tabs this button opened, kept because the mark above is a
 // reasonable bet rather than a promise. An entry carries the moment it was made:

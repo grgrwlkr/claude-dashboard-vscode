@@ -25,6 +25,10 @@ test.after(() => fs.rmSync(EMPTY_TREE, { recursive: true, force: true }));
 
 const vscode = require('./vscode-stub.js');
 const ext = require('../extension');
+// The badge reads `claude agents --json` as the window opens. A test is not a
+// window on this machine: it gets an empty listing rather than a process that
+// reports whatever sessions the machine running the suite has open.
+require('../session').readAgents = async () => [];
 const ix = require('../indexer');
 const seg = require('../segments');
 const wf = require('../workflows');
@@ -358,35 +362,16 @@ test('the free-text arguments go to the user settings whatever scope was picked'
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
-// The two panes worth reading without scrolling are the limits and the session;
-// the two lists below them are worth having, not worth the height. So the first
-// two share the container evenly and the lists open closed — one click away, and
-// none of it binds afterwards: VS Code remembers what the user drags.
-test('the sidebar opens with limits and session even, and the lists collapsed', () => {
+// The sidebar is one view. Four had VS Code dividing the column between them —
+// content cut off at each pane's edge, a hidden pane's share left empty — and
+// the folding now happens inside the one page.
+test('the sidebar container holds exactly one view, a webview', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-    const views = Object.fromEntries(manifest.contributes.views.claudeStatusline.map((v) => [v.id, v]));
-    assert.equal(views['claudeStatusline.limitsPane'].initialSize, views['claudeStatusline.sessionPane'].initialSize);
-    assert.equal(views['claudeStatusline.livePane'].visibility, 'collapsed');
-    assert.equal(views['claudeStatusline.runsPane'].visibility, 'collapsed');
+    const views = manifest.contributes.views.claudeStatusline;
+    assert.deepEqual(views.map((v) => [v.id, v.type]), [['claudeStatusline.sidebarPane', 'webview']]);
+    assert.equal(views[0].when, undefined, 'the view is always there; a block inside it hides instead');
 });
 
-// `initialSize` is applied when a pane is *first shown*, so a pane behind a
-// `when` clause that turns true on the first tick arrives after the container
-// has been laid out and takes whatever is left rather than its share. The answer
-// from last time is therefore applied before anything is registered — a reload
-// then builds the sidebar with both panes in it, and they split it evenly.
-test('the session pane is asked for before the views are registered', () => {
-    const run = activate({ segments: ['{today}'], hadSession: true });
-    try {
-        const keys = vscode.__executed.filter((e) => e.id === 'setContext' && e.args[0] === 'claudeStatusline.hasSession');
-        assert.ok(keys.length > 0, 'the key must be set at all');
-        assert.equal(keys[0].args[1], true, 'and the first answer is what was remembered');
-    } finally { run.dispose(); }
-});
-
-// A view whose id the manifest declares and the extension never registers is an
-// empty pane with a spinner in it — and renaming ids, which is the only way to
-// make VS Code forget a remembered layout, is exactly how that happens.
 test('every view the manifest declares is registered under that id', () => {
     const run = activate({ segments: ['x'] });
     try {
@@ -411,30 +396,18 @@ test('the commands the package manifest promises are all registered', () => {
 // palette — where there is no node — can only make them apologise. The manifest
 // is the only place that decides this, which is why it is asserted here rather
 // than through activate().
-test('the run commands are wired to the tree row, not to the palette', () => {
+test('the run commands are kept out of the palette, where there is no run to act on', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
     const menus = manifest.contributes.menus;
     for (const command of ['claudeStatusline.openWorkflowScript', 'claudeStatusline.copyRunId']) {
-        assert.ok(
-            menus['view/item/context'].some((m) => m.command === command && /viewItem == run/.test(m.when)),
-            `${command} never reaches the run row`,
-        );
         assert.ok(
             menus.commandPalette.some((m) => m.command === command && m.when === 'false'),
             `${command} has no node to act on in the palette`,
         );
     }
-    // An inline item is drawn as its icon and nothing else, and the icon is
-    // declared on the command — a menu entry has no icon of its own.
-    for (const item of menus['view/item/context'].filter((m) => m.group === 'inline')) {
-        const declared = manifest.contributes.commands.find((c) => c.command === item.command);
-        assert.ok(declared && declared.icon, `${item.command} is drawn inline, so it is drawn as an icon`);
-    }
-    // The inline entry is a button on hover; right-click reaches the other list.
-    assert.ok(
-        menus['view/item/context'].some((m) => m.command === 'claudeStatusline.openWorkflowScript' && m.group !== 'inline'),
-        'opening the script must also be a plain context-menu item',
-    );
+    // Their way in is a button on a run's row in the sidebar (see the sidebar
+    // tests); the tree view whose context menu carried them is gone.
+    assert.equal(menus['view/item/context'], undefined);
 });
 
 test('deactivating disposes every item it created', () => {
@@ -759,8 +732,8 @@ test('the workflow view draws the runs the collector filled', () => {
         };
         state.data.workflows = { runs: [going], active: [going] };
 
-        const provider = vscode.__views.get('claudeStatusline.runsPane');
-        assert.ok(provider, 'the view was registered with a provider');
+        const provider = state.tree;
+        assert.ok(provider, 'the tree the sidebar lists runs from exists');
 
         const [node] = provider.getChildren();
         const item = provider.getTreeItem(node);
@@ -818,9 +791,9 @@ test('the run commands are registered and act on a tree node', async () => {
 
 // The fast tick draws six times a minute and the slow one rebuilds the whole
 // list every minute whether or not anything moved — so a new object is not a
-// change, and treating it as one rebuilt 1500 rows a minute for nothing. What
-// counts is whether a row would read differently.
-test('the tree is redrawn when the runs change, not on every collection', () => {
+// change, and treating it as one sent the sidebar 1500 rows a minute for
+// nothing. What counts is whether a row would read differently.
+test('the sidebar is sent the runs when they change, not on every collection', () => {
     const run = activate({ segments: ['{wfRuns}'] });
     try {
         const state = run.context.claudeState;
@@ -829,27 +802,27 @@ test('the tree is redrawn when the runs change, not on every collection', () => 
             lastActivity: 7, phases: [], agents: [], totals: { agents: 2, done: 1 },
         });
         state.data.workflows = { runs: [one()], active: [one()] };
+        const view = fakeWebviewView();
+        vscode.__views.get('claudeStatusline.sidebarPane').resolveWebviewView(view);
         ext.__render(state);
-
-        const provider = vscode.__views.get('claudeStatusline.runsPane');
-        let fired = 0;
-        provider.onDidChangeTreeData(() => { fired += 1; });
+        const draws = () => view.posted.filter((m) => m.type === 'draw').length;
+        const before = draws();
 
         ext.__render(state);
-        assert.equal(fired, 0, 'the same object draws no tree');
+        assert.equal(draws(), before, 'the same object sends nothing');
 
         // What the slow tick hands over every minute: the same reading, in an
         // object nobody has seen before.
         state.data.workflows = { runs: [one()], active: [one()] };
         ext.__render(state);
-        assert.equal(fired, 0, 'and neither does the same reading rebuilt from scratch');
+        assert.equal(draws(), before, 'and neither does the same reading rebuilt from scratch');
 
         state.data.workflows = {
             runs: [{ ...one(), totals: { agents: 2, done: 2 } }],
             active: [],
         };
         ext.__render(state);
-        assert.equal(fired, 1, 'a row that would read differently does');
+        assert.equal(draws(), before + 1, 'a row that would read differently does');
     } finally { run.dispose(); }
 });
 
@@ -871,9 +844,9 @@ test('one unreadable run does not freeze the bar or the tree', () => {
         };
         state.data.workflows = { runs: [broken], active: [broken] };
 
-        const provider = vscode.__views.get('claudeStatusline.runsPane');
-        let fired = 0;
-        provider.onDidChangeTreeData(() => { fired += 1; });
+        const view = fakeWebviewView();
+        vscode.__views.get('claudeStatusline.sidebarPane').resolveWebviewView(view);
+        const lists = () => view.posted.filter((m) => m.type === 'draw').map((m) => m.blocks.runs);
 
         ext.__render(state);
 
@@ -890,7 +863,7 @@ test('one unreadable run does not freeze the bar or the tree', () => {
         };
         state.data.workflows = { runs: [good], active: [good] };
         ext.__render(state);
-        assert.equal(fired, 1, 'the tree comes back on the first reading it can draw');
+        assert.ok(lists().some((html) => html.includes('ok')), 'the list comes back on the first reading it can draw');
     } finally { run.dispose(); }
 });
 
@@ -2009,43 +1982,111 @@ test('a shell with no session under it is not renamed to nothing', async () => {
     } finally { run.dispose(); }
 });
 
-// An empty pane still claims its share of the sidebar's height, and that share
-// comes out of the limits above it — so the session pane is hidden rather than
-// emptied when no Claude session is open in this window. The context key is what
-// the manifest's `when` reads.
-test('the session pane is switched off when this window has no session', () => {
+// The sidebar view: drawn once, then filled by message. The session block
+// hides itself when this window has no session — what the context key and the
+// manifest's `when` used to do for a separate pane.
+function fakeWebviewView() {
+    const posted = [];
+    let receive = () => {};
+    return {
+        posted,
+        send: (msg) => receive(msg),
+        visible: true,
+        badge: undefined,
+        webview: {
+            options: {},
+            html: '',
+            postMessage: (m) => { posted.push(m); return Promise.resolve(true); },
+            onDidReceiveMessage: (fn) => { receive = fn; return { dispose() {} }; },
+        },
+        onDidChangeVisibility: () => ({ dispose() {} }),
+    };
+}
+
+test('the sidebar view is one page filled by message, with the session block hidden when there is none', () => {
     const run = activate({ segments: ['{today}'] });
     try {
-        const keys = () => vscode.__executed
-            .filter((e) => e.id === 'setContext' && e.args[0] === 'claudeStatusline.hasSession')
-            .map((e) => e.args[1]);
-        // A state with no session of its own: the collectors found no transcript
-        // for this window, so `statusNow` has neither a context nor a money row.
-        assert.deepEqual(keys().slice(-1), [false]);
-    } finally {
-        run.dispose();
-    }
+        const provider = vscode.__views.get('claudeStatusline.sidebarPane');
+        assert.ok(provider, 'the sidebar view has a provider');
+        const view = fakeWebviewView();
+        provider.resolveWebviewView(view);
+        assert.equal(view.webview.options.enableScripts, true);
+        assert.match(view.webview.html, /data-block="limits"/);
+
+        view.posted.length = 0;
+        view.send({ type: 'ready' });
+        const draw = view.posted.find((m) => m.type === 'draw');
+        assert.ok(draw, 'the page asked and nothing was sent');
+        assert.deepEqual(Object.keys(draw.blocks), ['limits', 'session', 'live', 'runs']);
+        // No session was found for this window, so the block is withheld.
+        assert.equal(draw.blocks.session, null);
+        assert.equal(typeof draw.blocks.limits, 'string');
+
+        // A redraw with nothing new sends nothing: the page would only replace
+        // markup with the same markup and close what the reader had opened.
+        view.posted.length = 0;
+        provider.refresh();
+        assert.equal(view.posted.length, 0);
+    } finally { run.dispose(); }
+});
+
+// A run's two actions, which lived in the tree's context menu, arrive as a
+// message naming the run. Only a run the extension itself put on the page is
+// acted on: the message carries an id from a webview, and the command it turns
+// into opens a file.
+test('the run actions in the sidebar act on a run it drew, and on nothing else', async () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const state = run.context.claudeState;
+        const shown = { runId: 'wf_shown', slug: '-p', sessionId: 's', name: 'shown', state: 'completed',
+            status: 'completed', lastActivity: 2, phases: [], totals: { agents: 0, done: 0 }, agents: [], scriptPath: '/tmp/x.js' };
+        state.data.workflows = { runs: [shown], active: [] };
+        const provider = vscode.__views.get('claudeStatusline.sidebarPane');
+        const view = fakeWebviewView();
+        provider.resolveWebviewView(view);
+        const ran = () => vscode.__executed.filter((e) => e.id === 'claudeStatusline.copyRunId' || e.id === 'claudeStatusline.openWorkflowScript');
+
+        view.send({ type: 'run', act: 'copy', runId: 'wf_forged' });
+        assert.deepEqual(ran(), []);
+
+        view.send({ type: 'run', act: 'copy', runId: 'wf_shown' });
+        view.send({ type: 'run', act: 'open', runId: 'wf_shown' });
+        assert.deepEqual(ran().map((e) => [e.id, e.args[0].kind, e.args[0].run.runId]), [
+            ['claudeStatusline.copyRunId', 'run', 'wf_shown'],
+            ['claudeStatusline.openWorkflowScript', 'run', 'wf_shown'],
+        ]);
+    } finally { run.dispose(); }
 });
 
 // The badge is the only number this extension puts where it can be read without
-// opening anything, so what it counts matters: sessions that are actually alive,
-// and nothing at all when there are none — a badge reading nought is a dot that
-// never leaves.
-test('the badge counts live sessions and disappears when there are none', () => {
-    const sessions = [
-        { id: 'a', pid: 1, alive: true, status: 'running', cwd: 'repo-one', entrypoint: 'cli' },
-        { id: 'b', pid: 2, alive: false, status: '', cwd: 'repo-two', entrypoint: 'cli' },
-    ];
-    const tree = new ext.__LiveSessionsTree(() => sessions);
-    tree.view = {};
+// opening anything, so it counts what is worth being interrupted by: the
+// sessions waiting on you. Nothing waiting, no badge — a badge reading nought is
+// a dot that never leaves — and no reading at all is no badge either, rather
+// than a zero that claims nobody is waiting.
+test('the badge counts the sessions waiting on you, and disappears when there are none', () => {
+    const run = activate({ segments: ['{today}'] });
+    try {
+        const state = run.context.claudeState;
+        const view = fakeWebviewView();
+        vscode.__views.get('claudeStatusline.sidebarPane').resolveWebviewView(view);
 
-    tree.refresh();
-    assert.equal(tree.view.badge.value, 1);
-    assert.match(tree.view.badge.tooltip, /1 live Claude session$/);
+        state.waiting = 2;
+        state.sidebar.refresh();
+        assert.equal(view.badge.value, 2);
+        assert.match(view.badge.tooltip, /^2 sessions waiting on you$/);
 
-    sessions[0].alive = false;
-    tree.refresh();
-    assert.equal(tree.view.badge, undefined);
+        state.waiting = 1;
+        state.sidebar.refresh();
+        assert.match(view.badge.tooltip, /^1 session waiting on you$/);
+
+        state.waiting = 0;
+        state.sidebar.refresh();
+        assert.equal(view.badge, undefined);
+
+        state.waiting = null;
+        state.sidebar.refresh();
+        assert.equal(view.badge, undefined);
+    } finally { run.dispose(); }
 });
 
 test('a live session is a row named by its project, with its client beside it', () => {
@@ -2083,12 +2124,14 @@ async function withOwnership({ own, byShell = {} }, run) {
     const real = {
         findOwnSession: s.findOwnSession,
         sessionForShell: s.sessionForShell,
-        transcriptPath: s.transcriptPath,
+        transcriptOf: s.transcriptOf,
     };
     const seen = [];
     s.findOwnSession = () => own;
     s.sessionForShell = (pid) => byShell[pid] || null;
-    s.transcriptPath = (w, id) => { seen.push(id); return `/nowhere/${id}.jsonl`; };
+    // The one call every read of a session's transcript goes through — keyed by
+    // the session, since a session attached in a tab can belong to any folder.
+    s.transcriptOf = (session) => { seen.push(session.sessionId); return `/nowhere/${session.sessionId}.jsonl`; };
     // Awaited, not returned: a `finally` around a returned promise restores the
     // real functions before the first await inside has even run.
     try { return await run(seen); } finally { Object.assign(s, real); }
@@ -2169,6 +2212,34 @@ test('a terminal with no session in it leaves the bar as it was', async () => {
                 `the fallback stopped working: ${JSON.stringify(seen)}`);
         });
     } finally { run.dispose(); }
+});
+
+// A tab running the agent view is the one tab where the fallback lies: the
+// view holds every session and shows one of them, and nothing says which. So
+// the bar goes quiet there instead of describing the folder's newest session
+// as if it were the one on screen — and comes back on the next tab that names one.
+test('the agent view in the active tab hides the session instead of guessing one', async () => {
+    const run = activate({ segments: ['{ctx}'], workspace: '/w' });
+    const real = s.agentViewIn;
+    s.agentViewIn = (pid) => pid === 5151;
+    try {
+        await withOwnership({ own: PANEL, byShell: { 4242: TAB_A } }, async (seen) => {
+            const agents = await openActiveTab(5151);
+            vscode.__activateTerminal(agents);
+            await new Promise((r) => setImmediate(r));
+            seen.length = 0;
+            await vscode.__commands.get('claudeStatusline.refresh')();
+            assert.deepEqual(seen, [], `the agent view tab still read a session: ${JSON.stringify(seen)}`);
+            assert.equal(run.context.claudeState.session, null);
+
+            const tab = await openActiveTab(4242);
+            vscode.__activateTerminal(tab);
+            await new Promise((r) => setImmediate(r));
+            seen.length = 0;
+            await vscode.__commands.get('claudeStatusline.refresh')();
+            assert.ok(seen.includes('tab-a-session'), 'a tab that names its session brings the bar back');
+        });
+    } finally { s.agentViewIn = real; run.dispose(); }
 });
 
 // A window that opens with a terminal already active — a reload restores both

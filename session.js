@@ -91,19 +91,42 @@ function parentsOf(pids) {
  * Fallbacks, for when ps is unavailable or the panel has not been opened yet:
  * a VS Code session with the same cwd, then the most recent live session there.
  */
-function findOwnSession(workspace, myPid = process.pid) {
-    const live = listSessions().filter((s) => alive(s.pid));
+function findOwnSession(workspace, myPid = process.pid, { dir = SESSIONS, table } = {}) {
+    const live = listSessions(dir).filter((s) => alive(s.pid));
     if (live.length === 0) return null;
 
-    const parents = parentsOf(live.map((s) => s.pid));
+    const parents = table
+        ? new Map(table.map((p) => [p.pid, p.ppid]))
+        : parentsOf(live.map((s) => s.pid));
     const mine = live.filter((s) => parents.get(s.pid) === myPid);
     if (mine.length > 0) return newest(mine);
 
     if (!workspace) return null;
     const here = live.filter((s) => s.cwd === workspace);
     const vscode = here.filter((s) => s.entrypoint === 'claude-vscode');
-    if (vscode.length > 0) return newest(vscode);
-    return here.length > 0 ? newest(here) : null;
+    if (vscode.length > 0) return newestWorking(vscode);
+    if (here.length > 0) return newestWorking(here);
+    // Below the folder, when nothing is in it: a worktree under
+    // `.claude/worktrees/` or a subdirectory is this repository's work, and with
+    // sessions running in the background it is often the only one there is.
+    const under = `${String(workspace).replace(/\/$/, '')}/`;
+    const below = live.filter((s) => String(s.cwd || '').startsWith(under));
+    return below.length > 0 ? newestWorking(below) : null;
+}
+
+// The newest of the sessions that have answered at least once, or the newest of
+// all when none has. A guess by folder is only a guess, and a background session
+// nobody has prompted yet is often the newest thing in one: taken on age alone,
+// the window described an empty session beside one holding 209k of context
+// (COG, 2026-09-16). One tail read per candidate, and there are rarely more
+// than three.
+function newestWorking(sessions, answered = hasAnswered) {
+    const working = sessions.filter((x) => answered(x));
+    return newest(working.length > 0 ? working : sessions);
+}
+
+function hasAnswered(session) {
+    return Boolean(session.cwd && session.sessionId && readTail(transcriptPath(session.cwd, session.sessionId)));
 }
 
 // Several panels in one window: take the one with the latest activity.
@@ -127,6 +150,13 @@ function stamp(s) {
 
 function transcriptPath(workspace, sessionId) {
     return path.join(PROJECTS, slugFor(workspace), `${sessionId}.jsonl`);
+}
+
+// Where a session's own transcript is. Its folder, not the window's: a session
+// found through the tab it is attached in may belong to any folder on the
+// machine, and the client files the transcript under the one it runs in.
+function transcriptOf(session, workspace) {
+    return transcriptPath(session.cwd || workspace, session.sessionId);
 }
 
 // The last record carrying usage. Subagent records are skipped: they have their
@@ -234,13 +264,101 @@ function scanTitle(file, size, length) {
  * a window has exactly one panel session; a window can hold any number of
  * terminals, and a guess there would label one tab with another tab's session.
  */
-function sessionForShell(shellPid) {
+function sessionForShell(shellPid, { dir = SESSIONS, table } = {}) {
     if (!shellPid) return null;
-    const live = listSessions().filter((s) => alive(s.pid));
+    const live = listSessions(dir).filter((s) => alive(s.pid));
     if (live.length === 0) return null;
-    const parents = parentsOf(live.map((s) => s.pid));
+    const parents = table
+        ? new Map(table.map((p) => [p.pid, p.ppid]))
+        : parentsOf(live.map((s) => s.pid));
     const mine = live.filter((s) => parents.get(s.pid) === shellPid);
-    return mine.length > 0 ? newest(mine) : null;
+    if (mine.length > 0) return newest(mine);
+
+    // A background session is never the shell's child: the daemon owns it, and
+    // what runs in the tab is `claude attach <id>`. That client is the only
+    // thing tying the tab to the session, and its argument is the id. Measured
+    // 2026-09-16 on 2.1.273: every live session had `claude bg-pty-host` for a
+    // parent, so the parent test above found nothing in any tab.
+    //
+    // `claude agents` is deliberately not matched: the agent view holds many
+    // sessions and does not say which one is on screen.
+    const id = attachedIdUnder(shellPid, table);
+    return id ? live.find((s) => String(s.sessionId).startsWith(id)) || null : null;
+}
+
+// The id a `claude attach` running directly under a shell was given. The binary
+// may be called by name or by path; the id is what `claude --bg` prints, eight
+// hex digits, or the full one.
+const ATTACH = /(?:^|\/)claude\s+attach\s+([0-9a-f]{8}(?:-[0-9a-f-]{4,28})?)(?:\s|$)/;
+
+// How many sessions are waiting on the reader, from `claude agents --json` — the
+// supported way to read session state from outside the client. `state: blocked`
+// is a background session that needs something only the reader can give (a
+// question, a permission, an error to clear, or its first prompt); `status:
+// waiting` is a live process holding an open prompt. A session that finished
+// its turn reads `done` and is not counted. No reading returns null, not zero:
+// zero would claim nobody is waiting.
+function waitingCount(entries) {
+    if (!Array.isArray(entries)) return null;
+    const waiting = new Set();
+    for (const e of entries) {
+        if (!e) continue;
+        if (e.state === 'blocked' || e.status === 'waiting') waiting.add(e.sessionId || e.id);
+    }
+    return waiting.size;
+}
+
+// The listing itself, off the extension host's thread: a tenth of a second
+// here, but a process spawn all the same, and the client may not be on the
+// PATH VS Code was started with — then the native installer's own location is
+// tried, and failing both there is no reading.
+function readAgents() {
+    const { execFile } = require('child_process');
+    const run = (bin) => new Promise((resolve) => {
+        execFile(bin, ['agents', '--json'], { encoding: 'utf8', timeout: 5000 }, (err, out) => {
+            if (err) return resolve(null);
+            try { resolve(JSON.parse(out)); } catch { resolve(null); }
+        });
+    });
+    return run('claude').then((list) => list || run(path.join(HOME, '.local', 'bin', 'claude')));
+}
+
+// The agent view, running directly under a shell. `--json` is the listing that
+// prints and exits, not a view anyone is looking at.
+const AGENT_VIEW = /(?:^|\/)claude\s+agents(?:\s|$)/;
+
+function agentViewIn(shellPid, { table } = {}) {
+    if (!shellPid) return false;
+    for (const p of table || processTable()) {
+        if (p.ppid === shellPid && AGENT_VIEW.test(p.command) && !/\s--json(?:\s|$)/.test(p.command)) return true;
+    }
+    return false;
+}
+
+function attachedIdUnder(shellPid, table = processTable()) {
+    for (const p of table) {
+        if (p.ppid !== shellPid) continue;
+        const m = p.command.match(ATTACH);
+        if (m) return m[1];
+    }
+    return null;
+}
+
+// The whole process table in one call, which is what finding a child by what it
+// runs needs: `parentsOf` above can ask about named pids, and the attach client's
+// pid is exactly the one nobody knows in advance.
+function processTable() {
+    if (process.platform === 'win32') return [];
+    let out;
+    try {
+        out = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8', timeout: 3000 });
+    } catch { return []; }
+    const rows = [];
+    for (const line of out.split('\n')) {
+        const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+        if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] });
+    }
+    return rows;
 }
 
 // Model context window. A [1m] suffix forces a million; Haiku and anything
@@ -994,7 +1112,7 @@ function pinClientSettings(file, values) {
 
 module.exports = {
     SESSIONS, PROJECTS, TAIL,
-    slugFor, listSessions, findOwnSession, sessionForShell, titleOf, titleIn,
+    slugFor, listSessions, findOwnSession, newestWorking, sessionForShell, agentViewIn, waitingCount, readAgents, transcriptOf, titleOf, titleIn,
     transcriptPath, readTail, contextOf,
     windowFor, sessionStats, contextParts, costToday, costSince, peersOf, todoOf,
     scanTranscript, forgetTranscript, readLines, costScan,

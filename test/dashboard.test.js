@@ -930,6 +930,59 @@ test('the sidebar page states a policy that forbids script outright', () => {
     assert.doesNotMatch(html, /<script/);
 });
 
+// The sidebar is one view with its blocks folding inside it, the way Claude
+// Code's own panel is built. Four views had VS Code dividing the height between
+// them: content was cut off at every pane's edge, and a hidden pane left its
+// share of the column empty.
+test('the sidebar is one page of four blocks that fold', () => {
+    const html = db.sidebarShell('n0nce');
+    const blocks = [...html.matchAll(/<details class="side-block" data-block="([a-z]+)"( open)?>/g)];
+    assert.deepEqual(blocks.map((m) => m[1]), ['limits', 'session', 'live', 'runs']);
+    // What was open when these were four panes: the two readouts open, the two
+    // lists closed. A reader's own choice is kept by the page from there on.
+    assert.deepEqual(blocks.map((m) => Boolean(m[2])), [true, true, false, false]);
+    for (const title of ['Limits', 'Session', 'Live Sessions', 'Workflow Runs']) {
+        assert.ok(html.includes(`<span class="side-block-title">${title}</span>`), `${title} has no header`);
+    }
+    // The page is drawn once and filled by message, so it runs a script — under
+    // a nonce, and it asks for the webview API exactly once.
+    assert.match(html, /script-src 'nonce-n0nce'/);
+    assert.match(html, /<script nonce="n0nce">/);
+    assert.equal((html.match(/acquireVsCodeApi\(\)/g) || []).length, 1);
+    assert.match(html, /setState/, 'what is folded survives the view being hidden');
+    // Only a fold the reader made is stored: the browser raises `toggle` for
+    // details opened by markup as well, and storing those kept a finished run
+    // open for good. Driven in a stand on 2026-09-16; the stored state held the
+    // two blocks clicked and nothing else.
+    assert.match(html, /dataset\.touched/);
+});
+
+// The two lists keep what their trees drew — the label, the grey description,
+// the icon, the hover — and a run keeps the two things its context menu offered.
+test('a sidebar list draws the rows its tree would, and a run carries its actions', () => {
+    const html = db.sidebarList([
+        {
+            id: 'run:wf_1', kind: 'run', runId: 'wf_1', label: 'shown', description: '0/1',
+            icon: 'sync~spin', tooltip: '', expanded: true,
+            children: [{ id: 'run:wf_1/a1', kind: 'agent', label: '# делай <это>', description: 'opus 5',
+                icon: 'check', tooltip: 'prompt <b>', expanded: false, children: [] }],
+        },
+        { id: 'done', kind: 'run', runId: 'wf_2', label: 'old', description: '3 agents', icon: 'error',
+            tooltip: '', expanded: false, children: [{ id: 'x', kind: 'agent', label: 'a', description: '', icon: '', tooltip: '', expanded: false, children: [] }] },
+    ]);
+    assert.match(html, /<details class="side-node" data-node="run:wf_1" open>/, 'a run in flight opens itself');
+    assert.match(html, /<details class="side-node" data-node="done">/, 'a finished one stays folded');
+    assert.ok(html.includes('# делай &lt;это&gt;'), 'a label is text, not markup');
+    assert.ok(html.includes('title="prompt &lt;b&gt;"'), 'the hover is kept, escaped');
+    assert.match(html, /data-run-act="open" data-run="wf_1"/);
+    assert.match(html, /data-run-act="copy" data-run="wf_1"/);
+    assert.doesNotMatch(html, /data-run-act="[a-z]+" data-run="undefined"/);
+    // A row with no children is a row, not a fold.
+    assert.doesNotMatch(html, /data-node="run:wf_1\/a1"/);
+    assert.match(html, /class="side-row"[^>]*title="prompt &lt;b&gt;"/);
+    assert.equal(db.sidebarList([]), '<p class="empty">Nothing here.</p>');
+});
+
 test('a count of replies is spelled the English way', () => {
     const total = ix.summarize(demoIndex());
     total.agents = { 'general-purpose': bucket(5, 2843) };
