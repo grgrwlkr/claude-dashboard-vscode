@@ -848,9 +848,6 @@ function fastTick(state) {
     collectWorkflowsFast(state);
     collectFast(state);
     render(state);
-    // A session is named a little after it starts and renamed at any point, so
-    // the tab follows on the same ten seconds as the rest of the cheap reads.
-    renameActiveTab(state);
     refreshWaiting(state);
 }
 
@@ -1347,7 +1344,7 @@ async function handleMessage(context, msg) {
         // Empty when the id is not one — see attachCommand. Nothing is opened
         // for a registry entry carrying something else.
         const command = dashboard.attachCommand(wanted);
-        if (command) openTerminal(context, command, 'Claude attached');
+        if (command) openTerminal(context, command, fixedTabName());
         return;
     }
 
@@ -1968,22 +1965,8 @@ function activate(context) {
             if (timerOn()) slowTick(state);
             else { collectFast(state); render(state); }
         }),
-        // Switching to a tab is the moment its name matters, and the moment the
-        // rename command can reach it at all.
-        vscode.window.onDidChangeActiveTerminal(() => {
-            watchActiveTerminal(state, true);
-            renameActiveTab(state);
-        }),
-        // A tab restored after a reload opens as far as this process is
-        // concerned, so this is where it is recognised. The sweep below covers
-        // the other order, where the tabs were back before the extension was.
-        vscode.window.onDidOpenTerminal((t) => adopt(t, context)),
-        // Closing one is the only way a tab leaves the set, whoever put it
-        // there: the button's own tabs and the ones taken over after a reload.
-        vscode.window.onDidCloseTerminal((t) => {
-            const tab = tabFor(t);
-            if (tab) ourTabs.delete(tab);
-        }),
+        // Switching tabs switches which session the bar describes.
+        vscode.window.onDidChangeActiveTerminal(() => watchActiveTerminal(state, true)),
         // One view for the whole container. The id is new on purpose: VS Code
         // remembers a container's layout — heights, collapsed panes — under the
         // ids of its views, and the four before this one (`limitsPane`,
@@ -2034,10 +2017,6 @@ function activate(context) {
         }),
     );
 
-    // Tabs that came back before this process did: on a reload VS Code may
-    // reconnect its terminals either side of the extension starting, and only
-    // the ones that land afterwards arrive as an event.
-    for (const terminal of vscode.window.terminals || []) adopt(terminal, context);
     // The same gap for the active one: a reload restores both the terminals and
     // which of them was last used, and no change event is fired for that — so
     // without this the bar sits on the workspace guess until a tab is clicked.
@@ -2184,7 +2163,7 @@ async function openClaudeWith(context) {
 }
 
 async function openClaude(context, launch = launchSettings()) {
-    return openTerminal(context, dashboard.claudeCommand(launch), tabName(launch.mode));
+    return openTerminal(context, dashboard.claudeCommand(launch), fixedTabName());
 }
 
 /**
@@ -2196,7 +2175,10 @@ async function openClaude(context, launch = launchSettings()) {
 async function openTerminal(context, command, name) {
     const where = PLACES[vscode.workspace.getConfiguration('claudeStatusline').get('openLocation')] || PLACES.activeGroup;
     const terminal = vscode.window.createTerminal({
-        name,
+        // No name unless one is asked for: a name given here is a static title,
+        // and VS Code then ignores the title Claude Code writes on the terminal
+        // for the life of the tab — see `fixedTabName`.
+        ...(name ? { name } : {}),
         iconPath: claudeIcon(context),
         location: where.location,
         // Where the session lands on disk, said out loud rather than left to the
@@ -2214,10 +2196,6 @@ async function openTerminal(context, command, name) {
         // agree on the answer. No folder open, no answer: VS Code's own
         // fallback — the home directory — is right for a session with no project.
         cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-        // Not for the shell, which never reads it — for the next window. This is
-        // what says "this tab is ours" after a reload has thrown away everything
-        // else about how it was made.
-        env: { [TAB_MARK]: '1' },
     });
     terminal.show();
 
@@ -2240,7 +2218,6 @@ async function openTerminal(context, command, name) {
             terminal.dispose();
         }
     });
-    track(terminal, context);
 
     const closed = vscode.window.onDidCloseTerminal((t) => {
         if (t !== terminal) return;
@@ -2260,122 +2237,25 @@ async function openTerminal(context, command, name) {
     return terminal;
 }
 
-// Only the tabs this extension opened. Somebody else's terminal keeps whatever
-// name they gave it — this renames what it started, and nothing else.
-const ourTabs = new Set();
-
-const tabFor = (terminal) => [...ourTabs].find((t) => t.terminal === terminal);
-
-// The name a tab is opened under, before a session renames it. The same env var
-// Claude Code reads for its own terminal, so a machine that renames one renames
-// both.
-const TAB_NAMES = { agents: 'Claude agents', background: 'Claude background' };
-const tabName = (mode) => process.env.CLAUDE_CODE_TERMINAL_TITLE || TAB_NAMES[mode] || 'Claude Code';
-
-// A mark put into the environment of every tab this button opens, and the one
-// thing about such a tab that a reload is known to carry: the extension host
-// rebuilds `creationOptions` for a terminal it did not create from six fields —
-// `name`, `shellPath`, `shellArgs`, `cwd`, `env`, `hideFromUser` — and the icon
-// is not among them (`$acceptTerminalOpened`, VS Code 1.121).
-const TAB_MARK = 'CLAUDE_DASHBOARD_TAB';
-
-// Pids of the tabs this button opened, kept because the mark above is a
-// reasonable bet rather than a promise. An entry carries the moment it was made:
-// the operating system reuses pids, and a day is long past the life of a window.
-const TABS_KEY = 'openTabs';
-const TAB_MEMORY = 24 * 60 * 60 * 1000;
-
-function rememberTab(context, pid) {
-    if (!pid || !context.globalState) return;
-    const now = Date.now();
-    const kept = (context.globalState.get(TABS_KEY) || [])
-        .filter((t) => t && t.pid !== pid && now - t.at < TAB_MEMORY);
-    context.globalState.update(TABS_KEY, [...kept, { pid, at: now }]);
-}
-
-const wasOurs = (context, pid) => Boolean(pid && context.globalState
-    && (context.globalState.get(TABS_KEY) || []).some((t) => t && t.pid === pid));
-
 /**
- * Is this a tab this extension opened, judged from the outside?
+ * The name a tab is given, or none.
  *
- * A reload restarts this process while the shells keep running, so the tabs come
- * back with nothing tying them to `ourTabs`, and almost nothing of how they were
- * made: the icon does not survive the trip, and the name is whatever the tab was
- * last renamed to, which after one session is no longer the name it was opened
- * under. Two witnesses are left, and either will do — the mark in the
- * environment, and this extension's own note of the pid.
+ * None by default, and that is the mechanism: Claude Code writes the session's
+ * name as the terminal's title — following `/rename`, the generated name, and
+ * the session opened in the agent view — and VS Code shows it on the tab,
+ * active or not, through `terminal.integrated.tabs.allowAgentCliTitle`. A name
+ * set through the API is a static title, and VS Code's label returns a static
+ * title before it looks at anything else (`computeLabel`, 1.137), so naming the
+ * tab here would freeze it. This used to rename the tab on a tick instead, and
+ * the one command for that reaches only the active terminal.
  *
- * Judging by the name was tried and is worse than useless: Claude Code's own
- * button opens terminals under exactly the same one, so this would rename and
- * close somebody else's tab.
+ * With `renameTabs` off the tab keeps one fixed name, which is exactly what a
+ * static title does. The same env var Claude Code reads for its own terminal
+ * decides that name, so a machine that renames one renames both.
  */
-const looksLikeOurs = (terminal) => Boolean((terminal.creationOptions || {}).env
-    && terminal.creationOptions.env[TAB_MARK]);
-
-/**
- * Tabs VS Code brought back on its own, taken back under this extension's wing.
- *
- * Without this a restored tab keeps running its session and nothing else works:
- * it is not renamed as the session renames itself, and it does not close when
- * the session ends. Whether the session is still alive is not asked here — a
- * tab revived empty after a quit is still this extension's tab, and the moment
- * somebody runs `claude` in it the rename has something to say again.
- *
- * The pid arrives through a promise, so the second witness can only be asked for
- * once it lands; the first is there straight away.
- */
-function adopt(terminal, context) {
-    if (tabFor(terminal)) return;
-    if (looksLikeOurs(terminal)) { track(terminal, context); return; }
-    terminal.processId.then((pid) => {
-        if (wasOurs(context, pid) && !tabFor(terminal)) track(terminal, context);
-    }, () => { /* the shell never started */ });
-}
-
-// The pid is what ties a tab to a session: `claude` runs as a direct child of
-// its shell. It is asked for once and kept, because the promise resolves after
-// the process is up and the rename runs on a tick. Taking the same terminal
-// twice is a no-op, which is what lets the button and the sweep both call it.
-function track(terminal, context) {
-    const already = tabFor(terminal);
-    if (already) return already;
-    const tab = { terminal, pid: 0, named: '' };
-    ourTabs.add(tab);
-    terminal.processId.then((pid) => {
-        tab.pid = pid || 0;
-        if (context) rememberTab(context, tab.pid);
-    }, () => { /* never started */ });
-    return tab;
-}
-
-/**
- * The active tab, renamed to the title of the session running in it.
- *
- * Only the active one, because that is all VS Code offers: the rename command
- * takes no terminal, it acts on whichever is active — so a background tab could
- * only be renamed by first making it active, which moves the tab the user is
- * looking at. Instead it is renamed the moment it becomes active, and a tab
- * opened by the button is active from the start.
- *
- * The title is written into the transcript over and over as a session goes on,
- * so this keeps up with `/rename` and with the generated one changing.
- */
-async function renameActiveTab(state) {
-    if (vscode.workspace.getConfiguration('claudeStatusline').get('renameTabs') === false) return;
-    const active = vscode.window.activeTerminal;
-    const tab = active && tabFor(active);
-    if (!tab || !tab.pid) return;
-
-    const session = s.sessionForShell(tab.pid);
-    if (!session) return;
-    const title = s.titleOf(session.cwd || state.workspace, session.sessionId);
-    if (!title || title === tab.named) return;
-
-    try {
-        await vscode.commands.executeCommand('workbench.action.terminal.renameWithArg', { name: title });
-        tab.named = title;
-    } catch { /* the command is gone; the tab keeps the name it has */ }
+function fixedTabName() {
+    if (vscode.workspace.getConfiguration('claudeStatusline').get('renameTabs') !== false) return undefined;
+    return process.env.CLAUDE_CODE_TERMINAL_TITLE || 'Claude Code';
 }
 
 function deactivate() {}

@@ -2641,9 +2641,9 @@ test('the launch mode puts agents after the command and drops what the agent vie
         fallbackModel: 'sonnet,haiku', outputStyle: 'Proactive', args: '--add-dir ../x',
     };
     assert.equal(db.claudeCommand({ mode: 'agents', ...all }),
-        "claude agents --model 'fable[1m]' --effort 'high' --permission-mode 'bypassPermissions' --settings '{\"outputStyle\":\"Proactive\"}' --add-dir ../x");
+        `${db.TITLE_PRIMER}claude agents --model 'fable[1m]' --effort 'high' --permission-mode 'bypassPermissions' --settings '{"outputStyle":"Proactive"}' --add-dir ../x`);
     assert.equal(db.claudeCommand({ mode: 'session', ...all }), db.claudeCommand(all), 'session is the line the builder always made');
-    assert.match(db.aliasLine('cx', { mode: 'agents', model: 'opus' }), /^alias cx='claude agents --model /);
+    assert.match(db.aliasLine('cx', { mode: 'agents', model: 'opus' }), /^alias cx='printf .*; claude agents --model /);
     const { values } = db.clientSettingsFor({ mode: 'agents', ...all });
     assert.deepEqual(Object.keys(values).sort(), ['effortLevel', 'model', 'outputStyle', 'permissions.defaultMode']);
 });
@@ -2659,7 +2659,8 @@ test('the background mode starts a detached session and attaches to it', () => {
     const line = db.claudeCommand({ mode: 'background', ...all });
 
     // The inner command is the session line with --bg after `claude`, flags and all.
-    assert.match(line, /^claude attach "\$\(claude --bg --model 'fable\[1m\]' --effort 'high' --advisor 'opus' /);
+    assert.ok(line.startsWith(db.TITLE_PRIMER), 'the tab is marked as Claude before anything runs');
+    assert.match(line.slice(db.TITLE_PRIMER.length), /^claude attach "\$\(claude --bg --model 'fable\[1m\]' --effort 'high' --advisor 'opus' /);
     assert.match(line, /--fallback-model 'sonnet,haiku'/, 'the root command takes what the agent view refuses');
     assert.match(line, /--add-dir \.\.\/x \|/, "the user's own arguments stay with the session, not the parse");
     assert.ok(line.endsWith("')\""), `the attach closes the substitution: ${line.slice(-20)}`);
@@ -2675,7 +2676,7 @@ test('the background mode starts a detached session and attaches to it', () => {
     // The alias survives the second level of quoting: the command is full of
     // single quotes and so is the awk program inside it.
     const alias = db.aliasLine('cx', { mode: 'background', model: 'opus' });
-    assert.match(alias, /^alias cx='claude attach /);
+    assert.match(alias, /^alias cx='printf .*; claude attach /);
     assert.ok(alias.endsWith("'"), 'the alias closes its own quote');
     assert.ok(alias.includes("'\\''"), 'inner quotes are escaped for the alias');
 });
@@ -2685,10 +2686,25 @@ test('the background mode starts a detached session and attaches to it', () => {
 // to a shell, and anything that is not a session id is refused before it.
 test('an attach command quotes the id, and refuses one that is not an id', () => {
     assert.equal(db.attachCommand('aaaaaaaa-1111-2222-3333-444444444444'),
-        "claude attach 'aaaaaaaa-1111-2222-3333-444444444444'");
+        `${db.TITLE_PRIMER}claude attach 'aaaaaaaa-1111-2222-3333-444444444444'`);
     assert.equal(db.attachCommand("x'; rm -rf ~; #"), '');
     assert.equal(db.attachCommand('$(whoami)'), '');
     assert.equal(db.attachCommand(''), '');
+});
+
+// VS Code shows the title Claude Code writes on a terminal only once it has
+// seen one that says "Claude Code" (`agentCliTitlePatterns`, /claude\s*code/i).
+// A plain session writes exactly that as it starts; `claude attach` writes the
+// session's name straight away and the agent view writes "claude agents", so
+// neither is ever recognised (measured on 2.1.273). Those two lines say it first.
+test('the lines that open a session VS Code would not recognise mark the tab as Claude first', () => {
+    assert.equal(db.TITLE_PRIMER, "printf '\\033]0;Claude Code\\007'; ");
+    assert.ok(!db.claudeCommand({ mode: 'session', model: 'opus' }).startsWith('printf'), 'a plain session says it itself');
+    for (const mode of ['agents', 'background']) {
+        assert.ok(db.claudeCommand({ mode, model: 'opus' }).startsWith(db.TITLE_PRIMER), `${mode} is not marked`);
+    }
+    // Once, however the line is built.
+    assert.equal(db.claudeCommand({ mode: 'background' }).split('printf').length, 2);
 });
 
 // The mode is the first choice on the tab, because it decides which of the

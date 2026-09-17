@@ -5,6 +5,14 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
+## [0.62.0] — 2026-09-17
+
+### Changed
+
+- Every Claude terminal tab shows its session's name, from the title Claude Code writes; background tabs included.
+- `claude agents` and `claude attach` launch lines and the generated alias write a *Claude Code* title first.
+- `claudeStatusline.renameTabs` off gives a tab one fixed name.
+
 ## [0.60.0] — 2026-09-16
 
 ### Changed

@@ -2976,9 +2976,22 @@ function claudeCommand({ mode, model, effort, advisor, permissionMode, fallbackM
     // sent and everything else the user has configured stays as it was.
     if (outputStyle) parts.push('--settings', quoted(JSON.stringify({ outputStyle })));
     if (args) parts.push(String(args).trim());
-    if (mode === 'background') return attachLine(parts.join(' '));
+    if (mode === 'background') return TITLE_PRIMER + attachLine(parts.join(' '));
+    if (agents) return TITLE_PRIMER + parts.join(' ');
     return parts.join(' ');
 }
+
+// A terminal title that says "Claude Code", written before the command runs.
+//
+// The tab's name is the title Claude Code sets on the terminal — the session's
+// name, following `/rename` and the generated one — and VS Code shows it through
+// `terminal.integrated.tabs.allowAgentCliTitle`, but only once it has seen a
+// title matching /claude\s*code/i (`agentCliTitlePatterns`, VS Code 1.137). A
+// plain session writes exactly that as it starts. `claude attach` writes the
+// session's name straight away and the agent view writes "claude agents"
+// (measured on 2.1.273), so neither tab would ever be recognised; this says it
+// for them. A no-op anywhere the title is not shown.
+const TITLE_PRIMER = "printf '\\033]0;Claude Code\\007'; ";
 
 // `claude --bg` returns to the shell and prints the id the rest of the family
 // takes: `backgrounded · 3f5863e5 (idle — send a prompt to start)`, coloured
@@ -3005,7 +3018,7 @@ const attachLine = (start) => `${CLAUDE_COMMAND} attach "$(${start} | ${ID_FROM_
  * that is not one answers with no command rather than with a quoted oddity.
  */
 const attachCommand = (id) => (/^[A-Za-z0-9_-]{1,64}$/.test(String(id))
-    ? `${CLAUDE_COMMAND} attach ${quoted(String(id))}` : '');
+    ? `${TITLE_PRIMER}${CLAUDE_COMMAND} attach ${quoted(String(id))}` : '');
 
 /**
  * The same choices as the client's own settings keys — what a settings file has
@@ -4221,7 +4234,7 @@ module.exports = {
     SCRIPT,
     sessionLabel, navHtml, countdown, SECTIONS, CACHE_PARTS,
     overviewTab, agentsTab, healthTab, jobsTab, liveTab, diskTab, contextTab, tasksTab, changelogTab, clientTab, filesTab, settingsTab, launchTab,
-    claudeCommand, attachCommand, aliasLine, withAliasBlock, shellRcFor,
+    claudeCommand, attachCommand, TITLE_PRIMER, aliasLine, withAliasBlock, shellRcFor,
     limitsTab, weekLabel, nowTab, sidebarNow, sidebarPage, sidebarShell, sidebarList, sidebarSections, paceTrack, statusBlocks, meterTone,
     tile, tiles, panel, shareCell, assignModelColors,
     // The places a session can be opened in — the cards on the Settings tab and,

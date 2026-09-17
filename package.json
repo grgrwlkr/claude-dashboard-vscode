@@ -2,7 +2,7 @@
   "name": "claude-dashboard",
   "displayName": "Dashnlines for Claude — Dashboard & Statusline",
   "description": "Unofficial. A 24-tab dashboard over every Claude Code transcript on the machine — spend, agents, workflows, limits — and a configurable status bar for the numbers you want in front of you.",
-  "version": "0.60.0",
+  "version": "0.62.0",
   "publisher": "grgrwlkr",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -380,7 +380,7 @@
         "claudeStatusline.renameTabs": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Name each terminal opened by **Open Claude Code** after the session running in it, following `/rename` and the generated title as they change.\n\nOnly terminals this extension opened are renamed, and only while one of them is the active terminal — VS Code's rename acts on the active terminal, so a background one could only be renamed by first switching to it. A terminal opened by the button is active from the start, and any of them is renamed the moment you switch back to it.\n\nOff, they keep the name they were opened with."
+          "markdownDescription": "Let Claude Code name each terminal it runs in: the tab shows the session's name and follows `/rename`, the generated name, and the session opened in the agent view — in every tab, not only the active one.\n\nThe name is the title Claude Code writes on the terminal, which VS Code shows through `terminal.integrated.tabs.allowAgentCliTitle`. Before `claude agents` and `claude attach` the launch line writes a *Claude Code* title first, so VS Code recognises those tabs too.\n\nOff, a terminal opened by **Open Claude Code** keeps one fixed name."
         },
         "claudeStatusline.refreshInterval": {
           "type": "number",

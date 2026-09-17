@@ -1523,7 +1523,7 @@ test('the tab button opens the session in the active editor group', async () => 
         assert.equal(vscode.__terminals.length, 1);
         const terminal = lastTerminal();
         assert.deepEqual(terminal.options.location, { viewColumn: vscode.ViewColumn.Active });
-        assert.equal(terminal.options.name, 'Claude Code');
+        assert.equal(terminal.options.name, undefined, 'Claude names the tab');
         // Not transient: a reload reconnects to the shell that never stopped, so
         // the session inside the tab goes on running — and installing a build of
         // this extension is a reload. Claude Code's own terminals opt out of that
@@ -1544,7 +1544,7 @@ test('the placeholder tile on Now opens a session', async () => {
         const before = vscode.__terminals.length;
         await panel.__receive({ type: 'openClaude' });
         assert.equal(vscode.__terminals.length, before + 1, 'no session was opened');
-        assert.equal(lastTerminal().options.name, 'Claude Code');
+        assert.equal(lastTerminal().options.name, undefined);
     } finally { if (panel) panel.dispose(); run.dispose(); }
 });
 
@@ -1821,22 +1821,15 @@ test('every icon the manifest names exists and ships with the package', () => {
     }
 });
 
-// The tab is named after the session running in it. Two things make this worth
-// pinning: the rename can only reach the active terminal, so the wiring has to
-// pick the right tab out of whatever is active; and the title is re-read every
-// ten seconds, so a rename that does not compare against the last one it set
-// would fire a command six times a minute forever.
-const renames = () => vscode.__executed
-    .filter((c) => c.id === 'workbench.action.terminal.renameWithArg')
-    .map((c) => c.args[0].name);
-
 // The two session reads this depends on, both of which touch the machine: which
 // session runs under a shell, and what its transcript last called it.
-function withSession(session, title, run) {
+async function withSession(session, title, run) {
     const real = { sessionForShell: s.sessionForShell, titleOf: s.titleOf };
     s.sessionForShell = (pid) => (session && pid === session.shellPid ? session : null);
     s.titleOf = () => title;
-    try { return run(); } finally { Object.assign(s, real); }
+    // Awaited, not returned: a `finally` around a returned promise restores the
+    // real functions before the first await inside has even run.
+    try { return await run(); } finally { Object.assign(s, real); }
 }
 
 const openActiveTab = async (pid = 4242) => {
@@ -1848,136 +1841,39 @@ const openActiveTab = async (pid = 4242) => {
     return lastTerminal();
 };
 
-test('the tab takes the name of the session running in it', async () => {
+// The tab's name is the session's, and Claude Code writes it: the title it
+// sets on the terminal follows `/rename`, the generated name and, in the agent
+// view, the session opened in it (VS Code shows it through
+// `terminal.integrated.tabs.allowAgentCliTitle`). A tab named through the API
+// stops listening to that for good — `staticTitle` wins in VS Code's label — so
+// the extension names nothing and renames nothing. The one rename command it
+// could use reached only the active tab anyway.
+const renames = () => vscode.__executed
+    .filter((c) => c.id === 'workbench.action.terminal.renameWithArg')
+    .map((c) => c.args[0].name);
+
+test('a tab this extension opens is named by Claude, not by the extension', async () => {
     const run = activate({ segments: ['{today}'] });
     try {
-        const terminal = await openActiveTab();
-        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Fix the terminal tab', async () => {
+        await withSession({ pid: 51, sessionId: 'sess', cwd: '/w', shellPid: 4242 }, 'Fix the terminal tab', async () => {
+            const terminal = await openActiveTab(4242);
+            assert.equal(terminal.options.name, undefined, 'a name given here would pin the tab for good');
             vscode.__activateTerminal(terminal);
             await new Promise((r) => setImmediate(r));
+            await vscode.__commands.get('claudeStatusline.refresh')();
+            assert.deepEqual(renames(), []);
         });
-        assert.deepEqual(renames(), ['Fix the terminal tab']);
     } finally { run.dispose(); }
 });
 
-test('a title that has not changed is not set again', async () => {
-    const run = activate({ segments: ['{today}'] });
-    try {
-        const terminal = await openActiveTab();
-        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Same title', async () => {
-            for (let i = 0; i < 3; i++) {
-                vscode.__activateTerminal(terminal);
-                await new Promise((r) => setImmediate(r));
-            }
-        });
-        assert.deepEqual(renames(), ['Same title'], 'the tick asks every ten seconds; only a change is worth a command');
-    } finally { run.dispose(); }
-});
-
-test('a terminal this extension did not open is left alone', async () => {
-    const run = activate({ segments: ['{today}'] });
-    try {
-        await openActiveTab();
-        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Someone else', async () => {
-            vscode.__activateTerminal({ name: 'not ours' });
-            await new Promise((r) => setImmediate(r));
-        });
-        assert.deepEqual(renames(), []);
-    } finally { run.dispose(); }
-});
-
-// A reload restarts the extension host while the shells keep running, so the
-// tabs come back with nothing tying them to the sessions inside them — and with
-// almost nothing of how they were made: the extension host rebuilds
-// `creationOptions` from six fields, and the icon is not one of them. What is
-// left is the mark in the environment and this extension's own note of the pid.
-const OUR_ICON = { light: { fsPath: '/anywhere/media/open-claude-light.svg' }, dark: { fsPath: '/anywhere/media/open-claude-dark.svg' } };
-const OUR_ENV = { CLAUDE_DASHBOARD_TAB: '1' };
-
-// The pid a restored tab reports arrives through a promise, exactly as an opened
-// one's does, and taking it over waits for that — so the wait happens outside
-// `withSession`, whose stand-in for the session reader lasts only as long as the
-// synchronous half of what it is given.
-const restoreTab = async (options) => {
-    const terminal = vscode.__restoreTerminal(options);
-    await new Promise((r) => setImmediate(r));
-    return terminal;
-};
-
-test('a tab restored after a reload is taken back over, by the mark in its environment', async () => {
-    const run = activate({ segments: ['{today}'] });
-    try {
-        const restored = await restoreTab({ name: 'renamed by a session', env: OUR_ENV, pid: 707 });
-        await withSession({ shellPid: 707, sessionId: 'abc', cwd: '/w' }, 'Restored session', async () => {
-            vscode.__activateTerminal(restored);
-            await new Promise((r) => setImmediate(r));
-        });
-        assert.deepEqual(renames(), ['Restored session']);
-    } finally { run.dispose(); }
-});
-
-test('a tab whose mark did not survive is taken back over by its pid', async () => {
-    const run = activate({ segments: ['{today}'] });
-    try {
-        // What the previous window left behind: the button opened a tab, and the
-        // pid of its shell went into the register.
-        const opened = await openActiveTab(808);
-        opened.dispose();
-        const restored = await restoreTab({ name: 'renamed by a session', pid: 808 });
-        await withSession({ shellPid: 808, sessionId: 'abc', cwd: '/w' }, 'By its pid', async () => {
-            vscode.__activateTerminal(restored);
-            await new Promise((r) => setImmediate(r));
-        });
-        assert.deepEqual(renames(), ['By its pid']);
-    } finally { run.dispose(); }
-});
-
-test("a restored terminal of somebody else's is not taken over", async () => {
-    const run = activate({ segments: ['{today}'] });
-    try {
-        const restored = await restoreTab({ name: 'zsh', iconPath: { fsPath: '/elsewhere/terminal.svg' }, pid: 909 });
-        await withSession({ shellPid: 909, sessionId: 'abc', cwd: '/w' }, 'Not ours to name', async () => {
-            vscode.__activateTerminal(restored);
-            await new Promise((r) => setImmediate(r));
-        });
-        assert.deepEqual(renames(), [], 'a session running in a tab this extension did not open is still their tab');
-    } finally { run.dispose(); }
-});
-
-// Claude Code's own button opens its terminals under exactly this name, so a
-// name match would rename and close a tab belonging to another extension.
-test("a restored tab named like ours but opened by somebody else is left alone", async () => {
-    const run = activate({ segments: ['{today}'] });
-    try {
-        const restored = await restoreTab({ name: 'Claude Code', iconPath: OUR_ICON, pid: 606 });
-        await withSession({ shellPid: 606, sessionId: 'abc', cwd: '/w' }, 'Their tab', async () => {
-            vscode.__activateTerminal(restored);
-            await new Promise((r) => setImmediate(r));
-        });
-        assert.deepEqual(renames(), [], 'the name and the icon are not evidence: neither survives a reload of ours');
-    } finally { run.dispose(); }
-});
-
-test('renameTabs off leaves the tab as it was opened', async () => {
+// Off, a tab keeps one fixed name — which is also the only way a name is ever
+// set: the setting that used to switch the rename off now switches the title
+// off, and a pinned name is what that means in VS Code.
+test('renameTabs off gives the tab a fixed name', async () => {
     const run = activate({ segments: ['{today}'], settings: { renameTabs: false } });
     try {
-        const terminal = await openActiveTab();
-        await withSession({ shellPid: 4242, sessionId: 'abc', cwd: '/w' }, 'Would have been this', async () => {
-            vscode.__activateTerminal(terminal);
-            await new Promise((r) => setImmediate(r));
-        });
-        assert.deepEqual(renames(), []);
-    } finally { run.dispose(); }
-});
-
-test('a shell with no session under it is not renamed to nothing', async () => {
-    const run = activate({ segments: ['{today}'] });
-    try {
-        const terminal = await openActiveTab();
-        await withSession(null, '', async () => {
-            vscode.__activateTerminal(terminal);
-            await new Promise((r) => setImmediate(r));
-        });
+        await openClaude();
+        assert.equal(lastTerminal().options.name, 'Claude Code');
         assert.deepEqual(renames(), []);
     } finally { run.dispose(); }
 });
@@ -2850,8 +2746,9 @@ test('launchMode is a user-only closed choice and the button runs the agent view
         await openClaude();
         const terminal = lastTerminal();
         vscode.__shellIntegrationArrives(terminal);
-        assert.deepEqual(terminal.executed, ["claude agents --model 'fable[1m]'"]);
-        assert.equal(terminal.options.name, 'Claude agents');
+        assert.deepEqual(terminal.executed, [db.claudeCommand({ mode: 'agents', model: 'fable[1m]' })]);
+        assert.match(terminal.executed[0], /claude agents --model 'fable\[1m\]'$/);
+        assert.equal(terminal.options.name, undefined);
     } finally { run.dispose(); }
 });
 
@@ -2887,7 +2784,7 @@ test('attach opens the session the page offered, and nothing else', async () => 
         assert.equal(vscode.__terminals.length, before + 1);
         vscode.__shellIntegrationArrives(lastTerminal());
         assert.deepEqual(lastTerminal().executed, [db.attachCommand(offered[0])]);
-        assert.match(lastTerminal().executed[0], /^claude attach '[A-Za-z0-9_-]+'$/, 'the id is quoted');
+        assert.match(lastTerminal().executed[0], /; claude attach '[A-Za-z0-9_-]+'$/, 'the id is quoted');
     } finally { if (panel) panel.dispose(); run.dispose(); s.peersOf = real; }
 });
 
@@ -2901,8 +2798,8 @@ test('the background mode attaches to the session it starts, and says so', async
         vscode.__shellIntegrationArrives(terminal);
         assert.deepEqual(terminal.executed,
             [db.claudeCommand({ mode: 'background', model: 'fable[1m]', advisor: 'opus' })]);
-        assert.match(terminal.executed[0], /^claude attach "\$\(claude --bg /);
-        assert.equal(terminal.options.name, 'Claude background');
+        assert.match(terminal.executed[0], /; claude attach "\$\(claude --bg /);
+        assert.equal(terminal.options.name, undefined);
     } finally { run.dispose(); }
 });
 
@@ -2913,8 +2810,9 @@ test('the launch preview and the pin follow the mode', async () => {
         panel = await openDashboard();
         await panel.__receive({ type: 'launchPreview', settings: { launchMode: 'agents', model: 'opus', advisor: 'fable', aliasName: 'cx' } });
         const reply = lastPost(panel);
-        assert.equal(reply.command, "claude agents --model 'opus'");
-        assert.equal(reply.alias, "alias cx='claude agents --model '\\''opus'\\'''");
+        assert.equal(reply.command, db.claudeCommand({ mode: 'agents', model: 'opus' }));
+        assert.equal(reply.alias, db.aliasLine('cx', { mode: 'agents', model: 'opus' }));
+        assert.match(reply.alias, /claude agents --model '\\''opus'\\'''$/);
     } finally { if (panel) panel.dispose(); run.dispose(); }
     await withPinHome(({ home, workspace }) => {
         ext.pinLaunchSettings({ settings: { launchMode: 'agents', model: 'opus', advisor: 'fable', launchSaveTo: 'user' }, home, workspace });
