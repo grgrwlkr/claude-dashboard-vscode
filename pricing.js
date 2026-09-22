@@ -1,11 +1,13 @@
 // Public Anthropic rates, $ per 1M tokens. Checked against the claude-api skill
-// on 2026-09-01 rather than recalled. Everything derived from these is an
+// on 2026-09-01, and Opus 5.5 against the pricing page on 2026-09-23, rather
+// than recalled. Everything derived from these is an
 // estimate — the real bill depends on plan and discounts, which is why every
 // figure in the UI carries a tilde.
 //
 // Cache: a write costs 1.25x input at the 5-minute TTL and 2x at the hourly one;
 // a read costs 0.1x — unless the row says otherwise: Fable 5.1 reads at $0.25/M,
-// 0.025x of its input rate, and `cacheRead` on a row is that exception. Which
+// 0.025x of its input rate, Opus 5.5 at $0.20/M, 0.05x, and `cacheRead` on a
+// row is that exception. Which
 // TTL was used is on disk — `usage.cache_creation`
 // splits the write into `ephemeral_5m_input_tokens` and
 // `ephemeral_1h_input_tokens` — and the split matters: across the transcripts
@@ -16,6 +18,7 @@ const CACHE_WRITE_1H = 2;
 const CACHE_READ = 0.1;
 
 const RATES = {
+    'claude-opus-5-5': { in: 4, out: 20, cacheRead: 0.05 },
     'claude-opus-5': { in: 5, out: 25 },
     'claude-opus-4-8': { in: 5, out: 25 },
     'claude-opus-4-7': { in: 5, out: 25 },

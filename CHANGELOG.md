@@ -7,6 +7,10 @@ is a pre-release and an **even** one is a stable release.
 
 ## [Unreleased]
 
+### Added
+
+- `claude-opus-5-5` is priced, at $4 / $20 per million tokens and $0.20 per cache read.
+
 ### Fixed
 
 - The limits request waits out the endpoint's `retry-after`, up to six hours, and goes at most every five minutes.
