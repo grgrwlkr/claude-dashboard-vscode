@@ -403,3 +403,15 @@ test('the limits request goes at most once in five minutes, like the terminal st
 });
 
 function mtimeOf(p) { return Math.floor(fs.statSync(p).mtimeMs / 1000); }
+
+test('a pause never outlasts six hours from when it was written, whatever the file says', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const file = path.join(home, '.claude', 'statusline-usage.json.backoff');
+        fs.writeFileSync(file, String(nowS() + 86400 * 30));
+        const written = nowS() - 6 * 3600 - 60;
+        fs.utimesSync(file, written, written);
+        fs.writeFileSync(m.STAMP, '');
+        fs.utimesSync(m.STAMP, 0, 0);
+        assert.strictEqual(m.stampExpired(nowS()), true);
+    });
+});

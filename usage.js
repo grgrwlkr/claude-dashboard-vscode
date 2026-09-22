@@ -20,6 +20,9 @@ const WEEK = 604800;
 // .backoff (an epoch; empty means its old format, mtime + 15 min) is honoured here too.
 const STAMP_TTL = 300;
 const BACKOFF_DEFAULT = 900;
+// A pause never outlasts six hours from when the file was written: a huge
+// retry-after or junk in the file would otherwise freeze the cache silently.
+const BACKOFF_MAX = 21600;
 const CACHE_TTL = 1800;
 
 // The 30-minute / 2% floor matches statusline.sh: in the first minutes of a
@@ -107,7 +110,8 @@ function touchStamp() {
 function backoffUntil() {
     let raw;
     try { raw = fs.readFileSync(BACKOFF, 'utf8').trim(); } catch { return 0; }
-    return /^\d+$/.test(raw) ? Number(raw) : mtime(BACKOFF) + BACKOFF_DEFAULT;
+    const written = mtime(BACKOFF);
+    return /^\d+$/.test(raw) ? Math.min(Number(raw), written + BACKOFF_MAX) : written + BACKOFF_DEFAULT;
 }
 
 function stampExpired(now) {
