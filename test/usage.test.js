@@ -331,3 +331,75 @@ test('the glyph bar draws spend against the weighted plan too', () => {
     assert.ok(over.includes('▓'), over);
     assert.notEqual(under, over);
 });
+
+// --- the limits request: poll rate and the pause after a refusal -------------
+// The endpoint answers 429 with retry-after: 3600 when polled too often. A
+// minute-by-minute poll that ignored it kept the cache stale for three days
+// (19–22.09.2026), and the terminal statusline's pause file was never read here.
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+async function withIsolatedUsage(respond, body) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-backoff-'));
+    fs.mkdirSync(path.join(home, '.claude'));
+    fs.writeFileSync(path.join(home, '.claude', '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 't' } }));
+    const saved = { HOME: process.env.HOME, PATH: process.env.PATH, fetch: global.fetch };
+    process.env.HOME = home;
+    process.env.PATH = home; // no `security` here: the token comes from the file, never the real Keychain
+    global.fetch = async () => respond();
+    delete require.cache[require.resolve('../usage')];
+    const fresh = require('../usage');
+    try {
+        return await body(fresh, home);
+    } finally {
+        process.env.HOME = saved.HOME;
+        process.env.PATH = saved.PATH;
+        global.fetch = saved.fetch;
+        delete require.cache[require.resolve('../usage')];
+        require('../usage');
+    }
+}
+
+const backoffOf = (home) => Number(fs.readFileSync(path.join(home, '.claude', 'statusline-usage.json.backoff'), 'utf8').trim());
+const nowS = () => Math.floor(Date.now() / 1000);
+
+test('a 429 pauses the request for as long as retry-after asks', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 429, headers: { 'retry-after': '3600' } }), async (m, home) => {
+        assert.strictEqual(await m.refreshUsage(), false);
+        const until = backoffOf(home);
+        assert.ok(Math.abs(until - (nowS() + 3600)) < 30, `until=${until}`);
+        m.touchStamp();
+        fs.utimesSync(m.STAMP, 0, 0);
+        assert.strictEqual(m.stampExpired(nowS() + 1200), false, 'twenty minutes later the pause still holds');
+        assert.strictEqual(m.stampExpired(until), true, 'the request goes again once the pause is over');
+    });
+});
+
+test('a refusal without retry-after pauses for fifteen minutes', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 503 }), async (m, home) => {
+        await m.refreshUsage();
+        assert.ok(Math.abs(backoffOf(home) - (nowS() + 900)) < 30);
+    });
+});
+
+test('a success writes the cache and lifts the pause', async () => {
+    await withIsolatedUsage(() => new Response('{"limits":[]}', { status: 200 }), async (m, home) => {
+        fs.writeFileSync(path.join(home, '.claude', 'statusline-usage.json.backoff'), '1');
+        assert.strictEqual(await m.refreshUsage(), true);
+        assert.ok(fs.existsSync(m.CACHE));
+        assert.ok(!fs.existsSync(path.join(home, '.claude', 'statusline-usage.json.backoff')));
+    });
+});
+
+test('the limits request goes at most once in five minutes, like the terminal statusline', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m) => {
+        m.touchStamp();
+        const t = mtimeOf(m.STAMP);
+        assert.strictEqual(m.stampExpired(t + 120), false);
+        assert.strictEqual(m.stampExpired(t + 300), true);
+    });
+});
+
+function mtimeOf(p) { return Math.floor(fs.statSync(p).mtimeMs / 1000); }

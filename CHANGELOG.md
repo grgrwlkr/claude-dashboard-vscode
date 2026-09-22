@@ -5,6 +5,12 @@ Notable changes, newest first. The format follows
 [semver](https://semver.org/), with the VS Code convention that an **odd** minor
 is a pre-release and an **even** one is a stable release.
 
+## [Unreleased]
+
+### Fixed
+
+- The limits request waits out the endpoint's `retry-after` and goes at most every five minutes.
+
 ## [0.62.0] — 2026-09-17
 
 ### Changed

@@ -9,11 +9,17 @@ const path = require('path');
 const HOME = os.homedir();
 const CACHE = path.join(HOME, '.claude', 'statusline-usage.json');
 const STAMP = CACHE + '.stamp';
+const BACKOFF = CACHE + '.backoff';
 const CREDS = path.join(HOME, '.claude', '.credentials.json');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
 const WEEK = 604800;
-const STAMP_TTL = 60;
+// The endpoint answers 429 with retry-after: 3600 when polled too often, and a
+// once-a-minute poll that ignored it kept the cache stale for three days
+// (19–22.09.2026). Five minutes, and the pause the terminal statusline keeps in
+// .backoff (an epoch; empty means its old format, mtime + 15 min) is honoured here too.
+const STAMP_TTL = 300;
+const BACKOFF_DEFAULT = 900;
 const CACHE_TTL = 1800;
 
 // The 30-minute / 2% floor matches statusline.sh: in the first minutes of a
@@ -72,7 +78,12 @@ async function refreshUsage() {
             signal: AbortSignal.timeout(8000),
         });
     } catch { return false; }
-    if (!res.ok) return false;
+    if (!res.ok) {
+        const ra = parseInt(res.headers.get('retry-after') || '', 10);
+        const wait = ra > 0 ? ra : BACKOFF_DEFAULT;
+        try { fs.writeFileSync(BACKOFF, String(Math.floor(Date.now() / 1000) + wait)); } catch { /* next tick retries */ }
+        return false;
+    }
     const body = await res.text();
     try {
         if (!JSON.parse(body).limits) return false;
@@ -81,6 +92,7 @@ async function refreshUsage() {
     try {
         fs.writeFileSync(tmp, body);
         fs.renameSync(tmp, CACHE);
+        try { fs.unlinkSync(BACKOFF); } catch { /* no pause to lift */ }
         return true;
     } catch {
         try { fs.unlinkSync(tmp); } catch { /* already gone */ }
@@ -92,8 +104,14 @@ function touchStamp() {
     try { fs.writeFileSync(STAMP, ''); return true; } catch { return false; }
 }
 
+function backoffUntil() {
+    let raw;
+    try { raw = fs.readFileSync(BACKOFF, 'utf8').trim(); } catch { return 0; }
+    return /^\d+$/.test(raw) ? Number(raw) : mtime(BACKOFF) + BACKOFF_DEFAULT;
+}
+
 function stampExpired(now) {
-    return now - mtime(STAMP) >= STAMP_TTL;
+    return now - mtime(STAMP) >= STAMP_TTL && now >= backoffUntil();
 }
 
 function readCache(now) {
