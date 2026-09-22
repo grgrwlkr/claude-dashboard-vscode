@@ -380,7 +380,7 @@
         "claudeStatusline.renameTabs": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Let Claude Code name each terminal it runs in: the tab shows the session's name and follows `/rename`, the generated name, and the session opened in the agent view — in every tab, not only the active one.\n\nThe name is the title Claude Code writes on the terminal, which VS Code shows through `terminal.integrated.tabs.allowAgentCliTitle`. Before `claude agents` and `claude attach` the launch line writes a *Claude Code* title first, so VS Code recognises those tabs too.\n\nOff, a terminal opened by **Open Claude Code** keeps one fixed name."
+          "markdownDescription": "Let Claude Code name each terminal it runs in: the tab shows the session's name and follows `/rename`, the generated name, and the session opened in the agent view — in every tab, not only the active one.\n\nThe name is the title Claude Code writes on the terminal, which VS Code shows through `terminal.integrated.tabs.allowAgentCliTitle`. Before `claude agents` and `claude attach` the launch line writes a *Claude Code* title first, so VS Code recognises those tabs too.\n\nVS Code forgets that a tab runs Claude Code when the window reloads, and the tab then shows the client's version. Set `\"terminal.integrated.tabs.title\": \"${sequence}\"` to keep the session's name across reloads.\n\nOff, a terminal opened by **Open Claude Code** keeps one fixed name."
         },
         "claudeStatusline.refreshInterval": {
           "type": "number",

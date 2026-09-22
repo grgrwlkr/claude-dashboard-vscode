@@ -11,6 +11,10 @@ is a pre-release and an **even** one is a stable release.
 
 - The limits request waits out the endpoint's `retry-after`, up to six hours, and goes at most every five minutes.
 
+### Documentation
+
+- README and `claudeStatusline.renameTabs` name `terminal.integrated.tabs.title: ${sequence}` for keeping tab names across reloads.
+
 ## [0.62.0] — 2026-09-17
 
 ### Changed
