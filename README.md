@@ -491,7 +491,7 @@ request can leave the machine, and it is optional.**
 | --- | --- |
 | **What is read locally** | `~/.claude` — transcripts, the session registry, settings, plugins, workflow runs. Read-only: nothing of ours is ever written there. |
 | **What is written** | Only inside the extension's own storage: the aggregate index and the limit history. Neither holds prompt text. |
-| **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage`, the same endpoint Claude Code's own `/usage` screen reads, carrying the OAuth token Claude Code already stores. At most once a minute per machine, however many windows are open, and shared with a terminal `statusline.sh` through the same cache file if you run one. |
+| **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage`, the same endpoint Claude Code's own `/usage` screen reads, carrying the OAuth token Claude Code already stores. At most once every five minutes per machine, however many windows are open, paused for as long as the endpoint's `retry-after` asks after a refusal, and shared with a terminal `statusline.sh` through the same cache file if you run one. |
 | **What happens to the token** | Read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and put into one `Authorization` header. Never logged, never cached, never written, never sent anywhere else. |
 | **Two things that could, and do not** | `claudeStatusline.checkPluginUpdates` asks each plugin's marketplace whether a newer version exists; `claudeStatusline.fetchChangelog` refreshes Anthropic's own published documentation and changelog — public files, no credentials, at most once an hour, cached in the extension's storage. **Both are off by default**, and off means those requests are never made: the settings reference then comes from the copy packaged with the extension, which says how old it is. |
 | **Credentials are hidden even from you** | Anything in the settings whose name looks like a key, token, secret or password renders as `•••`, at any depth inside an object. A plain number stays readable, such as `MAX_THINKING_TOKENS`. A test plants a token in the settings and asserts it never reaches the rendered page. |
@@ -607,8 +607,9 @@ Nothing is asked of the CLI; it has no channel to ask.
 
 - **Limits** — `api.anthropic.com/api/oauth/usage`, the endpoint the `/usage`
   screen reads. The extension makes that request itself and caches the answer in
-  `~/.claude/statusline-usage.json`, at most once a minute per machine however
-  many windows are open. Nothing else has to be installed; the cache and its
+  `~/.claude/statusline-usage.json`, at most once every five minutes per machine
+  however many windows are open, and not again until the `retry-after` of a
+  refusal has passed. Nothing else has to be installed; the cache and its
   stamp use the same file a terminal `statusline.sh` would, so if you run one too
   the two share a single request rather than making two. Data older than 30
   minutes is not drawn.
