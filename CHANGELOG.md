@@ -9,7 +9,7 @@ is a pre-release and an **even** one is a stable release.
 
 ### Fixed
 
-- The limits request waits out the endpoint's `retry-after` and goes at most every five minutes.
+- The limits request waits out the endpoint's `retry-after`, up to six hours, and goes at most every five minutes.
 
 ## [0.62.0] — 2026-09-17
 
