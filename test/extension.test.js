@@ -19,6 +19,13 @@ Module._resolveFilename = function patched(request, ...rest) {
 // tree. That collection is not gated on what the bar mentions, so without this
 // every activate() here walks the real ~/.claude — reading the transcripts of
 // whatever other sessions happen to be running on the machine.
+// HOME goes to a scratch directory before any module computes its paths from it:
+// usage.js resolves ~/.claude/statusline-usage.json at load, and a run here once
+// overwrote the real one with a live answer.
+const REAL_HOME = os.homedir();
+const SCRATCH_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-home-'));
+process.env.HOME = SCRATCH_HOME;
+test.after(() => fs.rmSync(SCRATCH_HOME, { recursive: true, force: true }));
 const EMPTY_TREE = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-empty-'));
 process.env.CLAUDE_STATUSLINE_PROJECTS = EMPTY_TREE;
 test.after(() => fs.rmSync(EMPTY_TREE, { recursive: true, force: true }));
@@ -40,7 +47,9 @@ const sys = require('../system');
 function activate({ segments, workspace = '', settings = {}, hadSession } = {}) {
     vscode.__reset();
     vscode.__setSettings({
-        segments, alignment: 'right', priority: 100, refreshInterval: 3600, ...settings,
+        // The limits request reads the Keychain token and goes to the network:
+        // off unless the test asks for it.
+        segments, alignment: 'right', priority: 100, refreshInterval: 3600, fetchLimits: false, ...settings,
     });
     vscode.__setWorkspace(workspace);
     const storage = fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-ext-'));
@@ -165,7 +174,8 @@ test('left at its default the refresh command does ask for limits', async () => 
     // count is 1 on a machine running Claude Code and 2 on a clean one, and CI
     // is always the clean one.
     u.stampExpired = () => false;
-    const run = activate({ segments: ['✻ {weekly}'] });
+    // The harness turns the request off; unset is the extension's own default.
+    const run = activate({ segments: ['✻ {weekly}'], settings: { fetchLimits: undefined } });
     try {
         await vscode.__commands.get('claudeStatusline.refresh')();
         assert.equal(requests, 1);
@@ -2820,4 +2830,27 @@ test('the launch preview and the pin follow the mode', async () => {
         assert.equal(read.model, 'opus');
         assert.equal(read.advisorModel, undefined, 'the agent view takes no advisor, so none is pinned for it');
     });
+});
+
+// A local run of this suite once read the real Keychain token, reached the live
+// limits endpoint and overwrote the real ~/.claude/statusline-usage.json: the
+// harness left fetchLimits on and HOME pointing at the machine's own. Neither
+// may reach past the test — a test that wants the request turns it on itself.
+test('the harness leaves the live limits endpoint and the real ~/.claude alone', async () => {
+    assert.ok(!u.CACHE.startsWith(REAL_HOME + path.sep), `cache under the real home: ${u.CACHE}`);
+    const origFetch = globalThis.fetch;
+    let reached = 0;
+    globalThis.fetch = async (url) => {
+        if (String(url).includes('/api/oauth/usage')) reached++;
+        return { ok: false, status: 503, headers: new Map(), text: async () => '' };
+    };
+    const run = activate({ segments: ['{weekly}'] });
+    try {
+        await vscode.__commands.get('claudeStatusline.refresh')();
+        await new Promise((r) => setImmediate(r));
+        assert.equal(reached, 0);
+    } finally {
+        globalThis.fetch = origFetch;
+        run.dispose();
+    }
 });
