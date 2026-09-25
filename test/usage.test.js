@@ -415,3 +415,109 @@ test('a pause never outlasts six hours from when it was written, whatever the fi
         assert.strictEqual(m.stampExpired(nowS()), true);
     });
 });
+
+// Claude Code asks the same endpoint for its own /usage screen and keeps the
+// answer in ~/.claude.json. The two of them take turns being refused, so
+// whichever copy is newer is the reading — and neither is drawn past 30 minutes.
+function writeOwn(m, body, at) {
+    fs.writeFileSync(m.CACHE, JSON.stringify(body));
+    fs.utimesSync(m.CACHE, at, at);
+}
+function writeClaudeCopy(home, body, at, { copyAccount = 'acc-1', account = 'acc-1', email } = {}) {
+    // null is "the field is absent": undefined would take the default above.
+    const oauthAccount = {};
+    if (account !== null) oauthAccount.accountUuid = account;
+    if (email) oauthAccount.emailAddress = email;
+    const copy = { utilization: body, fetchedAtMs: at * 1000 };
+    if (copyAccount !== null) copy.accountUuid = copyAccount;
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount, cachedUsageUtilization: copy }));
+}
+const reading = (weeklyPct, now) => payload({ weeklyPct, weeklyReset: now + 3 * 86400 });
+
+test("Claude Code's copy of the limits stands in when ours is too old to draw", async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const now = nowS();
+        writeOwn(m, reading(20, now), now - 3 * 86400);
+        writeClaudeCopy(home, reading(31, now), now - 120);
+        const got = m.readLimits(now);
+        assert.strictEqual(got.source, 'claude');
+        assert.strictEqual(got.at, now - 120);
+        assert.strictEqual(m.limitsOf(got.payload).weekly.pct, 31);
+    });
+});
+
+test('of two readings fresh enough to draw, the newer one wins', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const now = nowS();
+        writeOwn(m, reading(40, now), now - 60);
+        writeClaudeCopy(home, reading(35, now), now - 600);
+        const got = m.readLimits(now);
+        assert.strictEqual(got.source, 'own');
+        assert.strictEqual(m.limitsOf(got.payload).weekly.pct, 40);
+    });
+});
+
+// Both ids or nothing: after a /logout the copy stays in the file, and a copy
+// with no id of its own cannot say whose week it is.
+test('a copy Claude Code took for another account, or cannot place, is not a reading of this one', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const now = nowS();
+        for (const ids of [
+            { copyAccount: 'acc-old', account: 'acc-new' },
+            { copyAccount: 'acc-old', account: null },
+            { copyAccount: null, account: 'acc-new' },
+        ]) {
+            writeClaudeCopy(home, reading(90, now), now - 60, ids);
+            assert.strictEqual(m.readLimits(now).payload, null, JSON.stringify(ids));
+        }
+    });
+});
+
+test('a copy with no rows in it does not hide a reading that has them', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const now = nowS();
+        writeOwn(m, reading(22, now), now - 600);
+        writeClaudeCopy(home, { limits: [] }, now - 60);
+        assert.strictEqual(m.limitsOf(m.readLimits(now).payload).weekly.pct, 22);
+
+        writeOwn(m, { limits: [] }, now - 30);
+        writeClaudeCopy(home, reading(11, now), now - 60);
+        assert.strictEqual(m.limitsOf(m.readLimits(now).payload).weekly.pct, 11);
+    });
+});
+
+test('nothing from the account block of ~/.claude.json travels with the reading', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const now = nowS();
+        writeClaudeCopy(home, reading(31, now), now - 60, { email: 'someone@example.com' });
+        const got = m.readLimits(now);
+        assert.strictEqual(got.source, 'claude');
+        assert.ok(!JSON.stringify(got).includes('someone@example.com'));
+    });
+});
+
+test('with nothing fresh there is no reading, but when the last one was taken and how long the request is refused', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const now = nowS();
+        const own = now - 2 * 86400;
+        writeOwn(m, reading(20, now), own);
+        writeClaudeCopy(home, reading(10, now), now - 4 * 86400);
+        fs.writeFileSync(path.join(home, '.claude', 'statusline-usage.json.backoff'), String(now + 1800));
+        const got = m.readLimits(now);
+        assert.strictEqual(got.payload, null);
+        assert.strictEqual(got.source, null);
+        assert.strictEqual(got.at, own);
+        assert.strictEqual(got.refusedUntil, now + 1800);
+    });
+});
+
+test('an unreadable ~/.claude.json costs the copy, not the reading', async () => {
+    await withIsolatedUsage(() => new Response('{}', { status: 200 }), async (m, home) => {
+        const now = nowS();
+        writeOwn(m, reading(22, now), now - 60);
+        fs.writeFileSync(path.join(home, '.claude.json'), '{ not json');
+        const got = m.readLimits(now);
+        assert.strictEqual(got.source, 'own');
+        assert.strictEqual(m.limitsOf(got.payload).weekly.pct, 22);
+    });
+});

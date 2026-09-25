@@ -87,7 +87,7 @@ function activate({ segments, workspace = '', settings = {}, hadSession } = {}) 
 const segmentItems = () => vscode.__items.filter((i) => String(i.id).startsWith('claudeStatusline.segment'));
 const openButtons = () => vscode.__items.filter((i) => i.id === 'claudeStatusline.open');
 
-// A pinned limits cache. `u.readCache` reads ~/.claude/statusline-usage.json,
+// A pinned limits reading. `u.readLimits` reads ~/.claude/statusline-usage.json,
 // which exists only where Claude Code has run — so the two tests below were
 // asserting that this machine had used Claude Code today, and on a runner that
 // has never seen it they failed on their own guard clauses. The guards were
@@ -95,15 +95,21 @@ const openButtons = () => vscode.__items.filter((i) => i.id === 'claudeStatuslin
 // what they name: that the page and the tooltip are cut from one list, and that
 // a frozen context still gets the numbers through.
 function pinLimits() {
-    const real = u.readCache;
-    const at = (secs) => new Date((Math.floor(Date.now() / 1000) + secs) * 1000).toISOString();
-    u.readCache = () => ({
-        limits: [
-            { kind: 'session', percent: 12, resets_at: at(3600) },
-            { kind: 'weekly_all', percent: 47, resets_at: at(3 * 86400) },
-        ],
+    const real = u.readLimits;
+    const nowS = () => Math.floor(Date.now() / 1000);
+    const at = (secs) => new Date((nowS() + secs) * 1000).toISOString();
+    u.readLimits = () => ({
+        payload: {
+            limits: [
+                { kind: 'session', percent: 12, resets_at: at(3600) },
+                { kind: 'weekly_all', percent: 47, resets_at: at(3 * 86400) },
+            ],
+        },
+        source: 'own',
+        at: nowS(),
+        refusedUntil: 0,
     });
-    return () => { u.readCache = real; };
+    return () => { u.readLimits = real; };
 }
 
 test('activate creates one status-bar item per configured segment', () => {
@@ -2852,5 +2858,97 @@ test('the harness leaves the live limits endpoint and the real ~/.claude alone',
     } finally {
         globalThis.fetch = origFetch;
         run.dispose();
+    }
+});
+
+// Both files live in the scratch home this suite runs under, and are removed
+// again so no other test finds a reading it did not ask for.
+function scratchLimits({ own, claude, backoff }) {
+    const nowS = Math.floor(Date.now() / 1000);
+    const body = (pct) => ({
+        limits: [{ kind: 'weekly_all', percent: pct, resets_at: new Date((nowS + 3 * 86400) * 1000).toISOString() }],
+    });
+    const dotClaude = path.join(SCRATCH_HOME, '.claude');
+    const claudeJson = path.join(SCRATCH_HOME, '.claude.json');
+    fs.mkdirSync(dotClaude, { recursive: true });
+    if (own) {
+        fs.writeFileSync(u.CACHE, JSON.stringify(body(own.pct)));
+        fs.utimesSync(u.CACHE, nowS - own.age, nowS - own.age);
+    }
+    if (claude) {
+        fs.writeFileSync(claudeJson, JSON.stringify({
+            oauthAccount: { accountUuid: 'acc-1' },
+            cachedUsageUtilization: { utilization: body(claude.pct), fetchedAtMs: (nowS - claude.age) * 1000, accountUuid: 'acc-1' },
+        }));
+    }
+    if (backoff) fs.writeFileSync(`${u.CACHE}.backoff`, String(nowS + backoff));
+    return () => {
+        for (const f of [u.CACHE, `${u.CACHE}.backoff`, claudeJson]) fs.rmSync(f, { force: true });
+    };
+}
+
+test("the bar draws Claude Code's copy of the limits when ours is too old", () => {
+    let clean = () => {};
+    let run;
+    try {
+        clean = scratchLimits({ own: { pct: 20, age: 3 * 86400 }, claude: { pct: 31, age: 60 } });
+        run = activate({ segments: ['7d {weekly}'] });
+        assert.equal(segmentItems()[0].text, '7d 31%');
+        // How old the drawn reading is comes from the reading, not from the
+        // cache file three days behind it.
+        const limits = ext.__statusNow(run.context.claudeState).find((x) => x.id === 'limits');
+        const nowS = Math.floor(Date.now() / 1000);
+        assert.ok(!limits.blocks.some((b) => b.kind === 'note' && /refresh failed/.test(b.text)));
+        const band = limits.blocks.find((b) => b.kind === 'band');
+        assert.ok([nowS - 60, nowS - 61].some((t) => band.facts.includes(`updated ${u.fmtAbs(t)}`)), band.facts.join());
+    } finally {
+        if (run) run.dispose();
+        clean();
+    }
+});
+
+function sidebarLimits(run) {
+    const view = fakeWebviewView();
+    vscode.__views.get('claudeStatusline.sidebarPane').resolveWebviewView(view);
+    ext.__render(run.context.claudeState);
+    return view.posted.filter((m) => m.type === 'draw').pop().blocks.limits;
+}
+
+test('the sidebar says why the limits are missing, not that none were ever read', () => {
+    // The request is on here, and must still not go: the pause in .backoff is
+    // what keeps it home, and a stub records it if that ever stops holding.
+    const realRefresh = u.refreshUsage;
+    let asked = 0;
+    u.refreshUsage = async () => { asked++; return false; };
+    let clean = () => {};
+    let run;
+    try {
+        clean = scratchLimits({ own: { pct: 20, age: 3 * 86400 }, backoff: 1800 });
+        run = activate({ segments: ['{weekly}'], settings: { fetchLimits: true } });
+        const limits = sidebarLimits(run);
+        const nextTry = u.fmtAbs(Math.floor(Date.now() / 1000) + 1800);
+        assert.match(limits, /Request refused/);
+        assert.ok(limits.includes(nextTry) || limits.includes(u.fmtAbs(Math.floor(Date.now() / 1000) + 1799)), limits);
+        assert.match(limits, /last reading/);
+        assert.doesNotMatch(limits, /now-tag/, 'the refusal is labelled, not tagged "stale"');
+        assert.doesNotMatch(limits, /No limits have been read yet/);
+        assert.equal(asked, 0);
+    } finally {
+        u.refreshUsage = realRefresh;
+        if (run) run.dispose();
+        clean();
+    }
+});
+
+test('with the request switched off, the sidebar says so', () => {
+    let clean = () => {};
+    let run;
+    try {
+        clean = scratchLimits({ own: { pct: 20, age: 3 * 86400 } });
+        run = activate({ segments: ['{weekly}'], settings: { fetchLimits: false } });
+        assert.match(sidebarLimits(run), /fetchLimits/);
+    } finally {
+        if (run) run.dispose();
+        clean();
     }
 });

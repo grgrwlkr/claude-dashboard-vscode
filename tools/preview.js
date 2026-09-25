@@ -30,6 +30,14 @@ const DEMO = args.includes('--demo');
 // the first one before the button has been pressed. Half the Now tab is drawn
 // from a live session, so nothing else shows what that half looks like empty.
 const NO_SESSION = args.includes('--no-session');
+// `--stale-limits` draws the state the endpoint's refusals leave behind: no
+// reading fresh enough to draw, the last one three days old, and the request
+// paused for another half hour. Only the limits are invented; the rest is real.
+// Under `--demo` nothing is read: demo.meta carries its own limits.
+const STALE_LIMITS = args.includes('--stale-limits');
+const limitsRead = DEMO ? null : STALE_LIMITS
+    ? { payload: null, at: Math.floor(Date.now() / 1000) - 3 * 86400, refusedUntil: Math.floor(Date.now() / 1000) + 1800 }
+    : u.readLimits(Math.floor(Date.now() / 1000));
 const positional = args.filter((a) => !a.startsWith('--'));
 const store = positional[0] || fs.mkdtempSync(path.join(os.tmpdir(), 'ccsl-prev-'));
 const out = positional[1] || path.join(os.tmpdir(), 'dashboard-preview.html');
@@ -98,7 +106,7 @@ const html = db.render(index, total, demo ? demo.meta : {
     workflows: workflowRuns,
     metrics: (() => {
         const nowS = Math.floor(Date.now() / 1000);
-        const lim = u.limitsOf(u.readCache(nowS) || {});
+        const lim = u.limitsOf(limitsRead.payload || {});
         const pace = lim.weekly ? u.pace(lim.weekly, nowS) : null;
         const own = NO_SESSION ? null : sess.findOwnSession(REPO);
         const ctx = own ? sess.contextOf(sess.readTail(sess.transcriptPath(REPO, own.sessionId))) : null;
@@ -108,7 +116,7 @@ const html = db.render(index, total, demo ? demo.meta : {
     })(),
     now: (() => {
         const nowS = Math.floor(Date.now() / 1000);
-        const lim = u.limitsOf(u.readCache(nowS) || {});
+        const lim = u.limitsOf(limitsRead.payload || {});
         const pace = lim.weekly ? u.pace(lim.weekly, nowS) : null;
         const own = NO_SESSION ? null : sess.findOwnSession(REPO);
         const ctx = own ? sess.contextOf(sess.readTail(sess.transcriptPath(REPO, own.sessionId))) : null;
@@ -127,7 +135,10 @@ const html = db.render(index, total, demo ? demo.meta : {
         }, {
             fmtCost, fmtLeft: u.fmtLeft, fmtAbs: (ts) => u.fmtAbs(ts), fmtWhen: u.fmtWhen,
             fmtDuration: sess.fmtDuration, tok: wfm.tokenLabel, shortModel: db.shortModel,
-        }, { stale: false, updatedAt: u.mtime(u.CACHE) });
+        }, {
+            stale: false, updatedAt: limitsRead.at, refusedUntil: limitsRead.refusedUntil,
+            lastAt: limitsRead.payload ? 0 : limitsRead.at,
+        });
     })(),
     // The Client tab reads this machine's own settings chain — there is no
     // invented version of it, so in demo mode it draws its empty state instead

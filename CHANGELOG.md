@@ -10,6 +10,11 @@ is a pre-release and an **even** one is a stable release.
 ### Added
 
 - `claude-opus-5-5` is priced, at $4 / $20 per million tokens and $0.20 per cache read.
+- Limits are drawn from Claude Code's copy in `~/.claude.json` when it is newer than the extension's cache.
+
+### Changed
+
+- An empty Limits pane shows the refused request's next try or the last reading's time.
 
 ### Fixed
 

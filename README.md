@@ -489,7 +489,7 @@ request can leave the machine, and it is optional.**
 
 | | |
 | --- | --- |
-| **What is read locally** | `~/.claude` — transcripts, the session registry, settings, plugins, workflow runs. Read-only: nothing of ours is ever written there. |
+| **What is read locally** | `~/.claude` — transcripts, the session registry, settings, plugins, workflow runs. Read-only: nothing of ours is ever written there. `~/.claude.json` — MCP servers, per-project metrics, and Claude Code's copy of the limits (`cachedUsageUtilization`). |
 | **What is written** | Only inside the extension's own storage: the aggregate index and the limit history. Neither holds prompt text. |
 | **What leaves the machine** | One `GET https://api.anthropic.com/api/oauth/usage`, the same endpoint Claude Code's own `/usage` screen reads, carrying the OAuth token Claude Code already stores. At most once every five minutes per machine, however many windows are open, paused for as long as the endpoint's `retry-after` asks after a refusal (at most six hours), and shared with a terminal `statusline.sh` through the same cache file if you run one. |
 | **What happens to the token** | Read from the macOS Keychain (`Claude Code-credentials`), or from `~/.claude/.credentials.json` when the Keychain has nothing, and put into one `Authorization` header. Never logged, never cached, never written, never sent anywhere else. |
@@ -611,8 +611,11 @@ Nothing is asked of the CLI; it has no channel to ask.
   however many windows are open, and not again until the `retry-after` of a
   refusal has passed, six hours at most. Nothing else has to be installed; the cache and its
   stamp use the same file a terminal `statusline.sh` would, so if you run one too
-  the two share a single request rather than making two. Data older than 30
-  minutes is not drawn.
+  the two share a single request rather than making two. Claude Code keeps its
+  own copy of the same answer in `~/.claude.json` (`cachedUsageUtilization`);
+  when that copy is newer, it is the one drawn. Data older than 30 minutes is not
+  drawn, and the Limits pane then shows when a refused request is retried, or
+  when the last reading was taken.
 - **The window's session** — `~/.claude/sessions/*.json`. Which of them the bar
   describes is decided in order: the terminal tab you are looking at, matched by
   `ppid(claude) === pid(shell)`; then the Claude Code panel, a direct child of

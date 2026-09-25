@@ -11,6 +11,7 @@ const CACHE = path.join(HOME, '.claude', 'statusline-usage.json');
 const STAMP = CACHE + '.stamp';
 const BACKOFF = CACHE + '.backoff';
 const CREDS = path.join(HOME, '.claude', '.credentials.json');
+const CLAUDE_JSON = path.join(HOME, '.claude.json');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
 const WEEK = 604800;
@@ -121,6 +122,55 @@ function stampExpired(now) {
 function readCache(now) {
     if (now - mtime(CACHE) >= CACHE_TTL) return null;
     try { return JSON.parse(fs.readFileSync(CACHE, 'utf8')); } catch { return null; }
+}
+
+// Claude Code asks the same endpoint for its /usage screen and keeps the whole
+// answer in ~/.claude.json, stamped with when it got it. The endpoint refuses in
+// bursts that lasted days (19–23.09 and again from 23.09.2026), so whichever of
+// us got the last answer through holds the newer reading, and its copy costs no
+// request. The file is parsed whole, but only the copy and the two account ids
+// are looked at, and only the copy is kept. Both ids must be there and agree: a
+// copy survives a /logout, and one taken for another account is someone else's
+// week.
+function claudeCopy() {
+    let j;
+    try { j = JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf8')); } catch { return null; }
+    const c = j?.cachedUsageUtilization;
+    const at = Math.floor((c?.fetchedAtMs || 0) / 1000);
+    if (!at || !hasRows(c.utilization)) return null;
+    if (!c.accountUuid || c.accountUuid !== j.oauthAccount?.accountUuid) return null;
+    return { payload: c.utilization, at, source: 'claude' };
+}
+
+function ownCopy() {
+    const at = mtime(CACHE);
+    if (!at) return null;
+    let payload;
+    try { payload = JSON.parse(fs.readFileSync(CACHE, 'utf8')); } catch { return null; }
+    return hasRows(payload) ? { payload, at, source: 'own' } : null;
+}
+
+// A copy with no rows is no reading: newer or not, it must not hide one that
+// has them. statusline.sh keeps any answer whose `.limits` is merely present.
+function hasRows(payload) {
+    return Array.isArray(payload?.limits) && payload.limits.length > 0;
+}
+
+/**
+ * The newer of the two readings, drawn under the same 30-minute rule as
+ * `readCache`. With nothing that fresh `payload` is null, and the rest says why:
+ * `at` is when the newest reading was taken, drawable or not, and
+ * `refusedUntil` is the pause a refusal left in .backoff.
+ */
+function readLimits(now) {
+    const newest = [ownCopy(), claudeCopy()].filter(Boolean).sort((a, b) => b.at - a.at)[0];
+    const fresh = newest && now - newest.at < CACHE_TTL ? newest : null;
+    return {
+        payload: fresh ? fresh.payload : null,
+        source: fresh ? fresh.source : null,
+        at: newest ? newest.at : 0,
+        refusedUntil: backoffUntil(),
+    };
 }
 
 function isoToTs(iso) {
@@ -349,6 +399,6 @@ function barText(weekly, pc, nowMs = Date.now()) {
 
 module.exports = {
     CACHE, STAMP, WEEK, STAMP_TTL, CACHE_TTL, BAR_WIDTH,
-    mtime, parseToken, readToken, refreshUsage, touchStamp, stampExpired, readCache,
+    mtime, parseToken, readToken, refreshUsage, touchStamp, stampExpired, readCache, readLimits,
     isoToTs, limitsOf, creditsOf, pace, weightedPlan, hourWeight, fmtDry, fmtLeft, fmtAbs, fmtWhen, bar, barText, dayLabel, WEEKDAYS,
 };

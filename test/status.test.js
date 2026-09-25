@@ -186,6 +186,28 @@ test('a stale cache says so, and the reading carries when it was taken', () => {
     assert.ok(band.facts.some((f) => /^updated /.test(f)));
 });
 
+// A blank pane reads as "never read", when the usual story is a refused request
+// or an answer too old to draw. The section stays and says which.
+test('limits that cannot be drawn say why instead of vanishing', () => {
+    const [refused] = status.statusSections({ now: NOW }, helpers, { refusedUntil: NOW + 1800, lastAt: NOW - 3 * 86400 });
+    assert.strictEqual(refused.id, 'limits');
+    assert.ok(!refused.blocks.some((b) => b.kind === 'gauge'), 'no figure is drawn from an old reading');
+    assert.ok(notes(refused).some((n) => n.tone === 'warn' && /refused/i.test(n.label) && n.text.includes(helpers.fmtAbs(NOW + 1800))));
+    assert.ok(notes(refused).some((n) => /last reading/.test(n.text) && n.text.includes(helpers.fmtAbs(NOW - 3 * 86400))));
+
+    const [off] = status.statusSections({ now: NOW }, helpers, { limitsOff: true });
+    assert.ok(notes(off).some((n) => /fetchLimits/.test(n.text)));
+
+    // A pause the terminal statusline left behind promises no try from here
+    // when the request is off here.
+    const [offRefused] = status.statusSections({ now: NOW }, helpers, { limitsOff: true, refusedUntil: NOW + 1800 });
+    assert.ok(notes(offRefused).some((n) => /fetchLimits/.test(n.text)));
+    assert.ok(!notes(offRefused).some((n) => /refused/i.test(n.label || '')));
+
+    // A pause already over is no reason: the next tick asks again.
+    assert.deepEqual(status.statusSections({ now: NOW }, helpers, { refusedUntil: NOW - 60 }), []);
+});
+
 test('the session section reports the thinking setting, not the last reply', () => {
     const sections = status.statusSections(data, helpers, {});
     const ctx = sections.find((x) => x.id === 'context');

@@ -201,9 +201,15 @@ function statusHelpers() {
 function statusNow(state) {
     if (!state) return [];
     const now = Math.floor(Date.now() / 1000);
+    // The age is the reading's own, not the cache file's: the one drawn may be
+    // Claude Code's copy.
+    const read = state.data.limitsRead || { at: 0, drawn: false, refusedUntil: 0 };
     return status.statusSections(state.data, statusHelpers(), {
-        stale: now - u.mtime(u.CACHE) > STALE_AFTER,
-        updatedAt: u.mtime(u.CACHE),
+        stale: now - read.at > STALE_AFTER,
+        updatedAt: read.at,
+        refusedUntil: read.refusedUntil,
+        limitsOff: !limitsWanted(),
+        lastAt: read.drawn ? 0 : read.at,
     });
 }
 
@@ -607,8 +613,12 @@ function collectSlow(state) {
     const d = state.data;
     d.now = Math.floor(Date.now() / 1000);
 
-    const payload = u.readCache(d.now);
-    const lim = payload ? u.limitsOf(payload) : null;
+    // Ours or Claude Code's copy of the same answer, whichever is newer. What is
+    // kept beside it is for the pane that has nothing to draw: when the newest
+    // reading was taken and how long the request is refused.
+    const read = u.readLimits(d.now);
+    d.limitsRead = { at: read.at, drawn: Boolean(read.payload), refusedUntil: read.refusedUntil };
+    const lim = read.payload ? u.limitsOf(read.payload) : null;
     d.limits = lim;
     d.weekly = lim && lim.weekly ? lim.weekly : null;
     d.session = lim && lim.session ? lim.session : null;
@@ -817,7 +827,8 @@ function machineCounters(needs) {
 
 // The single request this extension makes is opt-out. `fetchLimits: false` means
 // the OAuth token is never read and api.anthropic.com is never called; limits
-// then come from the cache `statusline.sh` may have written, or not at all.
+// then come from the cache `statusline.sh` may have written or from Claude
+// Code's own copy in ~/.claude.json, or not at all.
 // Absent rather than false is treated as on, so a stub or an older settings file
 // keeps the default behaviour.
 function limitsWanted() {

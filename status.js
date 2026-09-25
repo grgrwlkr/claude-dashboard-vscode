@@ -47,16 +47,39 @@ const { ratesFor } = require('./pricing');
  * @param {object} d    the collector's data — the same object the segments read
  * @param {object} h    formatting helpers: fmtCost, fmtLeft, fmtAbs, fmtWhen,
  *                      fmtDuration, tok, shortModel
- * @param {object} env  what only the caller knows: whether the limit cache is
- *                      stale, and when it was last written
+ * @param {object} env  what only the caller knows: whether the limit reading is
+ *                      stale and when it was taken (`stale`, `updatedAt`), and
+ *                      with no reading to draw, why (`refusedUntil`, `limitsOff`,
+ *                      `lastAt` — the time of a reading too old to draw)
  */
 function statusSections(d = {}, h = {}, env = {}) {
     return [limits(d, h, env), context(d, h), money(d, h), work(d, h)].filter(Boolean);
 }
 
+// Nothing fresh enough to draw. A blank pane reads as "never read", when the
+// usual story is a refused request or an answer too old to show — so the
+// section stays, without a figure, and says which. With no reason known it is
+// left out like any other section with nothing behind it.
+function limitsMissing(d, h, env) {
+    const blocks = [];
+    // Off comes first: a pause the terminal statusline left in .backoff would
+    // otherwise promise a next try that this window is never going to make.
+    if (env.limitsOff) {
+        blocks.push({ kind: 'note', tone: 'muted', text: 'the limits request is off — claudeStatusline.fetchLimits' });
+    } else if (env.refusedUntil > d.now) {
+        // Labelled, so the page does not tag it "stale" as it does a warn note:
+        // nothing old is on show here, there is nothing on show at all.
+        blocks.push({ kind: 'note', tone: 'warn', label: 'Request refused', text: `next try after ${h.fmtAbs(env.refusedUntil)}` });
+    }
+    if (env.lastAt > 0) {
+        blocks.push({ kind: 'note', tone: 'muted', text: `last reading ${h.fmtAbs(env.lastAt)} — older than 30 minutes, so not drawn` });
+    }
+    return blocks.length ? { id: 'limits', title: 'Limits', blocks } : null;
+}
+
 function limits(d, h, env) {
     const lim = d.limits;
-    if (!lim || !d.weekly) return null;
+    if (!lim || !d.weekly) return limitsMissing(d, h, env);
     const now = d.now;
     const blocks = [];
     // Collected as they are found and hoisted to the front at the end: they are
