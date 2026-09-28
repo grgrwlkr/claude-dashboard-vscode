@@ -10,6 +10,7 @@ is a pre-release and an **even** one is a stable release.
 ### Added
 
 - `claude-opus-5-5` is priced, at $4 / $20 per million tokens and $0.20 per cache read.
+- `claude-sonnet-5-5` is priced, at $2 / $10 per million tokens and $0.20 per cache read.
 
 ### Fixed
 

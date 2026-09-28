@@ -94,6 +94,7 @@ test('the rate table matches the published prices', () => {
         'claude-fable-5-1': { in: 10, out: 50, cacheRead: 0.025 },
         'claude-mythos-5-1': { in: 10, out: 50, cacheRead: 0.025 },
         'claude-opus-5-5': { in: 4, out: 20, cacheRead: 0.05 },
+        'claude-sonnet-5-5': { in: 2, out: 10 },
     };
     for (const [id, rate] of Object.entries(published)) {
         assert.deepEqual(p.ratesFor(id).rates, rate, `${id} is priced wrong`);
@@ -152,6 +153,16 @@ test('Opus 5.5 is priced at its own published rate, not the Opus 5 fallback', ()
     assert.equal(p.costOf('claude-opus-5-5', { input_tokens: M, output_tokens: M }), 24);
     assert.equal(p.costOf('claude-opus-5-5', { cache_read_input_tokens: M }), 0.2);
     assert.equal(p.costOf('claude-opus-5-5', { cache_creation_input_tokens: M }), 5);
+});
+
+// Sonnet 5.5 reads its cache at $0.20/M — the default 0.1x of its $2 input rate.
+// Checked 2026-09-28 against the Claude Code 2.1.284 changelog, which added it.
+test('Sonnet 5.5 is priced at its own published rate, not the Opus fallback', () => {
+    assert.equal(p.ratesFor('claude-sonnet-5-5').known, true);
+    assert.equal(p.ratesFor('claude-sonnet-5-5[1m]').known, true);
+    assert.equal(p.costOf('claude-sonnet-5-5', { input_tokens: M, output_tokens: M }), 12);
+    assert.equal(p.costOf('claude-sonnet-5-5', { cache_read_input_tokens: M }), 0.2);
+    assert.equal(p.costOf('claude-sonnet-5-5', { cache_creation_input_tokens: M }), 2.5);
 });
 
 test('Fable 5.1 and Mythos 5.1 have a published rate', () => {

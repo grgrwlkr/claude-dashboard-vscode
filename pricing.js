@@ -1,6 +1,7 @@
 // Public Anthropic rates, $ per 1M tokens. Checked against the claude-api skill
-// on 2026-09-01, and Opus 5.5 against the pricing page on 2026-09-23, rather
-// than recalled. Everything derived from these is an
+// on 2026-09-01, Opus 5.5 against the pricing page on 2026-09-23 and Sonnet 5.5
+// against the Claude Code 2.1.284 changelog on 2026-09-28, rather than recalled.
+// Everything derived from these is an
 // estimate — the real bill depends on plan and discounts, which is why every
 // figure in the UI carries a tilde.
 //
@@ -23,6 +24,7 @@ const RATES = {
     'claude-opus-4-8': { in: 5, out: 25 },
     'claude-opus-4-7': { in: 5, out: 25 },
     'claude-opus-4-6': { in: 5, out: 25 },
+    'claude-sonnet-5-5': { in: 2, out: 10 },
     'claude-sonnet-5': { in: 2, out: 10 },
     'claude-sonnet-4-6': { in: 3, out: 15 },
     'claude-haiku-4-5': { in: 1, out: 5 },
