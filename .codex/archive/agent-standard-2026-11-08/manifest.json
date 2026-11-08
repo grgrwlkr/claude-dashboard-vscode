@@ -1,0 +1,23 @@
+[
+  {
+    "source": "CLAUDE.md",
+    "archive": ".codex/archive/agent-standard-2026-11-08/CLAUDE.source.txt",
+    "kind": "file",
+    "sha256": "ea0ffd7787bc5685c6eb58d5e0494b794faadeab6365c005afd9f7e50285c61b",
+    "source_commit": "d23cfa3375e47f42073cb2ce2614d2a2391871ad"
+  },
+  {
+    "source": ".claude/skills/writing-docs/SKILL.md",
+    "archive": ".codex/archive/agent-standard-2026-11-08/.claude/skills/writing-docs/SKILL.source.txt",
+    "kind": "file",
+    "sha256": "2d346c7c450eca583256ef0c5f54fba85b1e3ce563dadd9971166459a8597e4a",
+    "source_commit": "d23cfa3375e47f42073cb2ce2614d2a2391871ad"
+  },
+  {
+    "source": ".claude/skills/release/SKILL.md",
+    "archive": ".codex/archive/agent-standard-2026-11-08/.claude/skills/release/SKILL.source.txt",
+    "kind": "file",
+    "sha256": "2f652d32b9d4d1aadeaf8bd50975f54627eab5c59e8f2d31912b7ebf8488c14d",
+    "source_commit": "d23cfa3375e47f42073cb2ce2614d2a2391871ad"
+  }
+]
