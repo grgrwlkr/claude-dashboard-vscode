@@ -41,6 +41,8 @@ jobs:
       - run: npx @vscode/vsce package --no-dependencies -o extension.vsix
       - name: what went into the package
         run: npx @vscode/vsce ls --no-dependencies
+      - name: verify packaging exclusions and runtime assets
+        run: node --test test/packaging.js
       - uses: actions/upload-artifact@v4
         with:
           name: vsix

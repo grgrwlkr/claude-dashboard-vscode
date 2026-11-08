@@ -104,7 +104,12 @@ node -p "require('./package.json').version"                   # and match
 rg -m1 -n '^## ' CHANGELOG.md                                 # the two agree
 
 npx @vscode/vsce package --no-dependencies -o <scratch>/vX.Y.Z.vsix
-unzip -l <scratch>/vX.Y.Z.vsix | rg -c '\.claude/' || echo 'ok: no .claude'
+node --test test/packaging.js                                 # uses installed/cached vsce
+package_files="$(unzip -Z1 <scratch>/vX.Y.Z.vsix)" || exit 1
+if printf '%s\n' "$package_files" | rg '(^|/)(AGENTS\.md|CLAUDE\.md)$|(^|/)\.(claude|agents|codex)(/|$)'; then
+  echo 'Repository-only instructions leaked into the VSIX' >&2
+  exit 1
+fi
 unzip -l <scratch>/vX.Y.Z.vsix | rg 'dashboard\.css'    # the page has no styles without it
 code --install-extension <scratch>/vX.Y.Z.vsix
 ```
@@ -120,11 +125,21 @@ the other side, since the listing pulls them from `raw/HEAD`.
 Then the release commit — the work and the bump together, Conventional Commits,
 and the tag on it:
 
+Attribute the actual authoring client and model in the commit trailers. Fill the
+values from verified current-session evidence; do not copy a model name or session
+URL from this template or another client's transcript. Keep the actual Git author
+identity unchanged. Add a verified `Session:` URL/ID only when available; otherwise
+omit it. If the exact model is unavailable, use `Model: unverified`. Preserve a
+truthful `Co-Authored-By:` trailer when an actual contributor identity is known.
+
 ```bash
 git add <explicit paths>          # never -A: another session may be writing here
-git commit --no-verify -F - <<'MSG'
+git commit -F - <<'MSG'
 feat(scope): what changed, in the register the repo already uses
 …
+
+Agent: <actual authoring client>
+Model: <verified current model ID, or unverified>
 MSG
 git push origin master
 git tag vX.Y.Z && git push origin vX.Y.Z

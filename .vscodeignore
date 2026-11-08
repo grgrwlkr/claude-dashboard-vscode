@@ -9,6 +9,7 @@ test/**
 .superpowers/**
 docs/**
 CLAUDE.md
+AGENTS.md
 
 # Repository furniture and the screenshot harness: they belong on GitHub, not in
 # an installed extension.
@@ -21,6 +22,8 @@ tools/**
 # version cannot be replaced, only unpublished, so it stays there and this line
 # is what keeps the next one clean.
 .claude/**
+.agents/**
+.codex/**
 
 # Inside a .vsix everything lives under `extension/`, so unzipping one into the
 # repository leaves a directory of that name — and the next `vsce package` packs
