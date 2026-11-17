@@ -8,7 +8,7 @@ description: Show the Dashnlines for Claude dashboard for this session — the w
 Run it and print what it wrote, unchanged:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/bin/dashnlines" --print --width 76
+node "${CLAUDE_PLUGIN_ROOT}/bin/dashnlines" --print --no-color --width 76
 ```
 
 The doubled slash a path like this can produce is harmless — POSIX collapses it
@@ -40,6 +40,12 @@ Useful flags:
 | `--session ID` | describe another session |
 | `--tab spend` | print another tab: `now`, `spend`, `agents`, `sessions` |
 
-If it prints nothing but a line about no limits having been read, the machine
-has not yet fetched a usage reading — the figures appear once Claude Code or the
-status line has made that request.
+Missing limits mean that this print operation has no usable local usage-cache reading;
+the cache may be absent, unavailable, invalid or older than the implementation's TTL.
+Other work/session sections may still be present. This read-only print path does not
+fetch OAuth usage and does not prove that the machine has never fetched it.
+
+The frame describes Claude's selected session and may include neighboring session
+names or locations. Return it locally to the requesting user; do not forward it to
+another service or substitute these figures for Codex/Astra usage without a separate
+request.
